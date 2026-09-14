@@ -19,6 +19,7 @@ import { Route as AuthenticatedAppDesktopRouteImport } from './routes/_authentic
 import { Route as AuthenticatedAppProxiesRouteImport } from './routes/_authenticated/app.proxies'
 import { Route as AuthenticatedAppTeamRouteImport } from './routes/_authenticated/app.team'
 import { Route as ApiPublicAgentMeRouteImport } from './routes/api/public/agent/me'
+import { Route as ApiPublicAgentProfilesRouteImport } from './routes/api/public/agent/profiles'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -69,6 +70,11 @@ const ApiPublicAgentMeRoute = ApiPublicAgentMeRouteImport.update({
   path: '/api/public/agent/me',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicAgentProfilesRoute = ApiPublicAgentProfilesRouteImport.update({
+  id: '/api/public/agent/profiles',
+  path: '/api/public/agent/profiles',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -80,6 +86,7 @@ export interface FileRoutesByFullPath {
   '/app/team': typeof AuthenticatedAppTeamRoute
   '/app/': typeof AuthenticatedAppIndexRoute
   '/api/public/agent/me': typeof ApiPublicAgentMeRoute
+  '/api/public/agent/profiles': typeof ApiPublicAgentProfilesRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -90,6 +97,7 @@ export interface FileRoutesByTo {
   '/app/team': typeof AuthenticatedAppTeamRoute
   '/app': typeof AuthenticatedAppIndexRoute
   '/api/public/agent/me': typeof ApiPublicAgentMeRoute
+  '/api/public/agent/profiles': typeof ApiPublicAgentProfilesRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -103,6 +111,7 @@ export interface FileRoutesById {
   '/_authenticated/app/team': typeof AuthenticatedAppTeamRoute
   '/_authenticated/app/': typeof AuthenticatedAppIndexRoute
   '/api/public/agent/me': typeof ApiPublicAgentMeRoute
+  '/api/public/agent/profiles': typeof ApiPublicAgentProfilesRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -116,6 +125,7 @@ export interface FileRouteTypes {
     | '/app/team'
     | '/app/'
     | '/api/public/agent/me'
+    | '/api/public/agent/profiles'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -126,6 +136,7 @@ export interface FileRouteTypes {
     | '/app/team'
     | '/app'
     | '/api/public/agent/me'
+    | '/api/public/agent/profiles'
   id:
     | '__root__'
     | '/'
@@ -138,6 +149,7 @@ export interface FileRouteTypes {
     | '/_authenticated/app/team'
     | '/_authenticated/app/'
     | '/api/public/agent/me'
+    | '/api/public/agent/profiles'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -146,6 +158,7 @@ export interface RootRouteChildren {
   AuthRoute: typeof AuthRoute
   InviteTokenRoute: typeof InviteTokenRoute
   ApiPublicAgentMeRoute: typeof ApiPublicAgentMeRoute
+  ApiPublicAgentProfilesRoute: typeof ApiPublicAgentProfilesRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -220,6 +233,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicAgentMeRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/agent/profiles': {
+      id: '/api/public/agent/profiles'
+      path: '/api/public/agent/profiles'
+      fullPath: '/api/public/agent/profiles'
+      preLoaderRoute: typeof ApiPublicAgentProfilesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -257,6 +277,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthRoute: AuthRoute,
   InviteTokenRoute: InviteTokenRoute,
   ApiPublicAgentMeRoute: ApiPublicAgentMeRoute,
+  ApiPublicAgentProfilesRoute: ApiPublicAgentProfilesRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

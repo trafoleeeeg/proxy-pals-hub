@@ -57,20 +57,48 @@ function createWindow() {
   });
 }
 
+/* ---------- автообновление ---------- */
+
+// Последнее состояние обновления: панель запрашивает его сразу после загрузки,
+// чтобы уведомление не потерялось, если событие пришло раньше отрисовки.
+let updateState = { state: "none" };
+
+function setUpdateState(next) {
+  updateState = next;
+  send("umbra:update", next);
+}
+
 app.whenReady().then(async () => {
   session.fromPartition("persist:umbra-app");
   createWindow();
 
-  autoUpdater.autoDownload = false;
-  autoUpdater.on("update-available", (info) => send("umbra:update", { state: "available", version: info.version }));
-  autoUpdater.on("update-not-available", () => send("umbra:update", { state: "none" }));
-  autoUpdater.on("download-progress", (p) => send("umbra:update", { state: "downloading", percent: Math.round(p.percent) }));
-  autoUpdater.on("update-downloaded", (info) => send("umbra:update", { state: "downloaded", version: info.version }));
-  autoUpdater.on("error", (err) => send("umbra:update", { state: "error", error: String(err && err.message ? err.message : err) }));
+  // Новая версия скачивается сразу — пользователю остаётся один клик.
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on("checking-for-update", () => setUpdateState({ state: "checking" }));
+  autoUpdater.on("update-available", (info) =>
+    setUpdateState({ state: "downloading", percent: 0, version: info.version }),
+  );
+  autoUpdater.on("update-not-available", () => setUpdateState({ state: "none" }));
+  autoUpdater.on("download-progress", (p) =>
+    setUpdateState({
+      state: "downloading",
+      percent: Math.round(p.percent),
+      version: updateState.version,
+    }),
+  );
+  autoUpdater.on("update-downloaded", (info) =>
+    setUpdateState({ state: "downloaded", version: info.version }),
+  );
+  autoUpdater.on("error", (err) =>
+    setUpdateState({ state: "error", error: String(err && err.message ? err.message : err) }),
+  );
 
   if (app.isPackaged) {
     autoUpdater.checkForUpdates().catch(() => {});
-    setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 6 * 60 * 60 * 1000);
+    // Частая проверка: новая версия появляется в приложении почти сразу после релиза.
+    setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 15 * 60 * 1000);
   }
 
   app.on("activate", () => {

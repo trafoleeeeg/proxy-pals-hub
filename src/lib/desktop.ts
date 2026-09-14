@@ -1,7 +1,8 @@
 export type UpdateStatus =
   | { state: "none" }
+  | { state: "checking" }
   | { state: "available"; version: string }
-  | { state: "downloading"; percent: number }
+  | { state: "downloading"; percent: number; version?: string }
   | { state: "downloaded"; version: string }
   | { state: "error"; error: string };
 
@@ -24,6 +25,7 @@ export type UmbraBridge = {
   openExternal: (url: string) => Promise<{ ok: boolean }>;
   appVersion: () => Promise<string>;
   checkUpdate: () => Promise<{ ok: boolean; version?: string | null; current?: string; error?: string }>;
+  updateState: () => Promise<UpdateStatus>;
   downloadUpdate: () => Promise<{ ok: boolean; error?: string }>;
   installUpdate: () => Promise<{ ok: boolean }>;
   onUpdateStatus: (cb: (s: UpdateStatus) => void) => () => void;

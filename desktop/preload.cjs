@@ -2,7 +2,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("umbra", {
   isDesktop: true,
-  version: "0.2.0",
+  version: "0.2.1",
   platform: process.platform,
   launchProfile: (payload) => ipcRenderer.invoke("umbra:launch-profile", payload),
   closeProfile: (profileId) => ipcRenderer.invoke("umbra:close-profile", profileId),

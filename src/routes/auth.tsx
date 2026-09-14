@@ -8,13 +8,19 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-type Search = { mode?: string | undefined; next?: string | undefined; desktop?: string | undefined };
+type Search = {
+  mode?: string | undefined;
+  next?: string | undefined;
+  desktop?: string | undefined;
+  cb?: string | undefined;
+};
 
 export const Route = createFileRoute("/auth")({
   validateSearch: (s: Record<string, unknown>): Search => ({
     mode: typeof s["mode"] === "string" ? s["mode"] : undefined,
     next: typeof s["next"] === "string" ? s["next"] : undefined,
     desktop: typeof s["desktop"] === "string" ? s["desktop"] : undefined,
+    cb: typeof s["cb"] === "string" ? s["cb"] : undefined,
   }),
   head: () => ({
     meta: [
@@ -44,24 +50,13 @@ function AuthPage() {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [handoff, setHandoff] = useState(false);
+  const [handoffUrl, setHandoffUrl] = useState<string | null>(null);
 
   const next = safeNext(search.next);
   const isDesktopApp = !!desktop();
   const handoffMode = search.desktop === "1" && !isDesktopApp;
-
-  // Приложение получило токены из системного браузера — входим внутри приложения.
-  useEffect(() => {
-    const bridge = desktop();
-    if (!bridge) return;
-    return bridge.onAuthTokens(async (tokens) => {
-      const { error } = await supabase.auth.setSession(tokens);
-      if (error) {
-        toast.error("Не удалось перенести вход из браузера");
-        return;
-      }
-      navigate({ to: next });
-    });
-  }, [navigate, next]);
+  const callback =
+    search.cb && /^http:\/\/127\.0\.0\.1:\d+\/cb$/.test(search.cb) ? search.cb : null;
 
   // Обычный браузер, открытый приложением: после входа отдаём сессию в приложение.
   useEffect(() => {
@@ -70,15 +65,18 @@ function AuthPage() {
     const hand = (session: { access_token: string; refresh_token: string } | null) => {
       if (!session || done) return;
       done = true;
-      setHandoff(true);
-      window.location.href = `umbra://auth#access_token=${encodeURIComponent(
+      const qs = `access_token=${encodeURIComponent(
         session.access_token,
       )}&refresh_token=${encodeURIComponent(session.refresh_token)}`;
+      const target = callback ? `${callback}?${qs}` : `umbra://auth#${qs}`;
+      setHandoff(true);
+      setHandoffUrl(target);
+      window.location.href = target;
     };
     supabase.auth.getSession().then(({ data }) => hand(data.session));
     const { data } = supabase.auth.onAuthStateChange((_e, session) => hand(session));
     return () => data.subscription.unsubscribe();
-  }, [handoffMode]);
+  }, [handoffMode, callback]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -119,10 +117,11 @@ function AuthPage() {
       } catch {
         /* ignore */
       }
+      const handoffReturn =
+        `${window.location.origin}/auth?desktop=1` +
+        (callback ? `&cb=${encodeURIComponent(callback)}` : "");
       const result = await lovable.auth.signInWithOAuth("google", {
-        redirect_uri: handoffMode
-          ? `${window.location.origin}/auth?desktop=1`
-          : window.location.origin,
+        redirect_uri: handoffMode ? handoffReturn : window.location.origin,
       });
       if (result.error) {
         toast.error(
@@ -155,11 +154,20 @@ function AuthPage() {
         </p>
 
         {handoffMode && (
-          <p className="mono mt-4 rounded-md border border-border bg-secondary/40 p-3 text-xs text-muted-foreground">
-            {handoff
-              ? "Вход выполнен — возвращаемся в приложение Umbra."
-              : "Вход для приложения Umbra: после входа браузер сам вернёт вас в приложение."}
-          </p>
+          <div className="mono mt-4 rounded-md border border-border bg-secondary/40 p-3 text-xs text-muted-foreground">
+            {handoff ? (
+              <>
+                Вход выполнен — возвращаемся в приложение Umbra.
+                {handoffUrl && (
+                  <a href={handoffUrl} className="mt-2 block text-foreground underline">
+                    Если приложение не отреагировало — нажмите здесь
+                  </a>
+                )}
+              </>
+            ) : (
+              "Вход для приложения Umbra: после входа браузер сам вернёт вас в приложение."
+            )}
+          </div>
         )}
         {isDesktopApp && (
           <p className="mono mt-4 text-xs text-muted-foreground">

@@ -13,6 +13,8 @@ import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { supabase } from "@/integrations/supabase/client";
 import { Toaster } from "@/components/ui/sonner";
+import { toast } from "sonner";
+import "@/lib/desktop";
 
 function NotFoundComponent() {
   return (
@@ -126,6 +128,22 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function AuthSync() {
   const router = useRouter();
+
+  // Настольное приложение: токены, полученные из системного браузера.
+  useEffect(() => {
+    const bridge = typeof window !== "undefined" ? window.umbra : null;
+    if (!bridge) return;
+    return bridge.onAuthTokens(async (tokens) => {
+      const { error } = await supabase.auth.setSession(tokens);
+      if (error) {
+        toast.error("Не удалось перенести вход из браузера");
+        return;
+      }
+      toast.success("Вход выполнен");
+      window.location.replace("/app");
+    });
+  }, []);
+
   useEffect(() => {
     const { data } = supabase.auth.onAuthStateChange((event) => {
       if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;

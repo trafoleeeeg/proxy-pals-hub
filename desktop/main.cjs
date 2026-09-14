@@ -1,14 +1,62 @@
 const { app, BrowserWindow, ipcMain, session, shell } = require("electron");
 const path = require("node:path");
+const http = require("node:http");
 const { autoUpdater } = require("electron-updater");
 const { launchProfileWindow, closeProfileWindow } = require("./launcher.cjs");
 
 const APP_URL = process.env.UMBRA_APP_URL || "https://proxy-pals-hub.lovable.app/app";
-const AUTH_URL = APP_URL.replace(/\/app.*$/, "") + "/auth?desktop=1";
+const BASE_URL = APP_URL.replace(/\/app.*$/, "");
 const PROTOCOL = "umbra";
 
 let mainWindow = null;
 let pendingTokens = null;
+let callbackPort = null;
+
+/* ---------- локальный приёмник токенов из системного браузера ---------- */
+
+function startCallbackServer() {
+  return new Promise((resolve) => {
+    const server = http.createServer((req, res) => {
+      let url;
+      try {
+        url = new URL(req.url, "http://127.0.0.1");
+      } catch {
+        res.writeHead(400).end();
+        return;
+      }
+      if (url.pathname !== "/cb") {
+        res.writeHead(404).end();
+        return;
+      }
+      const access_token = url.searchParams.get("access_token");
+      const refresh_token = url.searchParams.get("refresh_token");
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      if (access_token && refresh_token) {
+        deliverTokens({ access_token, refresh_token });
+        res.end(
+          "<meta charset='utf-8'><body style='font:16px sans-serif;background:#111312;color:#e8ece9;display:flex;align-items:center;justify-content:center;height:100vh'>Вход выполнен — вернитесь в приложение Umbra. Эту вкладку можно закрыть.</body>",
+        );
+      } else {
+        res.end("<meta charset='utf-8'>Не удалось передать вход в приложение.");
+      }
+    });
+    server.listen(0, "127.0.0.1", () => {
+      callbackPort = server.address().port;
+      resolve(callbackPort);
+    });
+    server.on("error", () => resolve(null));
+  });
+}
+
+function deliverTokens(tokens) {
+  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isLoading()) {
+    mainWindow.webContents.send("umbra:auth-tokens", tokens);
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  } else {
+    pendingTokens = tokens;
+  }
+}
 
 /* ---------- единственный экземпляр + deep link umbra:// ---------- */
 
@@ -50,12 +98,7 @@ function handleDeepLink(url) {
   const access_token = params.get("access_token");
   const refresh_token = params.get("refresh_token");
   if (!access_token || !refresh_token) return;
-  const tokens = { access_token, refresh_token };
-  if (mainWindow && !mainWindow.webContents.isLoading()) {
-    mainWindow.webContents.send("umbra:auth-tokens", tokens);
-  } else {
-    pendingTokens = tokens;
-  }
+  deliverTokens({ access_token, refresh_token });
 }
 
 /* ---------- основное окно ---------- */
@@ -98,10 +141,11 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   registerProtocol();
   handleDeepLink(process.argv.find((a) => a.startsWith(`${PROTOCOL}://`)));
   session.fromPartition("persist:umbra-app");
+  await startCallbackServer();
   createWindow();
 
   autoUpdater.autoDownload = false;
@@ -145,7 +189,11 @@ ipcMain.handle("umbra:close-profile", async (_e, profileId) => {
 });
 
 ipcMain.handle("umbra:open-auth", async () => {
-  await shell.openExternal(AUTH_URL);
+  if (!callbackPort) await startCallbackServer();
+  const cb = callbackPort ? `http://127.0.0.1:${callbackPort}/cb` : null;
+  const url =
+    `${BASE_URL}/auth?desktop=1` + (cb ? `&cb=${encodeURIComponent(cb)}` : "");
+  await shell.openExternal(url);
   return { ok: true };
 });
 

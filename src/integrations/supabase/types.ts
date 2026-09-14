@@ -14,9 +14,63 @@ export type Database = {
   }
   public: {
     Tables: {
+      agent_keys: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          expires_at: string | null
+          id: string
+          key_hash: string
+          key_prefix: string
+          last_used_at: string | null
+          name: string
+          revoked_at: string | null
+          scopes: string[]
+          team_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          expires_at?: string | null
+          id?: string
+          key_hash: string
+          key_prefix: string
+          last_used_at?: string | null
+          name: string
+          revoked_at?: string | null
+          scopes?: string[]
+          team_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          expires_at?: string | null
+          id?: string
+          key_hash?: string
+          key_prefix?: string
+          last_used_at?: string | null
+          name?: string
+          revoked_at?: string | null
+          scopes?: string[]
+          team_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_keys_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       audit_log: {
         Row: {
           action: string
+          agent_key_id: string | null
           created_at: string
           id: string
           meta: Json
@@ -27,6 +81,7 @@ export type Database = {
         }
         Insert: {
           action: string
+          agent_key_id?: string | null
           created_at?: string
           id?: string
           meta?: Json
@@ -37,6 +92,7 @@ export type Database = {
         }
         Update: {
           action?: string
+          agent_key_id?: string | null
           created_at?: string
           id?: string
           meta?: Json
@@ -46,6 +102,13 @@ export type Database = {
           user_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "audit_log_agent_key_id_fkey"
+            columns: ["agent_key_id"]
+            isOneToOne: false
+            referencedRelation: "agent_keys"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "audit_log_team_id_fkey"
             columns: ["team_id"]

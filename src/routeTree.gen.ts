@@ -15,7 +15,7 @@ import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedAppRouteImport } from './routes/_authenticated/app'
 import { Route as InviteTokenRouteImport } from './routes/invite.$token'
 import { Route as AuthenticatedAppIndexRouteImport } from './routes/_authenticated/app.index'
-import { Route as AuthenticatedAppClientRouteImport } from './routes/_authenticated/app.client'
+import { Route as AuthenticatedAppDesktopRouteImport } from './routes/_authenticated/app.desktop'
 import { Route as AuthenticatedAppProxiesRouteImport } from './routes/_authenticated/app.proxies'
 import { Route as AuthenticatedAppTeamRouteImport } from './routes/_authenticated/app.team'
 
@@ -48,9 +48,9 @@ const AuthenticatedAppIndexRoute = AuthenticatedAppIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AuthenticatedAppRoute,
 } as any)
-const AuthenticatedAppClientRoute = AuthenticatedAppClientRouteImport.update({
-  id: '/client',
-  path: '/client',
+const AuthenticatedAppDesktopRoute = AuthenticatedAppDesktopRouteImport.update({
+  id: '/desktop',
+  path: '/desktop',
   getParentRoute: () => AuthenticatedAppRoute,
 } as any)
 const AuthenticatedAppProxiesRoute = AuthenticatedAppProxiesRouteImport.update({
@@ -69,7 +69,7 @@ export interface FileRoutesByFullPath {
   '/auth': typeof AuthRoute
   '/app': typeof AuthenticatedAppRouteWithChildren
   '/invite/$token': typeof InviteTokenRoute
-  '/app/client': typeof AuthenticatedAppClientRoute
+  '/app/desktop': typeof AuthenticatedAppDesktopRoute
   '/app/proxies': typeof AuthenticatedAppProxiesRoute
   '/app/team': typeof AuthenticatedAppTeamRoute
   '/app/': typeof AuthenticatedAppIndexRoute
@@ -78,7 +78,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/invite/$token': typeof InviteTokenRoute
-  '/app/client': typeof AuthenticatedAppClientRoute
+  '/app/desktop': typeof AuthenticatedAppDesktopRoute
   '/app/proxies': typeof AuthenticatedAppProxiesRoute
   '/app/team': typeof AuthenticatedAppTeamRoute
   '/app': typeof AuthenticatedAppIndexRoute
@@ -90,7 +90,7 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/_authenticated/app': typeof AuthenticatedAppRouteWithChildren
   '/invite/$token': typeof InviteTokenRoute
-  '/_authenticated/app/client': typeof AuthenticatedAppClientRoute
+  '/_authenticated/app/desktop': typeof AuthenticatedAppDesktopRoute
   '/_authenticated/app/proxies': typeof AuthenticatedAppProxiesRoute
   '/_authenticated/app/team': typeof AuthenticatedAppTeamRoute
   '/_authenticated/app/': typeof AuthenticatedAppIndexRoute
@@ -102,7 +102,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/app'
     | '/invite/$token'
-    | '/app/client'
+    | '/app/desktop'
     | '/app/proxies'
     | '/app/team'
     | '/app/'
@@ -111,7 +111,7 @@ export interface FileRouteTypes {
     | '/'
     | '/auth'
     | '/invite/$token'
-    | '/app/client'
+    | '/app/desktop'
     | '/app/proxies'
     | '/app/team'
     | '/app'
@@ -122,7 +122,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/_authenticated/app'
     | '/invite/$token'
-    | '/_authenticated/app/client'
+    | '/_authenticated/app/desktop'
     | '/_authenticated/app/proxies'
     | '/_authenticated/app/team'
     | '/_authenticated/app/'
@@ -179,11 +179,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAppIndexRouteImport
       parentRoute: typeof AuthenticatedAppRoute
     }
-    '/_authenticated/app/client': {
-      id: '/_authenticated/app/client'
-      path: '/client'
-      fullPath: '/app/client'
-      preLoaderRoute: typeof AuthenticatedAppClientRouteImport
+    '/_authenticated/app/desktop': {
+      id: '/_authenticated/app/desktop'
+      path: '/desktop'
+      fullPath: '/app/desktop'
+      preLoaderRoute: typeof AuthenticatedAppDesktopRouteImport
       parentRoute: typeof AuthenticatedAppRoute
     }
     '/_authenticated/app/proxies': {
@@ -204,14 +204,14 @@ declare module '@tanstack/react-router' {
 }
 
 interface AuthenticatedAppRouteChildren {
-  AuthenticatedAppClientRoute: typeof AuthenticatedAppClientRoute
+  AuthenticatedAppDesktopRoute: typeof AuthenticatedAppDesktopRoute
   AuthenticatedAppProxiesRoute: typeof AuthenticatedAppProxiesRoute
   AuthenticatedAppTeamRoute: typeof AuthenticatedAppTeamRoute
   AuthenticatedAppIndexRoute: typeof AuthenticatedAppIndexRoute
 }
 
 const AuthenticatedAppRouteChildren: AuthenticatedAppRouteChildren = {
-  AuthenticatedAppClientRoute: AuthenticatedAppClientRoute,
+  AuthenticatedAppDesktopRoute: AuthenticatedAppDesktopRoute,
   AuthenticatedAppProxiesRoute: AuthenticatedAppProxiesRoute,
   AuthenticatedAppTeamRoute: AuthenticatedAppTeamRoute,
   AuthenticatedAppIndexRoute: AuthenticatedAppIndexRoute,

@@ -23,7 +23,7 @@ const NAV = [
   { to: "/app", label: "Профили", exact: true },
   { to: "/app/proxies", label: "Прокси", exact: false },
   { to: "/app/team", label: "Команда", exact: false },
-  { to: "/app/client", label: "Приложение", exact: false },
+  { to: "/app/desktop", label: "Приложение", exact: false },
 ] as const;
 
 function AppLayout() {

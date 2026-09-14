@@ -71,11 +71,20 @@ function AuthPage() {
   async function google() {
     setBusy(true);
     try {
+      try {
+        sessionStorage.setItem("umbra:next", next);
+      } catch {
+        /* ignore */
+      }
       const result = await lovable.auth.signInWithOAuth("google", {
-        redirect_uri: `${window.location.origin}/auth?next=${encodeURIComponent(next)}`,
+        redirect_uri: window.location.origin,
       });
       if (result.error) {
-        toast.error("Не удалось войти через Google");
+        toast.error(
+          result.error instanceof Error
+            ? `Google: ${result.error.message}`
+            : "Не удалось войти через Google",
+        );
         return;
       }
       if (result.redirected) return;

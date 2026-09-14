@@ -130,6 +130,19 @@ function AuthSync() {
     const { data } = supabase.auth.onAuthStateChange((event) => {
       if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;
       router.invalidate();
+      if (event === "SIGNED_IN") {
+        let next = "/app";
+        try {
+          next = sessionStorage.getItem("umbra:next") || "/app";
+          sessionStorage.removeItem("umbra:next");
+        } catch {
+          /* ignore */
+        }
+        const here = window.location.pathname;
+        if (here === "/" || here === "/auth") {
+          window.location.replace(next.startsWith("/") ? next : "/app");
+        }
+      }
     });
     return () => data.subscription.unsubscribe();
   }, [router]);

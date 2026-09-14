@@ -14,6 +14,7 @@ import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedAppRouteImport } from './routes/_authenticated/app'
 import { Route as AuthenticatedAppClientRouteImport } from './routes/_authenticated/app.client'
+import { Route as AuthenticatedAppProxiesRouteImport } from './routes/_authenticated/app.proxies'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -39,18 +40,25 @@ const AuthenticatedAppClientRoute = AuthenticatedAppClientRouteImport.update({
   path: '/client',
   getParentRoute: () => AuthenticatedAppRoute,
 } as any)
+const AuthenticatedAppProxiesRoute = AuthenticatedAppProxiesRouteImport.update({
+  id: '/proxies',
+  path: '/proxies',
+  getParentRoute: () => AuthenticatedAppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/app': typeof AuthenticatedAppRouteWithChildren
   '/app/client': typeof AuthenticatedAppClientRoute
+  '/app/proxies': typeof AuthenticatedAppProxiesRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/app': typeof AuthenticatedAppRouteWithChildren
   '/app/client': typeof AuthenticatedAppClientRoute
+  '/app/proxies': typeof AuthenticatedAppProxiesRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -59,12 +67,13 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/_authenticated/app': typeof AuthenticatedAppRouteWithChildren
   '/_authenticated/app/client': typeof AuthenticatedAppClientRoute
+  '/_authenticated/app/proxies': typeof AuthenticatedAppProxiesRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth' | '/app' | '/app/client'
+  fullPaths: '/' | '/auth' | '/app' | '/app/client' | '/app/proxies'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/app' | '/app/client'
+  to: '/' | '/auth' | '/app' | '/app/client' | '/app/proxies'
   id:
     | '__root__'
     | '/'
@@ -72,6 +81,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/_authenticated/app'
     | '/_authenticated/app/client'
+    | '/_authenticated/app/proxies'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -117,15 +127,24 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAppClientRouteImport
       parentRoute: typeof AuthenticatedAppRoute
     }
+    '/_authenticated/app/proxies': {
+      id: '/_authenticated/app/proxies'
+      path: '/proxies'
+      fullPath: '/app/proxies'
+      preLoaderRoute: typeof AuthenticatedAppProxiesRouteImport
+      parentRoute: typeof AuthenticatedAppRoute
+    }
   }
 }
 
 interface AuthenticatedAppRouteChildren {
   AuthenticatedAppClientRoute: typeof AuthenticatedAppClientRoute
+  AuthenticatedAppProxiesRoute: typeof AuthenticatedAppProxiesRoute
 }
 
 const AuthenticatedAppRouteChildren: AuthenticatedAppRouteChildren = {
   AuthenticatedAppClientRoute: AuthenticatedAppClientRoute,
+  AuthenticatedAppProxiesRoute: AuthenticatedAppProxiesRoute,
 }
 
 const AuthenticatedAppRouteWithChildren =

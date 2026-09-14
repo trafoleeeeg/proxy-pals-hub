@@ -1,6 +1,6 @@
 {
   "name": "umbra-desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Umbra — управление антидетект-профилями",
   "main": "main.cjs",

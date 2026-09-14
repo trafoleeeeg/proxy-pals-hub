@@ -117,10 +117,11 @@ function AuthPage() {
       } catch {
         /* ignore */
       }
+      const handoffReturn =
+        `${window.location.origin}/auth?desktop=1` +
+        (callback ? `&cb=${encodeURIComponent(callback)}` : "");
       const result = await lovable.auth.signInWithOAuth("google", {
-        redirect_uri: handoffMode
-          ? `${window.location.origin}/auth?desktop=1`
-          : window.location.origin,
+        redirect_uri: handoffMode ? handoffReturn : window.location.origin,
       });
       if (result.error) {
         toast.error(
@@ -153,11 +154,20 @@ function AuthPage() {
         </p>
 
         {handoffMode && (
-          <p className="mono mt-4 rounded-md border border-border bg-secondary/40 p-3 text-xs text-muted-foreground">
-            {handoff
-              ? "Вход выполнен — возвращаемся в приложение Umbra."
-              : "Вход для приложения Umbra: после входа браузер сам вернёт вас в приложение."}
-          </p>
+          <div className="mono mt-4 rounded-md border border-border bg-secondary/40 p-3 text-xs text-muted-foreground">
+            {handoff ? (
+              <>
+                Вход выполнен — возвращаемся в приложение Umbra.
+                {handoffUrl && (
+                  <a href={handoffUrl} className="mt-2 block text-foreground underline">
+                    Если приложение не отреагировало — нажмите здесь
+                  </a>
+                )}
+              </>
+            ) : (
+              "Вход для приложения Umbra: после входа браузер сам вернёт вас в приложение."
+            )}
+          </div>
         )}
         {isDesktopApp && (
           <p className="mono mt-4 text-xs text-muted-foreground">

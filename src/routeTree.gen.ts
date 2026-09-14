@@ -15,9 +15,14 @@ import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedAppRouteImport } from './routes/_authenticated/app'
 import { Route as InviteTokenRouteImport } from './routes/invite.$token'
 import { Route as AuthenticatedAppIndexRouteImport } from './routes/_authenticated/app.index'
+import { Route as AuthenticatedAppAgentsRouteImport } from './routes/_authenticated/app.agents'
 import { Route as AuthenticatedAppDesktopRouteImport } from './routes/_authenticated/app.desktop'
 import { Route as AuthenticatedAppProxiesRouteImport } from './routes/_authenticated/app.proxies'
 import { Route as AuthenticatedAppTeamRouteImport } from './routes/_authenticated/app.team'
+import { Route as ApiPublicAgentMeRouteImport } from './routes/api/public/agent/me'
+import { Route as ApiPublicAgentProfilesRouteImport } from './routes/api/public/agent/profiles'
+import { Route as ApiPublicAgentProxiesRouteImport } from './routes/api/public/agent/proxies'
+import { Route as ApiPublicAgentProfilesIdRouteImport } from './routes/api/public/agent/profiles.$id'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -48,6 +53,11 @@ const AuthenticatedAppIndexRoute = AuthenticatedAppIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AuthenticatedAppRoute,
 } as any)
+const AuthenticatedAppAgentsRoute = AuthenticatedAppAgentsRouteImport.update({
+  id: '/agents',
+  path: '/agents',
+  getParentRoute: () => AuthenticatedAppRoute,
+} as any)
 const AuthenticatedAppDesktopRoute = AuthenticatedAppDesktopRouteImport.update({
   id: '/desktop',
   path: '/desktop',
@@ -63,25 +73,56 @@ const AuthenticatedAppTeamRoute = AuthenticatedAppTeamRouteImport.update({
   path: '/team',
   getParentRoute: () => AuthenticatedAppRoute,
 } as any)
+const ApiPublicAgentMeRoute = ApiPublicAgentMeRouteImport.update({
+  id: '/api/public/agent/me',
+  path: '/api/public/agent/me',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPublicAgentProfilesRoute = ApiPublicAgentProfilesRouteImport.update({
+  id: '/api/public/agent/profiles',
+  path: '/api/public/agent/profiles',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPublicAgentProxiesRoute = ApiPublicAgentProxiesRouteImport.update({
+  id: '/api/public/agent/proxies',
+  path: '/api/public/agent/proxies',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPublicAgentProfilesIdRoute =
+  ApiPublicAgentProfilesIdRouteImport.update({
+    id: '/$id',
+    path: '/$id',
+    getParentRoute: () => ApiPublicAgentProfilesRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/app': typeof AuthenticatedAppRouteWithChildren
   '/invite/$token': typeof InviteTokenRoute
+  '/app/agents': typeof AuthenticatedAppAgentsRoute
   '/app/desktop': typeof AuthenticatedAppDesktopRoute
   '/app/proxies': typeof AuthenticatedAppProxiesRoute
   '/app/team': typeof AuthenticatedAppTeamRoute
   '/app/': typeof AuthenticatedAppIndexRoute
+  '/api/public/agent/me': typeof ApiPublicAgentMeRoute
+  '/api/public/agent/profiles': typeof ApiPublicAgentProfilesRouteWithChildren
+  '/api/public/agent/proxies': typeof ApiPublicAgentProxiesRoute
+  '/api/public/agent/profiles/$id': typeof ApiPublicAgentProfilesIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/invite/$token': typeof InviteTokenRoute
+  '/app/agents': typeof AuthenticatedAppAgentsRoute
   '/app/desktop': typeof AuthenticatedAppDesktopRoute
   '/app/proxies': typeof AuthenticatedAppProxiesRoute
   '/app/team': typeof AuthenticatedAppTeamRoute
   '/app': typeof AuthenticatedAppIndexRoute
+  '/api/public/agent/me': typeof ApiPublicAgentMeRoute
+  '/api/public/agent/profiles': typeof ApiPublicAgentProfilesRouteWithChildren
+  '/api/public/agent/proxies': typeof ApiPublicAgentProxiesRoute
+  '/api/public/agent/profiles/$id': typeof ApiPublicAgentProfilesIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -90,10 +131,15 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/_authenticated/app': typeof AuthenticatedAppRouteWithChildren
   '/invite/$token': typeof InviteTokenRoute
+  '/_authenticated/app/agents': typeof AuthenticatedAppAgentsRoute
   '/_authenticated/app/desktop': typeof AuthenticatedAppDesktopRoute
   '/_authenticated/app/proxies': typeof AuthenticatedAppProxiesRoute
   '/_authenticated/app/team': typeof AuthenticatedAppTeamRoute
   '/_authenticated/app/': typeof AuthenticatedAppIndexRoute
+  '/api/public/agent/me': typeof ApiPublicAgentMeRoute
+  '/api/public/agent/profiles': typeof ApiPublicAgentProfilesRouteWithChildren
+  '/api/public/agent/proxies': typeof ApiPublicAgentProxiesRoute
+  '/api/public/agent/profiles/$id': typeof ApiPublicAgentProfilesIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -102,19 +148,29 @@ export interface FileRouteTypes {
     | '/auth'
     | '/app'
     | '/invite/$token'
+    | '/app/agents'
     | '/app/desktop'
     | '/app/proxies'
     | '/app/team'
     | '/app/'
+    | '/api/public/agent/me'
+    | '/api/public/agent/profiles'
+    | '/api/public/agent/proxies'
+    | '/api/public/agent/profiles/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/auth'
     | '/invite/$token'
+    | '/app/agents'
     | '/app/desktop'
     | '/app/proxies'
     | '/app/team'
     | '/app'
+    | '/api/public/agent/me'
+    | '/api/public/agent/profiles'
+    | '/api/public/agent/proxies'
+    | '/api/public/agent/profiles/$id'
   id:
     | '__root__'
     | '/'
@@ -122,10 +178,15 @@ export interface FileRouteTypes {
     | '/auth'
     | '/_authenticated/app'
     | '/invite/$token'
+    | '/_authenticated/app/agents'
     | '/_authenticated/app/desktop'
     | '/_authenticated/app/proxies'
     | '/_authenticated/app/team'
     | '/_authenticated/app/'
+    | '/api/public/agent/me'
+    | '/api/public/agent/profiles'
+    | '/api/public/agent/proxies'
+    | '/api/public/agent/profiles/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -133,6 +194,9 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
   InviteTokenRoute: typeof InviteTokenRoute
+  ApiPublicAgentMeRoute: typeof ApiPublicAgentMeRoute
+  ApiPublicAgentProfilesRoute: typeof ApiPublicAgentProfilesRouteWithChildren
+  ApiPublicAgentProxiesRoute: typeof ApiPublicAgentProxiesRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -179,6 +243,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAppIndexRouteImport
       parentRoute: typeof AuthenticatedAppRoute
     }
+    '/_authenticated/app/agents': {
+      id: '/_authenticated/app/agents'
+      path: '/agents'
+      fullPath: '/app/agents'
+      preLoaderRoute: typeof AuthenticatedAppAgentsRouteImport
+      parentRoute: typeof AuthenticatedAppRoute
+    }
     '/_authenticated/app/desktop': {
       id: '/_authenticated/app/desktop'
       path: '/desktop'
@@ -200,10 +271,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAppTeamRouteImport
       parentRoute: typeof AuthenticatedAppRoute
     }
+    '/api/public/agent/me': {
+      id: '/api/public/agent/me'
+      path: '/api/public/agent/me'
+      fullPath: '/api/public/agent/me'
+      preLoaderRoute: typeof ApiPublicAgentMeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/agent/profiles': {
+      id: '/api/public/agent/profiles'
+      path: '/api/public/agent/profiles'
+      fullPath: '/api/public/agent/profiles'
+      preLoaderRoute: typeof ApiPublicAgentProfilesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/agent/proxies': {
+      id: '/api/public/agent/proxies'
+      path: '/api/public/agent/proxies'
+      fullPath: '/api/public/agent/proxies'
+      preLoaderRoute: typeof ApiPublicAgentProxiesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/agent/profiles/$id': {
+      id: '/api/public/agent/profiles/$id'
+      path: '/$id'
+      fullPath: '/api/public/agent/profiles/$id'
+      preLoaderRoute: typeof ApiPublicAgentProfilesIdRouteImport
+      parentRoute: typeof ApiPublicAgentProfilesRoute
+    }
   }
 }
 
 interface AuthenticatedAppRouteChildren {
+  AuthenticatedAppAgentsRoute: typeof AuthenticatedAppAgentsRoute
   AuthenticatedAppDesktopRoute: typeof AuthenticatedAppDesktopRoute
   AuthenticatedAppProxiesRoute: typeof AuthenticatedAppProxiesRoute
   AuthenticatedAppTeamRoute: typeof AuthenticatedAppTeamRoute
@@ -211,6 +311,7 @@ interface AuthenticatedAppRouteChildren {
 }
 
 const AuthenticatedAppRouteChildren: AuthenticatedAppRouteChildren = {
+  AuthenticatedAppAgentsRoute: AuthenticatedAppAgentsRoute,
   AuthenticatedAppDesktopRoute: AuthenticatedAppDesktopRoute,
   AuthenticatedAppProxiesRoute: AuthenticatedAppProxiesRoute,
   AuthenticatedAppTeamRoute: AuthenticatedAppTeamRoute,
@@ -231,11 +332,28 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
 const AuthenticatedRouteRouteWithChildren =
   AuthenticatedRouteRoute._addFileChildren(AuthenticatedRouteRouteChildren)
 
+interface ApiPublicAgentProfilesRouteChildren {
+  ApiPublicAgentProfilesIdRoute: typeof ApiPublicAgentProfilesIdRoute
+}
+
+const ApiPublicAgentProfilesRouteChildren: ApiPublicAgentProfilesRouteChildren =
+  {
+    ApiPublicAgentProfilesIdRoute: ApiPublicAgentProfilesIdRoute,
+  }
+
+const ApiPublicAgentProfilesRouteWithChildren =
+  ApiPublicAgentProfilesRoute._addFileChildren(
+    ApiPublicAgentProfilesRouteChildren,
+  )
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
   InviteTokenRoute: InviteTokenRoute,
+  ApiPublicAgentMeRoute: ApiPublicAgentMeRoute,
+  ApiPublicAgentProfilesRoute: ApiPublicAgentProfilesRouteWithChildren,
+  ApiPublicAgentProxiesRoute: ApiPublicAgentProxiesRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

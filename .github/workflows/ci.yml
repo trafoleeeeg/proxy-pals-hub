@@ -1,0 +1,31 @@
+name: Проверка кода
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Установка зависимостей
+        run: bun install --frozen-lockfile
+
+      - name: Проверка типов
+        run: bunx tsgo --noEmit
+
+      - name: Проверка файлов приложения
+        run: |
+          node --check desktop/main.cjs
+          node --check desktop/preload.cjs
+          node --check desktop/launcher.cjs
+          node --check desktop/proxy-check.cjs
+          node --check desktop/fingerprint-preload.cjs

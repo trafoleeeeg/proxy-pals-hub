@@ -58,7 +58,7 @@ export const saveProfile = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(
     (d: {
-      id?: string;
+      id?: string | undefined;
       teamId: string;
       name: string;
       folder: string;

@@ -141,10 +141,11 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   registerProtocol();
   handleDeepLink(process.argv.find((a) => a.startsWith(`${PROTOCOL}://`)));
   session.fromPartition("persist:umbra-app");
+  await startCallbackServer();
   createWindow();
 
   autoUpdater.autoDownload = false;
@@ -188,7 +189,11 @@ ipcMain.handle("umbra:close-profile", async (_e, profileId) => {
 });
 
 ipcMain.handle("umbra:open-auth", async () => {
-  await shell.openExternal(AUTH_URL);
+  if (!callbackPort) await startCallbackServer();
+  const cb = callbackPort ? `http://127.0.0.1:${callbackPort}/cb` : null;
+  const url =
+    `${BASE_URL}/auth?desktop=1` + (cb ? `&cb=${encodeURIComponent(cb)}` : "");
+  await shell.openExternal(url);
   return { ok: true };
 });
 

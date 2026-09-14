@@ -70,10 +70,11 @@ function ProxiesPage() {
   const invalidate = () => qc.invalidateQueries({ queryKey: ["proxies"] });
 
   const saveMut = useMutation({
-    mutationFn: () =>
-      save({
+    mutationFn: () => {
+      if (!ws?.teamId) throw new Error("Команда ещё загружается, попробуйте через секунду");
+      return save({
         data: {
-          teamId: ws!.teamId,
+          teamId: ws.teamId,
           label: form.label || `${form.host}:${form.port}`,
           protocol: form.protocol,
           host: form.host,
@@ -82,7 +83,8 @@ function ProxiesPage() {
           password: form.password || undefined,
           country: form.country || undefined,
         },
-      }),
+      });
+    },
     onSuccess: () => {
       toast.success("Прокси сохранён");
       setOpen(false);
@@ -101,7 +103,10 @@ function ProxiesPage() {
   });
 
   const importMut = useMutation({
-    mutationFn: () => bulk({ data: { teamId: ws!.teamId, text: importText } }),
+    mutationFn: () => {
+      if (!ws?.teamId) throw new Error("Команда ещё загружается, попробуйте через секунду");
+      return bulk({ data: { teamId: ws.teamId, text: importText } });
+    },
     onSuccess: (r) => {
       toast.success(`Добавлено прокси: ${r.added}`);
       setImportOpen(false);

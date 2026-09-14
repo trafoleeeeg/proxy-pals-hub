@@ -64,12 +64,14 @@ function ClientPage() {
             установленная версия {version ?? "…"}
           </p>
           <p className="mt-3 text-sm text-muted-foreground">
-            {!status && "Нажмите «Проверить обновления»."}
+            {!status && "Приложение само проверяет новые версии каждые 15 минут."}
+            {status?.state === "checking" && "Проверяем наличие новой версии…"}
             {status?.state === "none" && "У вас последняя версия."}
             {status?.state === "available" && `Доступна версия ${status.version}.`}
-            {status?.state === "downloading" && `Загрузка… ${status.percent}%`}
+            {status?.state === "downloading" &&
+              `Новая версия загружается автоматически… ${status.percent}%`}
             {status?.state === "downloaded" &&
-              `Версия ${status.version} готова. Приложение перезапустится, все профили и данные сохранятся.`}
+              `Версия ${status.version} готова. Нажмите «Обновить и перезапустить» — приложение установит новые файлы поверх старых, все профили и данные сохранятся и откроется снова.`}
             {status?.state === "error" && `Ошибка: ${status.error}`}
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
@@ -82,7 +84,7 @@ function ClientPage() {
               </Button>
             )}
             {status?.state === "downloaded" && (
-              <Button onClick={() => bridge.installUpdate()}>Установить и перезапустить</Button>
+              <Button onClick={() => bridge.installUpdate()}>Обновить и перезапустить</Button>
             )}
           </div>
         </div>

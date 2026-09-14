@@ -50,24 +50,13 @@ function AuthPage() {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [handoff, setHandoff] = useState(false);
+  const [handoffUrl, setHandoffUrl] = useState<string | null>(null);
 
   const next = safeNext(search.next);
   const isDesktopApp = !!desktop();
   const handoffMode = search.desktop === "1" && !isDesktopApp;
-
-  // Приложение получило токены из системного браузера — входим внутри приложения.
-  useEffect(() => {
-    const bridge = desktop();
-    if (!bridge) return;
-    return bridge.onAuthTokens(async (tokens) => {
-      const { error } = await supabase.auth.setSession(tokens);
-      if (error) {
-        toast.error("Не удалось перенести вход из браузера");
-        return;
-      }
-      navigate({ to: next });
-    });
-  }, [navigate, next]);
+  const callback =
+    search.cb && /^http:\/\/127\.0\.0\.1:\d+\/cb$/.test(search.cb) ? search.cb : null;
 
   // Обычный браузер, открытый приложением: после входа отдаём сессию в приложение.
   useEffect(() => {
@@ -76,15 +65,18 @@ function AuthPage() {
     const hand = (session: { access_token: string; refresh_token: string } | null) => {
       if (!session || done) return;
       done = true;
-      setHandoff(true);
-      window.location.href = `umbra://auth#access_token=${encodeURIComponent(
+      const qs = `access_token=${encodeURIComponent(
         session.access_token,
       )}&refresh_token=${encodeURIComponent(session.refresh_token)}`;
+      const target = callback ? `${callback}?${qs}` : `umbra://auth#${qs}`;
+      setHandoff(true);
+      setHandoffUrl(target);
+      window.location.href = target;
     };
     supabase.auth.getSession().then(({ data }) => hand(data.session));
     const { data } = supabase.auth.onAuthStateChange((_e, session) => hand(session));
     return () => data.subscription.unsubscribe();
-  }, [handoffMode]);
+  }, [handoffMode, callback]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();

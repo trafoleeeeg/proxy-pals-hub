@@ -154,6 +154,20 @@ function AuthPage() {
             : "Создайте владельца команды — сотрудников добавите позже."}
         </p>
 
+        {handoffMode && (
+          <p className="mono mt-4 rounded-md border border-border bg-secondary/40 p-3 text-xs text-muted-foreground">
+            {handoff
+              ? "Вход выполнен — возвращаемся в приложение Umbra."
+              : "Вход для приложения Umbra: после входа браузер сам вернёт вас в приложение."}
+          </p>
+        )}
+        {isDesktopApp && (
+          <p className="mono mt-4 text-xs text-muted-foreground">
+            Вход через Google откроется в вашем обычном браузере.
+          </p>
+        )}
+
+
         <form onSubmit={submit} className="mt-6 space-y-4">
           <div className="space-y-2">
             <Label htmlFor="email">Почта</Label>

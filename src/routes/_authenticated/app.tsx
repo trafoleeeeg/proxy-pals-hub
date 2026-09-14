@@ -36,8 +36,16 @@ function UpdateBar() {
     if (!b) return;
     void b.appVersion().then(setVersion);
     const off = b.onUpdateStatus(setStatus);
+    // Текущее состояние на случай, если событие пришло до открытия панели.
+    if (typeof b.updateState === "function") void b.updateState().then(setStatus);
     void b.checkUpdate();
-    return off;
+    const timer = setInterval(() => {
+      void b.checkUpdate();
+    }, 10 * 60 * 1000);
+    return () => {
+      off();
+      clearInterval(timer);
+    };
   }, []);
 
   const bridge = desktop();
@@ -53,9 +61,10 @@ function UpdateBar() {
     <div className="flex items-center gap-3 border-b border-border bg-primary/10 px-6 py-2 text-sm">
       <span className="text-foreground">
         {status.state === "available" && `Доступна новая версия ${status.version}`}
-        {status.state === "downloading" && `Загрузка обновления… ${status.percent}%`}
+        {status.state === "downloading" &&
+          `Загружается обновление${status.version ? ` ${status.version}` : ""}… ${status.percent}%`}
         {status.state === "downloaded" &&
-          `Версия ${status.version} загружена — профили и данные сохранятся`}
+          `Версия ${status.version} готова к установке — профили и данные сохранятся`}
       </span>
       <span className="mono text-xs text-muted-foreground">сейчас {version ?? "…"}</span>
       <div className="ml-auto">
@@ -66,7 +75,7 @@ function UpdateBar() {
         )}
         {status.state === "downloaded" && (
           <Button size="sm" onClick={() => bridge.installUpdate()}>
-            Установить и перезапустить
+            Обновить и перезапустить
           </Button>
         )}
       </div>

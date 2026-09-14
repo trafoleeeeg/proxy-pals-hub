@@ -20,6 +20,7 @@ import { Route as AuthenticatedAppProxiesRouteImport } from './routes/_authentic
 import { Route as AuthenticatedAppTeamRouteImport } from './routes/_authenticated/app.team'
 import { Route as ApiPublicAgentMeRouteImport } from './routes/api/public/agent/me'
 import { Route as ApiPublicAgentProfilesRouteImport } from './routes/api/public/agent/profiles'
+import { Route as ApiPublicAgentProxiesRouteImport } from './routes/api/public/agent/proxies'
 import { Route as ApiPublicAgentProfilesIdRouteImport } from './routes/api/public/agent/profiles.$id'
 
 const IndexRoute = IndexRouteImport.update({
@@ -76,6 +77,11 @@ const ApiPublicAgentProfilesRoute = ApiPublicAgentProfilesRouteImport.update({
   path: '/api/public/agent/profiles',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicAgentProxiesRoute = ApiPublicAgentProxiesRouteImport.update({
+  id: '/api/public/agent/proxies',
+  path: '/api/public/agent/proxies',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicAgentProfilesIdRoute =
   ApiPublicAgentProfilesIdRouteImport.update({
     id: '/$id',
@@ -94,6 +100,7 @@ export interface FileRoutesByFullPath {
   '/app/': typeof AuthenticatedAppIndexRoute
   '/api/public/agent/me': typeof ApiPublicAgentMeRoute
   '/api/public/agent/profiles': typeof ApiPublicAgentProfilesRouteWithChildren
+  '/api/public/agent/proxies': typeof ApiPublicAgentProxiesRoute
   '/api/public/agent/profiles/$id': typeof ApiPublicAgentProfilesIdRoute
 }
 export interface FileRoutesByTo {
@@ -106,6 +113,7 @@ export interface FileRoutesByTo {
   '/app': typeof AuthenticatedAppIndexRoute
   '/api/public/agent/me': typeof ApiPublicAgentMeRoute
   '/api/public/agent/profiles': typeof ApiPublicAgentProfilesRouteWithChildren
+  '/api/public/agent/proxies': typeof ApiPublicAgentProxiesRoute
   '/api/public/agent/profiles/$id': typeof ApiPublicAgentProfilesIdRoute
 }
 export interface FileRoutesById {
@@ -121,6 +129,7 @@ export interface FileRoutesById {
   '/_authenticated/app/': typeof AuthenticatedAppIndexRoute
   '/api/public/agent/me': typeof ApiPublicAgentMeRoute
   '/api/public/agent/profiles': typeof ApiPublicAgentProfilesRouteWithChildren
+  '/api/public/agent/proxies': typeof ApiPublicAgentProxiesRoute
   '/api/public/agent/profiles/$id': typeof ApiPublicAgentProfilesIdRoute
 }
 export interface FileRouteTypes {
@@ -136,6 +145,7 @@ export interface FileRouteTypes {
     | '/app/'
     | '/api/public/agent/me'
     | '/api/public/agent/profiles'
+    | '/api/public/agent/proxies'
     | '/api/public/agent/profiles/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -148,6 +158,7 @@ export interface FileRouteTypes {
     | '/app'
     | '/api/public/agent/me'
     | '/api/public/agent/profiles'
+    | '/api/public/agent/proxies'
     | '/api/public/agent/profiles/$id'
   id:
     | '__root__'
@@ -162,6 +173,7 @@ export interface FileRouteTypes {
     | '/_authenticated/app/'
     | '/api/public/agent/me'
     | '/api/public/agent/profiles'
+    | '/api/public/agent/proxies'
     | '/api/public/agent/profiles/$id'
   fileRoutesById: FileRoutesById
 }
@@ -172,6 +184,7 @@ export interface RootRouteChildren {
   InviteTokenRoute: typeof InviteTokenRoute
   ApiPublicAgentMeRoute: typeof ApiPublicAgentMeRoute
   ApiPublicAgentProfilesRoute: typeof ApiPublicAgentProfilesRouteWithChildren
+  ApiPublicAgentProxiesRoute: typeof ApiPublicAgentProxiesRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -253,6 +266,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicAgentProfilesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/agent/proxies': {
+      id: '/api/public/agent/proxies'
+      path: '/api/public/agent/proxies'
+      fullPath: '/api/public/agent/proxies'
+      preLoaderRoute: typeof ApiPublicAgentProxiesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/agent/profiles/$id': {
       id: '/api/public/agent/profiles/$id'
       path: '/$id'
@@ -312,6 +332,7 @@ const rootRouteChildren: RootRouteChildren = {
   InviteTokenRoute: InviteTokenRoute,
   ApiPublicAgentMeRoute: ApiPublicAgentMeRoute,
   ApiPublicAgentProfilesRoute: ApiPublicAgentProfilesRouteWithChildren,
+  ApiPublicAgentProxiesRoute: ApiPublicAgentProxiesRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

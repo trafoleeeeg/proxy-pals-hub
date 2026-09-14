@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld("umbra", {
   // Обновление в один клик.
   appVersion: () => ipcRenderer.invoke("umbra:app-version"),
   checkUpdate: () => ipcRenderer.invoke("umbra:check-update"),
+  updateState: () => ipcRenderer.invoke("umbra:update-state"),
   downloadUpdate: () => ipcRenderer.invoke("umbra:download-update"),
   installUpdate: () => ipcRenderer.invoke("umbra:install-update"),
   onUpdateStatus: (cb) => {

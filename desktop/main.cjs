@@ -140,6 +140,8 @@ ipcMain.handle("umbra:open-external", async (_e, url) => {
   return { ok: true };
 });
 
+ipcMain.handle("umbra:update-state", async () => updateState);
+
 ipcMain.handle("umbra:check-update", async () => {
   if (!app.isPackaged) return { ok: false, error: "Обновления доступны только в установленном приложении" };
   try {

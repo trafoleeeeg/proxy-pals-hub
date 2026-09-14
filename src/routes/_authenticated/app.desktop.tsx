@@ -112,7 +112,7 @@ function ClientPage() {
         {STEPS.map((s, i) => (
           <li key={s} className="flex gap-3 text-sm">
             <span className="mono text-primary">{String(i + 1).padStart(2, "0")}</span>
-            <span className="text-muted-foreground">{String(i + 1) && s}</span>
+            <span className="text-muted-foreground">{s}</span>
           </li>
         ))}
       </ol>

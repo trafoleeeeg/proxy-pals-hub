@@ -40,6 +40,25 @@ function safeNext(next?: string) {
   return next;
 }
 
+function safeDesktopCallback(value?: string) {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (
+      url.protocol !== "http:" ||
+      url.hostname !== "127.0.0.1" ||
+      !url.port ||
+      url.pathname !== "/cb" ||
+      !/^[a-f0-9]{48}$/.test(url.searchParams.get("state") ?? "")
+    ) {
+      return null;
+    }
+    return url;
+  } catch {
+    return null;
+  }
+}
+
 function AuthPage() {
   const search = Route.useSearch();
   const navigate = useNavigate();
@@ -49,34 +68,24 @@ function AuthPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  const [handoff, setHandoff] = useState(false);
-  const [handoffUrl, setHandoffUrl] = useState<string | null>(null);
 
   const next = safeNext(search.next);
   const isDesktopApp = !!desktop();
-  const handoffMode = search.desktop === "1" && !isDesktopApp;
-  const callback =
-    search.cb && /^http:\/\/127\.0\.0\.1:\d+\/cb$/.test(search.cb) ? search.cb : null;
+  const callback = safeDesktopCallback(search.cb);
+  const handoffMode = !!callback && !isDesktopApp;
 
-  // Обычный браузер, открытый приложением: после входа отдаём сессию в приложение.
-  useEffect(() => {
-    if (!handoffMode) return;
-    let done = false;
-    const hand = (session: { access_token: string; refresh_token: string } | null) => {
-      if (!session || done) return;
-      done = true;
-      const qs = `access_token=${encodeURIComponent(
-        session.access_token,
-      )}&refresh_token=${encodeURIComponent(session.refresh_token)}`;
-      const target = callback ? `${callback}?${qs}` : `umbra://auth#${qs}`;
-      setHandoff(true);
-      setHandoffUrl(target);
-      window.location.href = target;
-    };
-    supabase.auth.getSession().then(({ data }) => hand(data.session));
-    const { data } = supabase.auth.onAuthStateChange((_e, session) => hand(session));
-    return () => data.subscription.unsubscribe();
-  }, [handoffMode, callback]);
+  function handoff(session: { access_token: string; refresh_token: string } | null) {
+    if (!handoffMode || !callback || !session) return false;
+    callback.searchParams.set("access_token", session.access_token);
+    callback.searchParams.set("refresh_token", session.refresh_token);
+    try {
+      sessionStorage.removeItem("umbra:desktop-callback");
+    } catch {
+      /* ignore */
+    }
+    window.location.replace(callback.toString());
+    return true;
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -91,8 +100,9 @@ function AuthPage() {
         if (error) throw error;
         toast.success("Проверьте почту — мы отправили ссылку для подтверждения.");
       } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
+        if (handoff(data.session)) return;
         navigate({ to: next });
       }
     } catch (err) {
@@ -117,11 +127,10 @@ function AuthPage() {
       } catch {
         /* ignore */
       }
-      const handoffReturn =
-        `${window.location.origin}/auth?desktop=1` +
-        (callback ? `&cb=${encodeURIComponent(callback)}` : "");
       const result = await lovable.auth.signInWithOAuth("google", {
-        redirect_uri: handoffMode ? handoffReturn : window.location.origin,
+        // Managed Google login may normalize the return URL to the origin.
+        // AuthSync keeps the desktop callback in sessionStorage across that round-trip.
+        redirect_uri: window.location.origin,
       });
       if (result.error) {
         toast.error(
@@ -132,6 +141,8 @@ function AuthPage() {
         return;
       }
       if (result.redirected) return;
+      const { data } = await supabase.auth.getSession();
+      if (handoff(data.session)) return;
       navigate({ to: next });
     } finally {
       setBusy(false);
@@ -155,18 +166,7 @@ function AuthPage() {
 
         {handoffMode && (
           <div className="mono mt-4 rounded-md border border-border bg-secondary/40 p-3 text-xs text-muted-foreground">
-            {handoff ? (
-              <>
-                Вход выполнен — возвращаемся в приложение Umbra.
-                {handoffUrl && (
-                  <a href={handoffUrl} className="mt-2 block text-foreground underline">
-                    Если приложение не отреагировало — нажмите здесь
-                  </a>
-                )}
-              </>
-            ) : (
-              "Вход для приложения Umbra: после входа браузер сам вернёт вас в приложение."
-            )}
+            Вход для приложения Umbra: после входа браузер сам вернёт вас в приложение.
           </div>
         )}
         {isDesktopApp && (

@@ -1,6 +1,6 @@
 {
   "name": "umbra-desktop",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "description": "Umbra — управление антидетект-профилями",
   "main": "main.cjs",
@@ -19,7 +19,7 @@
     "appId": "dev.umbra.desktop",
     "productName": "Umbra",
     "directories": { "output": "dist" },
-    "files": ["main.cjs", "preload.cjs", "launcher.cjs", "fingerprint-preload.cjs"],
+    "files": ["package.json", "main.cjs", "preload.cjs", "launcher.cjs", "fingerprint-preload.cjs"],
     "publish": [
       {
         "provider": "github",

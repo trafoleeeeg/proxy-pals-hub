@@ -70,10 +70,11 @@ function ProxiesPage() {
   const invalidate = () => qc.invalidateQueries({ queryKey: ["proxies"] });
 
   const saveMut = useMutation({
-    mutationFn: () =>
-      save({
+    mutationFn: () => {
+      if (!ws?.teamId) throw new Error("Команда ещё загружается, попробуйте через секунду");
+      return save({
         data: {
-          teamId: ws!.teamId,
+          teamId: ws.teamId,
           label: form.label || `${form.host}:${form.port}`,
           protocol: form.protocol,
           host: form.host,

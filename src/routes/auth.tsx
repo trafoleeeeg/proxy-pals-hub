@@ -8,13 +8,19 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-type Search = { mode?: string | undefined; next?: string | undefined; desktop?: string | undefined };
+type Search = {
+  mode?: string | undefined;
+  next?: string | undefined;
+  desktop?: string | undefined;
+  cb?: string | undefined;
+};
 
 export const Route = createFileRoute("/auth")({
   validateSearch: (s: Record<string, unknown>): Search => ({
     mode: typeof s["mode"] === "string" ? s["mode"] : undefined,
     next: typeof s["next"] === "string" ? s["next"] : undefined,
     desktop: typeof s["desktop"] === "string" ? s["desktop"] : undefined,
+    cb: typeof s["cb"] === "string" ? s["cb"] : undefined,
   }),
   head: () => ({
     meta: [

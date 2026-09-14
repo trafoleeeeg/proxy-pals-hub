@@ -14,7 +14,11 @@ export const getWorkspace = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<Workspace> => {
     const { supabase, userId } = context;
-    const email = (context.claims?.["email"] as string) ?? "";
+    let email = (context.claims?.["email"] as string) ?? "";
+    if (!email) {
+      const { data: me } = await supabase.from("profiles").select("email").eq("id", userId).maybeSingle();
+      email = me?.email ?? "";
+    }
 
     const { data: membership } = await supabase
       .from("team_members")

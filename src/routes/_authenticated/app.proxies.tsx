@@ -10,7 +10,10 @@ import {
   deleteProxy,
   importProxies,
   checkProxy,
+  proxyForCheck,
+  recordProxyCheck,
 } from "@/lib/proxies.functions";
+import { desktop } from "@/lib/desktop";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";

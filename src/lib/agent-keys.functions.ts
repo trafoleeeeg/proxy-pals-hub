@@ -13,7 +13,6 @@ export type AgentKeyRow = {
 };
 
 async function assertOwner(
-  supabase: { from: (t: string) => never } | unknown,
   ctx: { supabase: import("@supabase/supabase-js").SupabaseClient; userId: string },
   teamId: string,
 ) {
@@ -30,7 +29,7 @@ export const listAgentKeys = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { teamId: string }) => d)
   .handler(async ({ data, context }): Promise<AgentKeyRow[]> => {
-    await assertOwner(null, context, data.teamId);
+    await assertOwner(context, data.teamId);
     const { data: rows, error } = await context.supabase
       .from("agent_keys")
       .select("id, name, key_prefix, scopes, expires_at, revoked_at, last_used_at, created_at")
@@ -45,7 +44,7 @@ export const createAgentKey = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { teamId: string; name: string; scopes: string[]; days: number | null }) => d)
   .handler(async ({ data, context }) => {
-    await assertOwner(null, context, data.teamId);
+    await assertOwner(context, data.teamId);
     const { generateAgentKey, AGENT_SCOPES } = await import("./agent-auth.server");
 
     const scopes = data.scopes.filter((s) => (AGENT_SCOPES as readonly string[]).includes(s));
@@ -88,7 +87,7 @@ export const revokeAgentKey = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { teamId: string; id: string }) => d)
   .handler(async ({ data, context }) => {
-    await assertOwner(null, context, data.teamId);
+    await assertOwner(context, data.teamId);
     const { error } = await context.supabase
       .from("agent_keys")
       .update({ revoked_at: new Date().toISOString() })
@@ -102,7 +101,7 @@ export const deleteAgentKey = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { teamId: string; id: string }) => d)
   .handler(async ({ data, context }) => {
-    await assertOwner(null, context, data.teamId);
+    await assertOwner(context, data.teamId);
     const { error } = await context.supabase
       .from("agent_keys")
       .delete()
@@ -117,7 +116,7 @@ export const listAgentActivity = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { teamId: string }) => d)
   .handler(async ({ data, context }) => {
-    await assertOwner(null, context, data.teamId);
+    await assertOwner(context, data.teamId);
     const { data: rows, error } = await context.supabase
       .from("audit_log")
       .select("id, action, target_type, target_id, meta, created_at, agent_key_id")

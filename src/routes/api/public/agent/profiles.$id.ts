@@ -43,12 +43,18 @@ export const Route = createFileRoute("/api/public/agent/profiles/$id")({
             throw new AgentError(400, parsed.error.issues.map((i) => i.message).join("; "));
 
           const db = await ownedProfile(agent.teamId, params.id);
-          const patch: Record<string, unknown> = {};
-          if (parsed.data.name !== undefined) patch["name"] = parsed.data.name;
-          if (parsed.data.folder !== undefined) patch["folder"] = parsed.data.folder;
-          if (parsed.data.tags !== undefined) patch["tags"] = parsed.data.tags;
-          if (parsed.data.notes !== undefined) patch["notes"] = parsed.data.notes;
-          if (parsed.data.proxyId !== undefined) patch["proxy_id"] = parsed.data.proxyId;
+          const patch: {
+            name?: string;
+            folder?: string;
+            tags?: string[];
+            notes?: string;
+            proxy_id?: string | null;
+          } = {};
+          if (parsed.data.name !== undefined) patch.name = parsed.data.name;
+          if (parsed.data.folder !== undefined) patch.folder = parsed.data.folder;
+          if (parsed.data.tags !== undefined) patch.tags = parsed.data.tags;
+          if (parsed.data.notes !== undefined) patch.notes = parsed.data.notes;
+          if (parsed.data.proxyId !== undefined) patch.proxy_id = parsed.data.proxyId;
           if (Object.keys(patch).length === 0) throw new AgentError(400, "Нечего менять");
 
           const { error } = await db.from("browser_profiles").update(patch).eq("id", params.id);

@@ -6,6 +6,7 @@ const {
   closeProfileWindow,
   snapshotProfileCookies,
 } = require("./launcher.cjs");
+const { checkProxy } = require("./proxy-check.cjs");
 
 const APP_URL = process.env.UMBRA_APP_URL || "https://proxy-pals-hub.lovable.app/app";
 

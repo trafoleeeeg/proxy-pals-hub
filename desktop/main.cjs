@@ -209,7 +209,7 @@ ipcMain.handle("umbra:open-auth", async () => {
     ? `http://127.0.0.1:${callbackPort}/cb?state=${callbackState}`
     : null;
   const url =
-    `${BASE_URL}/auth?desktop=1` + (cb ? `&cb=${encodeURIComponent(cb)}` : "");
+    `${BASE_URL}/auth?desktop=1&auto=google` + (cb ? `&cb=${encodeURIComponent(cb)}` : "");
   await shell.openExternal(url);
   return { ok: true };
 });

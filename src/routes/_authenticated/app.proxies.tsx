@@ -50,6 +50,8 @@ function ProxiesPage() {
   const remove = useServerFn(deleteProxy);
   const bulk = useServerFn(importProxies);
   const check = useServerFn(checkProxy);
+  const forCheck = useServerFn(proxyForCheck);
+  const record = useServerFn(recordProxyCheck);
 
   const [open, setOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);

@@ -105,6 +105,13 @@ function AuthPage() {
   }
 
   async function google() {
+    const bridge = desktop();
+    if (bridge) {
+      // Открываем вход в системном браузере, где Google-аккаунт уже залогинен.
+      await bridge.openAuth();
+      toast.info("Продолжите вход в браузере — приложение подхватит его автоматически.");
+      return;
+    }
     setBusy(true);
     try {
       try {
@@ -113,7 +120,9 @@ function AuthPage() {
         /* ignore */
       }
       const result = await lovable.auth.signInWithOAuth("google", {
-        redirect_uri: window.location.origin,
+        redirect_uri: handoffMode
+          ? `${window.location.origin}/auth?desktop=1`
+          : window.location.origin,
       });
       if (result.error) {
         toast.error(

@@ -71,8 +71,8 @@ function AuthPage() {
 
   const next = safeNext(search.next);
   const isDesktopApp = !!desktop();
-  const handoffMode = search.desktop === "1" && !isDesktopApp;
   const callback = safeDesktopCallback(search.cb);
+  const handoffMode = !!callback && !isDesktopApp;
 
   function handoff(session: { access_token: string; refresh_token: string } | null) {
     if (!handoffMode || !callback || !session) return false;

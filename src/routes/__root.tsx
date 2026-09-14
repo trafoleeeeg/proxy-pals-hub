@@ -188,7 +188,7 @@ function AuthSync() {
     if (typeof window === "undefined" || window.umbra) return;
     const params = new URLSearchParams(window.location.search);
     const callback = safeDesktopCallback(params.get("cb"));
-    if (params.get("desktop") === "1" && callback) {
+    if (callback) {
       try {
         sessionStorage.setItem("umbra:desktop-callback", callback.toString());
       } catch {

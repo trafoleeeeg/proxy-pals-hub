@@ -136,6 +136,14 @@ ipcMain.handle("umbra:profile-cookies", async (_e, profileId) => {
   return { ok: true, cookies };
 });
 
+ipcMain.handle("umbra:check-proxy", async (_e, payload) => {
+  try {
+    return { ok: true, result: await checkProxy(payload || {}) };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
 ipcMain.handle("umbra:open-external", async (_e, url) => {
   if (typeof url === "string" && /^https?:\/\//.test(url)) await shell.openExternal(url);
   return { ok: true };

@@ -9,11 +9,52 @@ function proxyRules(proxy) {
   return `${scheme}://${proxy.host}:${proxy.port}`;
 }
 
+/** Восстанавливает cookies (сессии сайтов) профиля перед открытием окна. */
+async function restoreCookies(ses, raw) {
+  let list = [];
+  try {
+    list = JSON.parse(raw || "[]");
+  } catch {
+    return;
+  }
+  if (!Array.isArray(list)) return;
+  for (const c of list) {
+    if (!c || !c.name || !c.domain) continue;
+    const domain = String(c.domain).replace(/^\./, "");
+    const url = `${c.secure ? "https" : "http"}://${domain}${c.path || "/"}`;
+    try {
+      await ses.cookies.set({
+        url,
+        name: c.name,
+        value: c.value ?? "",
+        domain: c.domain,
+        path: c.path || "/",
+        secure: !!c.secure,
+        httpOnly: !!c.httpOnly,
+        ...(c.expirationDate ? { expirationDate: c.expirationDate } : {}),
+        ...(c.sameSite ? { sameSite: c.sameSite } : {}),
+      });
+    } catch {
+      /* пропускаем неподходящие cookie */
+    }
+  }
+}
+
+/** Снимает текущие cookies профиля, чтобы сохранить сессии в облаке команды. */
+async function dumpCookies(ses) {
+  try {
+    const list = await ses.cookies.get({});
+    return JSON.stringify(list);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Запускает профиль в отдельном изолированном окне со своей сессией,
  * своим прокси и подменённым отпечатком.
  */
-async function launchProfileWindow({ profileId, name, fingerprint, proxy }) {
+async function launchProfileWindow({ profileId, name, fingerprint, proxy, cookies }, onClosed) {
   if (open.has(profileId)) {
     open.get(profileId).focus();
     return;
@@ -36,6 +77,8 @@ async function launchProfileWindow({ profileId, name, fingerprint, proxy }) {
     });
   }
 
+  await restoreCookies(ses, cookies);
+
   const fp = fingerprint || {};
   const win = new BrowserWindow({
     width: fp.screen_width ? Math.min(fp.screen_width, 1600) : 1280,
@@ -56,10 +99,22 @@ async function launchProfileWindow({ profileId, name, fingerprint, proxy }) {
     ses.setUserAgent(fp.user_agent, fp.languages ? fp.languages.join(",") : undefined);
   }
 
+  // Сохраняем сессии сайтов до закрытия окна, пока сессия ещё доступна.
+  win.on("close", async () => {
+    const dump = await dumpCookies(ses);
+    if (typeof onClosed === "function") onClosed({ profileId, cookies: dump });
+  });
+
   win.on("closed", () => open.delete(profileId));
   open.set(profileId, win);
 
   await win.loadURL(fp.start_url || "https://whoer.net");
+}
+
+/** Периодическое сохранение сессий открытого профиля. */
+async function snapshotProfileCookies(profileId) {
+  if (!open.has(profileId)) return null;
+  return dumpCookies(session.fromPartition(`persist:profile-${profileId}`));
 }
 
 function closeProfileWindow(profileId) {
@@ -68,4 +123,4 @@ function closeProfileWindow(profileId) {
   open.delete(profileId);
 }
 
-module.exports = { launchProfileWindow, closeProfileWindow };
+module.exports = { launchProfileWindow, closeProfileWindow, snapshotProfileCookies };

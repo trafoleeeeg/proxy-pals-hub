@@ -93,6 +93,20 @@ export const launchProfile = createServerFn({ method: "POST" })
     };
   });
 
+/** Промежуточное сохранение сессий сайтов без снятия блокировки. */
+export const saveProfileSession = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { profileId: string; cookies: string }) => d)
+  .handler(async ({ data, context }) => {
+    const { encryptSecret } = await import("./crypto.server");
+    const { error } = await context.supabase
+      .from("browser_profiles")
+      .update({ cookies_enc: encryptSecret(data.cookies) })
+      .eq("id", data.profileId);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
 export const heartbeatProfile = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { profileId: string }) => d)

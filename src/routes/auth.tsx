@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable/index";
@@ -13,6 +13,7 @@ type Search = {
   next?: string | undefined;
   desktop?: string | undefined;
   cb?: string | undefined;
+  auto?: string | undefined;
 };
 
 export const Route = createFileRoute("/auth")({
@@ -21,6 +22,7 @@ export const Route = createFileRoute("/auth")({
     next: typeof s["next"] === "string" ? s["next"] : undefined,
     desktop: typeof s["desktop"] === "string" ? s["desktop"] : undefined,
     cb: typeof s["cb"] === "string" ? s["cb"] : undefined,
+    auto: typeof s["auto"] === "string" ? s["auto"] : undefined,
   }),
   head: () => ({
     meta: [
@@ -68,6 +70,7 @@ function AuthPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  const autoGoogleStarted = useRef(false);
 
   const next = safeNext(search.next);
   const isDesktopApp = !!desktop();
@@ -131,6 +134,7 @@ function AuthPage() {
         // Managed Google login may normalize the return URL to the origin.
         // AuthSync keeps the desktop callback in sessionStorage across that round-trip.
         redirect_uri: window.location.origin,
+        extraParams: { prompt: "select_account" },
       });
       if (result.error) {
         toast.error(
@@ -148,6 +152,12 @@ function AuthPage() {
       setBusy(false);
     }
   }
+
+  useEffect(() => {
+    if (search.auto !== "google" || !handoffMode || autoGoogleStarted.current) return;
+    autoGoogleStarted.current = true;
+    void google();
+  }, [handoffMode, search.auto]);
 
   return (
     <div className="flex min-h-screen items-center justify-center grid-bg px-4">

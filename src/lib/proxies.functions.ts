@@ -170,47 +170,53 @@ export const checkProxy = createServerFn({ method: "POST" })
       latency?: number | undefined;
     };
 
-    try {
-      const password = decryptSecret(proxy.password_enc);
-      const auth =
-        proxy.username || password
-          ? "Basic " + Buffer.from(`${proxy.username ?? ""}:${password}`).toString("base64")
-          : undefined;
-
-      // Воркер не умеет туннелировать SOCKS/HTTP-CONNECT напрямую,
-      // поэтому используем публичный HTTP-прокси-запрос через сам прокси.
-      const target = "http://ip-api.com/json/?fields=status,country,countryCode,city,query";
-      const headers: Record<string, string> = { Host: "ip-api.com" };
-      if (auth) headers["Proxy-Authorization"] = auth;
-
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 12000);
-      const res = await fetch(`http://${proxy.host}:${proxy.port}${new URL(target).pathname}${new URL(target).search}`, {
-        headers,
-        signal: controller.signal,
-      });
-      clearTimeout(timer);
-      const json = (await res.json()) as {
-        status?: string;
-        query?: string;
-        countryCode?: string;
-        city?: string;
-      };
-      result = json.status === "success"
-        ? {
-            ok: true,
-            ip: json.query,
-            country: json.countryCode,
-            city: json.city,
-            latency: Date.now() - started,
-          }
-        : { ok: false, error: "Прокси ответил, но IP определить не удалось" };
-    } catch (e) {
+    if (proxy.protocol === "socks5") {
       result = {
         ok: false,
-        error: e instanceof Error ? e.message : "Прокси не отвечает",
-        latency: Date.now() - started,
+        error: "SOCKS5 проверяется в настольном приложении",
       };
+    } else {
+      try {
+        const password = proxy.password_enc ? decryptSecret(proxy.password_enc) : "";
+        const auth =
+          proxy.username || password
+            ? "Basic " + btoa(`${proxy.username ?? ""}:${password}`)
+            : undefined;
+
+        const headers: Record<string, string> = { Host: "ip-api.com" };
+        if (auth) headers["Proxy-Authorization"] = auth;
+
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 12000);
+        const res = await fetch(
+          `http://${proxy.host}:${proxy.port}/json/?fields=status,countryCode,city,query`,
+          { headers, signal: controller.signal },
+        );
+        clearTimeout(timer);
+
+        const json = (await res.json()) as {
+          status?: string;
+          query?: string;
+          countryCode?: string;
+          city?: string;
+        };
+        result =
+          json.status === "success"
+            ? {
+                ok: true,
+                ip: json.query,
+                country: json.countryCode,
+                city: json.city,
+                latency: Date.now() - started,
+              }
+            : { ok: false, error: "Прокси ответил, но IP определить не удалось" };
+      } catch (e) {
+        result = {
+          ok: false,
+          error: e instanceof Error ? e.message : "Прокси не отвечает",
+          latency: Date.now() - started,
+        };
+      }
     }
 
     await context.supabase
@@ -221,8 +227,7 @@ export const checkProxy = createServerFn({ method: "POST" })
         last_check_ip: result.ip ?? null,
         last_check_latency_ms: result.latency ?? null,
         last_check_error: result.error ?? null,
-        country: result.country ?? null,
-        city: result.city ?? null,
+        ...(result.ok ? { country: result.country ?? null, city: result.city ?? null } : {}),
       })
       .eq("id", proxy.id);
 

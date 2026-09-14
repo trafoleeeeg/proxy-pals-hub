@@ -2,15 +2,15 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 export type ProxyInput = {
-  id?: string;
+  id?: string | undefined;
   teamId: string;
   label: string;
   protocol: "http" | "https" | "socks5";
   host: string;
   port: number;
-  username?: string;
-  password?: string;
-  country?: string;
+  username?: string | undefined;
+  password?: string | undefined;
+  country?: string | undefined;
 };
 
 export const listProxies = createServerFn({ method: "POST" })
@@ -79,10 +79,12 @@ export const deleteProxy = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-/** Массовый импорт строк host:port:login:pass */
+/** Массовый импорт: scheme://user:pass@host:port или host:port:login:pass */
 export const importProxies = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { teamId: string; text: string; protocol: "http" | "https" | "socks5" }) => d)
+  .inputValidator(
+    (d: { teamId: string; text: string; protocol?: "http" | "https" | "socks5" | undefined }) => d,
+  )
   .handler(async ({ data, context }) => {
     const { encryptSecret } = await import("./crypto.server");
     const rows: {
@@ -95,18 +97,42 @@ export const importProxies = createServerFn({ method: "POST" })
       password_enc: string | null;
       created_by: string;
     }[] = [];
+
     for (const line of data.text.split(/\r?\n/)) {
       const t = line.trim();
       if (!t) continue;
-      const parts = t.replace(/^\w+:\/\//, "").split(":");
-      if (parts.length < 2) continue;
-      const [host, portRaw, user, pass] = parts;
+
+      const schemeMatch = /^(https?|socks5):\/\//i.exec(t);
+      const protocol = (schemeMatch?.[1]?.toLowerCase() ?? data.protocol ?? "http") as
+        | "http"
+        | "https"
+        | "socks5";
+      let rest = t.replace(/^\w+:\/\//, "");
+
+      let user: string | undefined;
+      let pass: string | undefined;
+      let host: string | undefined;
+      let portRaw: string | undefined;
+
+      if (rest.includes("@")) {
+        const at = rest.lastIndexOf("@");
+        const cred = rest.slice(0, at).split(":");
+        rest = rest.slice(at + 1);
+        user = cred[0];
+        pass = cred[1];
+        [host, portRaw] = rest.split(":");
+      } else {
+        const parts = rest.split(":");
+        [host, portRaw, user, pass] = parts;
+      }
+
       const port = Number(portRaw);
-      if (!host || !Number.isFinite(port)) continue;
+      if (!host || !Number.isFinite(port) || port <= 0) continue;
+
       rows.push({
         team_id: data.teamId,
-        label: "",
-        protocol: data.protocol,
+        label: `${host}:${port}`,
+        protocol,
         host,
         port,
         username: user || null,
@@ -114,6 +140,7 @@ export const importProxies = createServerFn({ method: "POST" })
         created_by: context.userId,
       });
     }
+
     if (!rows.length) return { added: 0 };
     const { error } = await context.supabase.from("proxies").insert(rows);
     if (error) throw new Error(error.message);

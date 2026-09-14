@@ -16,7 +16,7 @@
     "appId": "dev.umbra.desktop",
     "productName": "Umbra",
     "directories": { "output": "dist" },
-    "files": ["main.cjs", "preload.cjs", "launcher.cjs", "splash.html"],
+    "files": ["main.cjs", "preload.cjs", "launcher.cjs", "fingerprint-preload.cjs"],
     "win": {
       "target": ["nsis", "portable"],
       "artifactName": "Umbra-${version}-${arch}.${ext}"

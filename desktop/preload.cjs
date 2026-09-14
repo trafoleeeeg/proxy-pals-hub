@@ -1,8 +1,9 @@
 const { contextBridge, ipcRenderer } = require("electron");
+const { version } = require("./package.json");
 
 contextBridge.exposeInMainWorld("umbra", {
   isDesktop: true,
-  version: "0.2.1",
+  version,
   platform: process.platform,
   launchProfile: (payload) => ipcRenderer.invoke("umbra:launch-profile", payload),
   closeProfile: (profileId) => ipcRenderer.invoke("umbra:close-profile", profileId),
@@ -15,6 +16,7 @@ contextBridge.exposeInMainWorld("umbra", {
     ipcRenderer.on("umbra:auth-tokens", handler);
     return () => ipcRenderer.removeListener("umbra:auth-tokens", handler);
   },
+  notifyReady: () => ipcRenderer.send("umbra:renderer-ready"),
 
   // Обновление в один клик.
   appVersion: () => ipcRenderer.invoke("umbra:app-version"),

@@ -129,11 +129,47 @@ function RootShell({ children }: { children: ReactNode }) {
 function AuthSync() {
   const router = useRouter();
 
+  function safeDesktopCallback(value: string | null) {
+    if (!value) return null;
+    try {
+      const url = new URL(value);
+      if (
+        url.protocol !== "http:" ||
+        url.hostname !== "127.0.0.1" ||
+        !url.port ||
+        url.pathname !== "/cb" ||
+        !/^[a-f0-9]{48}$/.test(url.searchParams.get("state") ?? "")
+      ) {
+        return null;
+      }
+      return url;
+    } catch {
+      return null;
+    }
+  }
+
+  function handSessionToDesktop(session: { access_token: string; refresh_token: string } | null) {
+    if (!session || typeof window === "undefined" || window.umbra) return false;
+    let saved: string | null = null;
+    try {
+      saved = sessionStorage.getItem("umbra:desktop-callback");
+    } catch {
+      return false;
+    }
+    const callback = safeDesktopCallback(saved);
+    if (!callback) return false;
+    callback.searchParams.set("access_token", session.access_token);
+    callback.searchParams.set("refresh_token", session.refresh_token);
+    sessionStorage.removeItem("umbra:desktop-callback");
+    window.location.replace(callback.toString());
+    return true;
+  }
+
   // Настольное приложение: токены, полученные из системного браузера.
   useEffect(() => {
     const bridge = typeof window !== "undefined" ? window.umbra : null;
     if (!bridge) return;
-    return bridge.onAuthTokens(async (tokens) => {
+    const unsubscribe = bridge.onAuthTokens(async (tokens) => {
       const { error } = await supabase.auth.setSession(tokens);
       if (error) {
         toast.error("Не удалось перенести вход из браузера");
@@ -142,11 +178,30 @@ function AuthSync() {
       toast.success("Вход выполнен");
       window.location.replace("/app");
     });
+    bridge.notifyReady();
+    return unsubscribe;
+  }, []);
+
+  // Системный браузер: сохраняем локальный callback до OAuth, потому что Google
+  // может вернуть только на origin без исходных query-параметров.
+  useEffect(() => {
+    if (typeof window === "undefined" || window.umbra) return;
+    const params = new URLSearchParams(window.location.search);
+    const callback = safeDesktopCallback(params.get("cb"));
+    if (params.get("desktop") === "1" && callback) {
+      try {
+        sessionStorage.setItem("umbra:desktop-callback", callback.toString());
+      } catch {
+        return;
+      }
+    }
+    void supabase.auth.getSession().then(({ data }) => handSessionToDesktop(data.session));
   }, []);
 
   useEffect(() => {
-    const { data } = supabase.auth.onAuthStateChange((event) => {
+    const { data } = supabase.auth.onAuthStateChange((event, session) => {
       if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;
+      if (event === "SIGNED_IN" && handSessionToDesktop(session)) return;
       // Браузер, открытый настольным приложением: сессию отдаёт страница /auth.
       if (window.location.search.includes("desktop=1")) return;
       router.invalidate();

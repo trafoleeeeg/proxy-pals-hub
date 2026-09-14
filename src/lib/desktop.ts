@@ -14,6 +14,7 @@ export type UmbraBridge = {
   openAuth: () => Promise<{ ok: boolean }>;
   openExternal: (url: string) => Promise<{ ok: boolean }>;
   onAuthTokens: (cb: (t: { access_token: string; refresh_token: string }) => void) => () => void;
+  notifyReady: () => void;
   appVersion: () => Promise<string>;
   checkUpdate: () => Promise<{ ok: boolean; version?: string | null; current?: string; error?: string }>;
   downloadUpdate: () => Promise<{ ok: boolean; error?: string }>;

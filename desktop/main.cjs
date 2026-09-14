@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, session, shell } = require("electron");
 const path = require("node:path");
 const http = require("node:http");
+const { randomBytes } = require("node:crypto");
 const { autoUpdater } = require("electron-updater");
 const { launchProfileWindow, closeProfileWindow } = require("./launcher.cjs");
 
@@ -11,6 +12,8 @@ const PROTOCOL = "umbra";
 let mainWindow = null;
 let pendingTokens = null;
 let callbackPort = null;
+let callbackState = null;
+let rendererReady = false;
 
 /* ---------- локальный приёмник токенов из системного браузера ---------- */
 
@@ -28,10 +31,16 @@ function startCallbackServer() {
         res.writeHead(404).end();
         return;
       }
+      if (!callbackState || url.searchParams.get("state") !== callbackState) {
+        res.writeHead(403, { "Content-Type": "text/html; charset=utf-8" });
+        res.end("<meta charset='utf-8'>Недействительный запрос входа.");
+        return;
+      }
       const access_token = url.searchParams.get("access_token");
       const refresh_token = url.searchParams.get("refresh_token");
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       if (access_token && refresh_token) {
+        callbackState = null;
         deliverTokens({ access_token, refresh_token });
         res.end(
           "<meta charset='utf-8'><body style='font:16px sans-serif;background:#111312;color:#e8ece9;display:flex;align-items:center;justify-content:center;height:100vh'>Вход выполнен — вернитесь в приложение Umbra. Эту вкладку можно закрыть.</body>",
@@ -49,7 +58,7 @@ function startCallbackServer() {
 }
 
 function deliverTokens(tokens) {
-  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isLoading()) {
+  if (mainWindow && !mainWindow.isDestroyed() && rendererReady) {
     mainWindow.webContents.send("umbra:auth-tokens", tokens);
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.focus();
@@ -122,11 +131,8 @@ function createWindow() {
 
   mainWindow.loadURL(APP_URL);
 
-  mainWindow.webContents.on("did-finish-load", () => {
-    if (pendingTokens) {
-      mainWindow.webContents.send("umbra:auth-tokens", pendingTokens);
-      pendingTokens = null;
-    }
+  mainWindow.webContents.on("did-start-loading", () => {
+    rendererReady = false;
   });
 
   // Любые внешние ссылки (включая вход через Google) открываем в системном браузере,
@@ -188,9 +194,20 @@ ipcMain.handle("umbra:close-profile", async (_e, profileId) => {
   return { ok: true };
 });
 
+ipcMain.on("umbra:renderer-ready", () => {
+  rendererReady = true;
+  if (pendingTokens && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("umbra:auth-tokens", pendingTokens);
+    pendingTokens = null;
+  }
+});
+
 ipcMain.handle("umbra:open-auth", async () => {
   if (!callbackPort) await startCallbackServer();
-  const cb = callbackPort ? `http://127.0.0.1:${callbackPort}/cb` : null;
+  callbackState = randomBytes(24).toString("hex");
+  const cb = callbackPort
+    ? `http://127.0.0.1:${callbackPort}/cb?state=${callbackState}`
+    : null;
   const url =
     `${BASE_URL}/auth?desktop=1` + (cb ? `&cb=${encodeURIComponent(cb)}` : "");
   await shell.openExternal(url);

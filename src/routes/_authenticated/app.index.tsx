@@ -15,6 +15,7 @@ import {
   launchProfile,
   closeProfile as closeProfileSession,
   heartbeatProfile,
+  saveProfileSession,
 } from "@/lib/session.functions";
 import { listProxies } from "@/lib/proxies.functions";
 import { desktop } from "@/lib/desktop";
@@ -60,6 +61,7 @@ function ProfilesPage() {
   const launchFn = useServerFn(launchProfile);
   const closeFn = useServerFn(closeProfileSession);
   const beatFn = useServerFn(heartbeatProfile);
+  const saveSessionFn = useServerFn(saveProfileSession);
 
   const [search, setSearch] = useState("");
   const [folder, setFolder] = useState<string>(ALL_FOLDERS);
@@ -121,8 +123,7 @@ function ProfilesPage() {
         await beatFn({ data: { profileId } }).catch(() => {});
         const snap = await b.profileCookies(profileId).catch(() => null);
         if (snap?.cookies) {
-          await closeFn({ data: { profileId, cookies: snap.cookies } }).catch(() => {});
-          await launchFn({ data: { profileId, device: b.platform } }).catch(() => {});
+          await saveSessionFn({ data: { profileId, cookies: snap.cookies } }).catch(() => {});
         }
       }
     }, 120_000);

@@ -112,7 +112,7 @@ function ProxiesPage() {
   });
 
   const checkMut = useMutation({
-    mutationFn: (id: string) => check({ data: { proxyId: id } }),
+    mutationFn: (id: string) => check({ data: { id } }),
     onSuccess: (r) => {
       if (r.ok) toast.success(`Работает · ${r.ip ?? ""} ${r.country ?? ""}`.trim());
       else toast.error(r.error ?? "Прокси не отвечает");
@@ -266,9 +266,9 @@ function ProxiesPage() {
                 </TableCell>
                 <TableCell className="mono text-xs">{p.country ?? "—"}</TableCell>
                 <TableCell>
-                  {p.last_status === "ok" ? (
+                  {p.last_check_ok === true ? (
                     <Badge className="bg-primary/15 text-primary">работает</Badge>
-                  ) : p.last_status ? (
+                  ) : p.last_check_ok === false ? (
                     <Badge variant="destructive">ошибка</Badge>
                   ) : (
                     <span className="text-xs text-muted-foreground">не проверялся</span>

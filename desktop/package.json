@@ -1,6 +1,6 @@
 {
   "name": "umbra-desktop",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "private": true,
   "description": "Umbra — управление антидетект-профилями",
   "main": "main.cjs",
@@ -18,8 +18,16 @@
   "build": {
     "appId": "dev.umbra.desktop",
     "productName": "Umbra",
-    "directories": { "output": "dist" },
-    "files": ["package.json", "main.cjs", "preload.cjs", "launcher.cjs", "fingerprint-preload.cjs"],
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "package.json",
+      "main.cjs",
+      "preload.cjs",
+      "launcher.cjs",
+      "fingerprint-preload.cjs"
+    ],
     "publish": [
       {
         "provider": "github",
@@ -30,11 +38,16 @@
     "protocols": [
       {
         "name": "Umbra",
-        "schemes": ["umbra"]
+        "schemes": [
+          "umbra"
+        ]
       }
     ],
     "win": {
-      "target": ["nsis", "portable"],
+      "target": [
+        "nsis",
+        "portable"
+      ],
       "artifactName": "Umbra-${version}-${arch}.${ext}"
     },
     "nsis": {

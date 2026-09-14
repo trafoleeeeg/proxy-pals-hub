@@ -18,6 +18,7 @@ import { Route as AuthenticatedAppIndexRouteImport } from './routes/_authenticat
 import { Route as AuthenticatedAppDesktopRouteImport } from './routes/_authenticated/app.desktop'
 import { Route as AuthenticatedAppProxiesRouteImport } from './routes/_authenticated/app.proxies'
 import { Route as AuthenticatedAppTeamRouteImport } from './routes/_authenticated/app.team'
+import { Route as ApiPublicAgentMeRouteImport } from './routes/api/public/agent/me'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -63,6 +64,11 @@ const AuthenticatedAppTeamRoute = AuthenticatedAppTeamRouteImport.update({
   path: '/team',
   getParentRoute: () => AuthenticatedAppRoute,
 } as any)
+const ApiPublicAgentMeRoute = ApiPublicAgentMeRouteImport.update({
+  id: '/api/public/agent/me',
+  path: '/api/public/agent/me',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -73,6 +79,7 @@ export interface FileRoutesByFullPath {
   '/app/proxies': typeof AuthenticatedAppProxiesRoute
   '/app/team': typeof AuthenticatedAppTeamRoute
   '/app/': typeof AuthenticatedAppIndexRoute
+  '/api/public/agent/me': typeof ApiPublicAgentMeRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -82,6 +89,7 @@ export interface FileRoutesByTo {
   '/app/proxies': typeof AuthenticatedAppProxiesRoute
   '/app/team': typeof AuthenticatedAppTeamRoute
   '/app': typeof AuthenticatedAppIndexRoute
+  '/api/public/agent/me': typeof ApiPublicAgentMeRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -94,6 +102,7 @@ export interface FileRoutesById {
   '/_authenticated/app/proxies': typeof AuthenticatedAppProxiesRoute
   '/_authenticated/app/team': typeof AuthenticatedAppTeamRoute
   '/_authenticated/app/': typeof AuthenticatedAppIndexRoute
+  '/api/public/agent/me': typeof ApiPublicAgentMeRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -106,6 +115,7 @@ export interface FileRouteTypes {
     | '/app/proxies'
     | '/app/team'
     | '/app/'
+    | '/api/public/agent/me'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -115,6 +125,7 @@ export interface FileRouteTypes {
     | '/app/proxies'
     | '/app/team'
     | '/app'
+    | '/api/public/agent/me'
   id:
     | '__root__'
     | '/'
@@ -126,6 +137,7 @@ export interface FileRouteTypes {
     | '/_authenticated/app/proxies'
     | '/_authenticated/app/team'
     | '/_authenticated/app/'
+    | '/api/public/agent/me'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -133,6 +145,7 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
   InviteTokenRoute: typeof InviteTokenRoute
+  ApiPublicAgentMeRoute: typeof ApiPublicAgentMeRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -200,6 +213,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAppTeamRouteImport
       parentRoute: typeof AuthenticatedAppRoute
     }
+    '/api/public/agent/me': {
+      id: '/api/public/agent/me'
+      path: '/api/public/agent/me'
+      fullPath: '/api/public/agent/me'
+      preLoaderRoute: typeof ApiPublicAgentMeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -236,6 +256,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
   InviteTokenRoute: InviteTokenRoute,
+  ApiPublicAgentMeRoute: ApiPublicAgentMeRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

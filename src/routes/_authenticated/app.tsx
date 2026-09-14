@@ -24,6 +24,7 @@ const NAV = [
   { to: "/app", label: "Профили", icon: "▢", exact: true },
   { to: "/app/proxies", label: "Прокси", icon: "◇", exact: false },
   { to: "/app/team", label: "Команда", icon: "◎", exact: false },
+  { to: "/app/agents", label: "Агенты", icon: "⬡", exact: false },
   { to: "/app/desktop", label: "Приложение", icon: "⬓", exact: false },
 ] as const;
 

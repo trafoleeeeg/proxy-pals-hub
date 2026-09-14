@@ -83,7 +83,8 @@ function ProxiesPage() {
           password: form.password || undefined,
           country: form.country || undefined,
         },
-      }),
+      });
+    },
     onSuccess: () => {
       toast.success("Прокси сохранён");
       setOpen(false);
@@ -102,7 +103,10 @@ function ProxiesPage() {
   });
 
   const importMut = useMutation({
-    mutationFn: () => bulk({ data: { teamId: ws!.teamId, text: importText } }),
+    mutationFn: () => {
+      if (!ws?.teamId) throw new Error("Команда ещё загружается, попробуйте через секунду");
+      return bulk({ data: { teamId: ws.teamId, text: importText } });
+    },
     onSuccess: (r) => {
       toast.success(`Добавлено прокси: ${r.added}`);
       setImportOpen(false);

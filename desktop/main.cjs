@@ -98,12 +98,7 @@ function handleDeepLink(url) {
   const access_token = params.get("access_token");
   const refresh_token = params.get("refresh_token");
   if (!access_token || !refresh_token) return;
-  const tokens = { access_token, refresh_token };
-  if (mainWindow && !mainWindow.webContents.isLoading()) {
-    mainWindow.webContents.send("umbra:auth-tokens", tokens);
-  } else {
-    pendingTokens = tokens;
-  }
+  deliverTokens({ access_token, refresh_token });
 }
 
 /* ---------- основное окно ---------- */

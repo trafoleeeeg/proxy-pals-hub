@@ -10,7 +10,10 @@ import {
   deleteProxy,
   importProxies,
   checkProxy,
+  proxyForCheck,
+  recordProxyCheck,
 } from "@/lib/proxies.functions";
+import { desktop } from "@/lib/desktop";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -47,6 +50,8 @@ function ProxiesPage() {
   const remove = useServerFn(deleteProxy);
   const bulk = useServerFn(importProxies);
   const check = useServerFn(checkProxy);
+  const forCheck = useServerFn(proxyForCheck);
+  const record = useServerFn(recordProxyCheck);
 
   const [open, setOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -117,7 +122,35 @@ function ProxiesPage() {
   });
 
   const checkMut = useMutation({
-    mutationFn: (id: string) => check({ data: { id } }),
+    mutationFn: async (id: string) => {
+      const b = desktop();
+      // В приложении проверяем сами — так работают и SOCKS5, и прокси с паролем.
+      if (b && typeof b.checkProxy === "function") {
+        const target = await forCheck({ data: { id } });
+        const r = await b.checkProxy({
+          id: target.id,
+          protocol: target.protocol,
+          host: target.host,
+          port: target.port,
+          username: target.username,
+          password: target.password,
+        });
+        const res = r.result ?? { ok: false, error: r.error ?? "Проверка не удалась" };
+        await record({
+          data: {
+            id,
+            ok: res.ok,
+            ip: res.ip,
+            country: res.country,
+            city: res.city,
+            latency: res.latency,
+            error: res.error,
+          },
+        });
+        return res;
+      }
+      return check({ data: { id } });
+    },
     onSuccess: (r) => {
       if (r.ok) toast.success(`Работает · ${r.ip ?? ""} ${r.country ?? ""}`.trim());
       else toast.error(r.error ?? "Прокси не отвечает");

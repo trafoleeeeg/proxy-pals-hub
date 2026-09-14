@@ -6,6 +6,7 @@ const {
   closeProfileWindow,
   snapshotProfileCookies,
 } = require("./launcher.cjs");
+const { checkProxy } = require("./proxy-check.cjs");
 
 const APP_URL = process.env.UMBRA_APP_URL || "https://proxy-pals-hub.lovable.app/app";
 
@@ -133,6 +134,14 @@ ipcMain.handle("umbra:close-profile", async (_e, profileId) => {
 ipcMain.handle("umbra:profile-cookies", async (_e, profileId) => {
   const cookies = await snapshotProfileCookies(profileId);
   return { ok: true, cookies };
+});
+
+ipcMain.handle("umbra:check-proxy", async (_e, payload) => {
+  try {
+    return { ok: true, result: await checkProxy(payload || {}) };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
 });
 
 ipcMain.handle("umbra:open-external", async (_e, url) => {

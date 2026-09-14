@@ -147,6 +147,58 @@ export const importProxies = createServerFn({ method: "POST" })
     return { added: rows.length };
   });
 
+/** Данные прокси для проверки внутри настольного приложения. */
+export const proxyForCheck = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { id: string }) => d)
+  .handler(async ({ data, context }) => {
+    const { data: proxy, error } = await context.supabase
+      .from("proxies")
+      .select("id, protocol, host, port, username, password_enc")
+      .eq("id", data.id)
+      .single();
+    if (error || !proxy) throw new Error("Прокси не найден");
+    const { decryptSecret } = await import("./crypto.server");
+    return {
+      id: proxy.id,
+      protocol: proxy.protocol,
+      host: proxy.host,
+      port: proxy.port,
+      username: proxy.username,
+      password: proxy.password_enc ? decryptSecret(proxy.password_enc) : "",
+    };
+  });
+
+/** Сохраняет результат проверки, сделанной в настольном приложении. */
+export const recordProxyCheck = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(
+    (d: {
+      id: string;
+      ok: boolean;
+      ip?: string | undefined;
+      country?: string | undefined;
+      city?: string | undefined;
+      latency?: number | undefined;
+      error?: string | undefined;
+    }) => d,
+  )
+  .handler(async ({ data, context }) => {
+    const { error } = await context.supabase
+      .from("proxies")
+      .update({
+        last_checked_at: new Date().toISOString(),
+        last_check_ok: data.ok,
+        last_check_ip: data.ip ?? null,
+        last_check_latency_ms: data.latency ?? null,
+        last_check_error: data.error ?? null,
+        ...(data.ok ? { country: data.country ?? null, city: data.city ?? null } : {}),
+      })
+      .eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
 /** Проверка прокси: реальный IP, страна, задержка. */
 export const checkProxy = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])

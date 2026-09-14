@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld("umbra", {
     return () => ipcRenderer.removeListener("umbra:profile-closed", handler);
   },
   openExternal: (url) => ipcRenderer.invoke("umbra:open-external", url),
+  checkProxy: (payload) => ipcRenderer.invoke("umbra:check-proxy", payload),
 
   // Обновление в один клик.
   appVersion: () => ipcRenderer.invoke("umbra:app-version"),

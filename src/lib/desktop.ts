@@ -23,6 +23,25 @@ export type UmbraBridge = {
   profileCookies: (profileId: string) => Promise<{ ok: boolean; cookies: string | null }>;
   onProfileClosed: (cb: (p: { profileId: string; cookies: string | null }) => void) => () => void;
   openExternal: (url: string) => Promise<{ ok: boolean }>;
+  checkProxy?: (payload: {
+    id: string;
+    protocol: string;
+    host: string;
+    port: number;
+    username: string | null;
+    password: string;
+  }) => Promise<{
+    ok: boolean;
+    error?: string;
+    result?: {
+      ok: boolean;
+      ip?: string;
+      country?: string;
+      city?: string;
+      latency?: number;
+      error?: string;
+    };
+  }>;
   appVersion: () => Promise<string>;
   checkUpdate: () => Promise<{ ok: boolean; version?: string | null; current?: string; error?: string }>;
   updateState: () => Promise<UpdateStatus>;

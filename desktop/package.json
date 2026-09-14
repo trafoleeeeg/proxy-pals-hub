@@ -1,12 +1,15 @@
 {
   "name": "umbra-desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Umbra — управление антидетект-профилями",
   "main": "main.cjs",
   "scripts": {
     "start": "electron .",
     "build:win": "electron-builder --win nsis portable --publish never"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
   },
   "devDependencies": {
     "electron": "^33.2.0",
@@ -17,13 +20,28 @@
     "productName": "Umbra",
     "directories": { "output": "dist" },
     "files": ["main.cjs", "preload.cjs", "launcher.cjs", "fingerprint-preload.cjs"],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "trafoleeeeg",
+        "repo": "proxy-pals-hub"
+      }
+    ],
+    "protocols": [
+      {
+        "name": "Umbra",
+        "schemes": ["umbra"]
+      }
+    ],
     "win": {
       "target": ["nsis", "portable"],
       "artifactName": "Umbra-${version}-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false
     }
   }
 }

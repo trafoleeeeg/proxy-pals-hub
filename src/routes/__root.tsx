@@ -129,6 +129,8 @@ function AuthSync() {
   useEffect(() => {
     const { data } = supabase.auth.onAuthStateChange((event) => {
       if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;
+      // Браузер, открытый настольным приложением: сессию отдаёт страница /auth.
+      if (window.location.search.includes("desktop=1")) return;
       router.invalidate();
       if (event === "SIGNED_IN") {
         let next = "/app";

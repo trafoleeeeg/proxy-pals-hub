@@ -121,6 +121,7 @@ export type Database = {
       browser_profiles: {
         Row: {
           cookies_enc: string | null
+          cookies_updated_at: string
           created_at: string
           created_by: string | null
           fingerprint: Json
@@ -135,6 +136,7 @@ export type Database = {
         }
         Insert: {
           cookies_enc?: string | null
+          cookies_updated_at?: string
           created_at?: string
           created_by?: string | null
           fingerprint?: Json
@@ -149,6 +151,7 @@ export type Database = {
         }
         Update: {
           cookies_enc?: string | null
+          cookies_updated_at?: string
           created_at?: string
           created_by?: string | null
           fingerprint?: Json
@@ -213,25 +216,31 @@ export type Database = {
       profile_locks: {
         Row: {
           acquired_at: string
+          device_id: string
           device_label: string | null
           expires_at: string
           heartbeat_at: string
+          lock_token: string
           profile_id: string
           user_id: string
         }
         Insert: {
           acquired_at?: string
+          device_id?: string
           device_label?: string | null
           expires_at?: string
           heartbeat_at?: string
+          lock_token?: string
           profile_id: string
           user_id: string
         }
         Update: {
           acquired_at?: string
+          device_id?: string
           device_label?: string | null
           expires_at?: string
           heartbeat_at?: string
+          lock_token?: string
           profile_id?: string
           user_id?: string
         }
@@ -439,7 +448,53 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      accept_team_invite: { Args: { _token: string }; Returns: string }
+      acquire_profile_lease: {
+        Args: {
+          _device_id: string
+          _device_label?: string
+          _profile_id: string
+        }
+        Returns: Json
+      }
+      bulk_mutate_profiles: {
+        Args: {
+          _changes?: Json
+          _operation: string
+          _profile_ids: string[]
+          _team_id: string
+        }
+        Returns: number
+      }
+      ensure_workspace: { Args: never; Returns: string }
+      force_profile_unlock: { Args: { _profile_id: string }; Returns: boolean }
+      import_profile_cookies: {
+        Args: { _cookies_enc: string; _profile_id: string }
+        Returns: string
+      }
+      mutate_profile_lease: {
+        Args: {
+          _cookies_enc?: string
+          _device_id?: string
+          _lock_token: string
+          _operation: string
+          _profile_id: string
+        }
+        Returns: Json
+      }
+      remove_team_member: {
+        Args: { _team_id: string; _user_id: string }
+        Returns: boolean
+      }
+      set_profiles_access: {
+        Args: {
+          _granted: boolean
+          _profile_ids: string[]
+          _team_id: string
+          _user_id: string
+        }
+        Returns: number
+      }
     }
     Enums: {
       app_role: "owner" | "member"

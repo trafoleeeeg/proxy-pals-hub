@@ -58,8 +58,8 @@ if (process.versions.electron) {
     });
     return ses;
   }
-  async function waitUntil(predicate) {
-    for (let index = 0; index < 100; index++) { if (predicate()) return; await new Promise((resolve) => setTimeout(resolve, 25)); }
+  async function waitUntil(predicate, attempts = 100) {
+    for (let index = 0; index < attempts; index++) { if (predicate()) return; await new Promise((resolve) => setTimeout(resolve, 25)); }
     throw new Error("Native fixture did not reach expected state");
   }
 
@@ -228,7 +228,12 @@ if (process.versions.electron) {
     assert.equal((await popup.webContents.executeJavaScript("firstDocument")).timezone, "Asia/Tokyo");
 
     await shell.webContents.executeJavaScript("document.getElementById('new').click()");
-    await waitUntil(() => runtime.getRunningProfile(ID).tabCount === 3);
+    try { await waitUntil(() => runtime.getRunningProfile(ID).tabCount === 3, 400); }
+    catch (failure) {
+      const profile = runtime.getRunningProfile(ID);
+      const toolbar = await shell.webContents.executeJavaScript("({error:document.querySelector('[role=alert]')?.textContent || '',tabs:document.querySelectorAll('[data-tab-id]').length})").catch(() => null);
+      throw new Error(`${failure.message}: ${JSON.stringify({ profile, toolbar })}`);
+    }
     const fresh = profileTabs(ses).find((view) => view !== win && view !== popup);
     const freshContents = fresh.webContents;
     await waitUntil(() => !fresh.webContents.isLoading());

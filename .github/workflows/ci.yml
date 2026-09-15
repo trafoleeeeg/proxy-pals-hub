@@ -37,9 +37,7 @@ jobs:
 
       - name: Зависимости клиента
         working-directory: desktop
-        env:
-          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
-        run: npm ci --ignore-scripts
+        run: npm ci
 
       - name: Тесты клиента
         working-directory: desktop

@@ -43,7 +43,10 @@ jobs:
 
       - name: Тесты клиента
         working-directory: desktop
-        run: npm test
+        run: |
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+          xvfb-run -a npm test
 
       - name: Проверка файлов приложения
         run: |

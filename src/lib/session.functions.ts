@@ -1,154 +1,66 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import type { Fingerprint } from "./fingerprint";
-
-/**
- * Функции для десктоп-клиента: выдача данных запуска, блокировка профиля,
- * сохранение cookies. Пароли и cookies расшифровываются только здесь,
- * после проверки доступа.
- */
-
-const LOCK_MINUTES = 5;
+import { closeSessionSchema, launchSchema, leaseSchema, profileIdSchema, saveSessionSchema } from "./server-validation";
+import { callServerRpc, requireProfile } from "./server-db";
+import { parseCookieImport } from "./server-cookies";
+import { classifyTerminalClose, prepareSessionLaunch, requireLeaseToken } from "./server-session";
 
 export const launchProfile = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((d: { profileId: string; device?: string }) => d)
+  .middleware([requireSupabaseAuth]).inputValidator(launchSchema)
   .handler(async ({ data, context }) => {
-    const { supabase, userId } = context;
-
-    const { data: profile, error } = await supabase
-      .from("browser_profiles")
-      .select("id, team_id, name, fingerprint, cookies_enc, proxy_id")
-      .eq("id", data.profileId)
-      .single();
-    if (error || !profile) throw new Error("Нет доступа к этому профилю");
-
-    const now = Date.now();
-    const { data: lock } = await supabase
-      .from("profile_locks")
-      .select("user_id, expires_at")
-      .eq("profile_id", profile.id)
-      .maybeSingle();
-    if (lock && lock.user_id !== userId && new Date(lock.expires_at).getTime() > now) {
-      throw new Error("Профиль уже открыт другим участником команды");
-    }
-
-    const expiresAt = new Date(now + LOCK_MINUTES * 60_000).toISOString();
-    await supabase.from("profile_locks").upsert(
-      {
-        profile_id: profile.id,
-        user_id: userId,
-        device_label: data.device ?? null,
-        heartbeat_at: new Date().toISOString(),
-        expires_at: expiresAt,
-      },
-      { onConflict: "profile_id" },
-    );
-
-    let proxy: {
-      protocol: string;
-      host: string;
-      port: number;
-      username: string | null;
-      password: string;
-    } | null = null;
-
-    if (profile.proxy_id) {
-      const { data: p } = await supabase
-        .from("proxies")
-        .select("protocol, host, port, username, password_enc")
-        .eq("id", profile.proxy_id)
-        .maybeSingle();
-      if (p) {
-        const { decryptSecret } = await import("./crypto.server");
-        proxy = {
-          protocol: p.protocol,
-          host: p.host,
-          port: p.port,
-          username: p.username,
-          password: decryptSecret(p.password_enc),
-        };
-      }
-    }
-
     const { decryptSecret } = await import("./crypto.server");
-    const cookies = profile.cookies_enc ? decryptSecret(profile.cookies_enc) : "[]";
-
-    await supabase.from("audit_log").insert({
-      team_id: profile.team_id,
-      user_id: userId,
-      action: "profile.launched",
-      target_type: "profile",
-      target_id: profile.id,
-      meta: { device: data.device ?? null },
-    });
-
-    return {
-      profileId: profile.id,
-      name: profile.name,
-      fingerprint: profile.fingerprint as unknown as Fingerprint,
-      proxy,
-      cookies,
-      lockExpiresAt: expiresAt,
-    };
+    return prepareSessionLaunch(context, data, decryptSecret);
   });
 
-/** Промежуточное сохранение сессий сайтов без снятия блокировки. */
 export const saveProfileSession = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((d: { profileId: string; cookies: string }) => d)
+  .middleware([requireSupabaseAuth]).inputValidator(saveSessionSchema)
   .handler(async ({ data, context }) => {
+    const lockToken = requireLeaseToken(data.lockToken);
+    const cookies = parseCookieImport(data.cookies);
     const { encryptSecret } = await import("./crypto.server");
-    const { error } = await context.supabase
-      .from("browser_profiles")
-      .update({ cookies_enc: encryptSecret(data.cookies) })
-      .eq("id", data.profileId);
-    if (error) throw new Error(error.message);
-    return { ok: true };
+    const result = await callServerRpc(context.supabase, "mutate_profile_lease", {
+      _profile_id: data.profileId, _lock_token: lockToken, _operation: "save",
+      _cookies_enc: encryptSecret(JSON.stringify(cookies)), _device_id: data.deviceId ?? null,
+    });
+    return { ok: true, cookiesUpdatedAt: result.cookiesUpdatedAt };
   });
 
 export const heartbeatProfile = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((d: { profileId: string }) => d)
+  .middleware([requireSupabaseAuth]).inputValidator(leaseSchema)
   .handler(async ({ data, context }) => {
-    const expiresAt = new Date(Date.now() + LOCK_MINUTES * 60_000).toISOString();
-    await context.supabase
-      .from("profile_locks")
-      .update({ heartbeat_at: new Date().toISOString(), expires_at: expiresAt })
-      .eq("profile_id", data.profileId)
-      .eq("user_id", context.userId);
-    return { expiresAt };
+    const result = await callServerRpc(context.supabase, "mutate_profile_lease", {
+      _profile_id: data.profileId, _lock_token: requireLeaseToken(data.lockToken), _operation: "heartbeat",
+      _cookies_enc: null, _device_id: data.deviceId ?? null,
+    });
+    return { expiresAt: result.expiresAt };
   });
 
 export const closeProfile = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((d: { profileId: string; cookies?: string }) => d)
+  .middleware([requireSupabaseAuth]).inputValidator(closeSessionSchema)
   .handler(async ({ data, context }) => {
-    const { supabase, userId } = context;
-    if (typeof data.cookies === "string") {
+    const lockToken = requireLeaseToken(data.lockToken);
+    let encrypted: string | null = null;
+    if (data.cookies !== undefined) {
+      const cookies = parseCookieImport(data.cookies);
       const { encryptSecret } = await import("./crypto.server");
-      await supabase
-        .from("browser_profiles")
-        .update({ cookies_enc: encryptSecret(data.cookies) })
-        .eq("id", data.profileId);
+      encrypted = encryptSecret(JSON.stringify(cookies));
     }
-    await supabase
-      .from("profile_locks")
-      .delete()
-      .eq("profile_id", data.profileId)
-      .eq("user_id", userId);
-    return { ok: true };
+    try {
+      const result = await callServerRpc(context.supabase, "mutate_profile_lease", {
+        _profile_id: data.profileId, _lock_token: lockToken, _operation: "close", _cookies_enc: encrypted, _device_id: data.deviceId ?? null,
+      });
+      return { ok: true as const, cookiesUpdatedAt: result.cookiesUpdatedAt };
+    } catch (error) {
+      const terminal = classifyTerminalClose(error);
+      if (!terminal) throw error;
+      return { ok: false as const, terminal, cookiesUpdatedAt: null };
+    }
   });
 
-/** Принудительно снять блокировку — только владелец команды. */
 export const forceUnlock = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((d: { profileId: string }) => d)
+  .middleware([requireSupabaseAuth]).inputValidator(profileIdSchema)
   .handler(async ({ data, context }) => {
-    const { error } = await context.supabase
-      .from("profile_locks")
-      .delete()
-      .eq("profile_id", data.profileId);
-    if (error) throw new Error(error.message);
+    await requireProfile(context, data.profileId, true);
+    await callServerRpc(context.supabase, "force_profile_unlock", { _profile_id: data.profileId });
     return { ok: true };
   });

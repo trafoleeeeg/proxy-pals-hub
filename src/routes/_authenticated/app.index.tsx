@@ -1,542 +1,171 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Copy, Cookie, FolderInput, Pencil, Play, Plus, RefreshCw, Square, Trash2, UserPlus, X } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "@/lib/useWorkspace";
-import {
-  listProfiles,
-  saveProfile,
-  deleteProfile,
-  cloneProfile,
-  bulkCreateProfiles,
-} from "@/lib/profiles.functions";
-import {
-  launchProfile,
-  closeProfile as closeProfileSession,
-  heartbeatProfile,
-  saveProfileSession,
-} from "@/lib/session.functions";
+import { listProfiles, saveProfile, cloneProfile, bulkCreateProfiles } from "@/lib/profiles.functions";
 import { listProxies } from "@/lib/proxies.functions";
-import { desktop } from "@/lib/desktop";
+import { useDesktopProfileLifecycle } from "@/hooks/useDesktopProfileLifecycle";
 import { generateFingerprint, describeFingerprint, type Fingerprint } from "@/lib/fingerprint";
+import { ProfileFingerprint } from "@/components/profile-fingerprint";
+import { ProfileCookies } from "@/components/profile-cookies";
+import { ProfileBulkDialog, type BulkAction } from "@/components/profile-bulk";
+import { fingerprintError, profileFingerprintPayload, splitTags, toggleVisibleSelection } from "@/components/profile-model";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-export const Route = createFileRoute("/_authenticated/app/")({
-  component: ProfilesPage,
-});
+export const Route = createFileRoute("/_authenticated/app/")({ component: ProfilesPage });
+type Edit = { id?: string; name: string; folder: string; tags: string; notes: string; proxyId: string; fingerprint: Fingerprint };
+const ALL = "__all__";
 
-const NO_PROXY = "none";
-const ALL_FOLDERS = "__all__";
-
-function ProfilesPage() {
+export function ProfilesPage() {
   const { data: ws } = useWorkspace();
+  return <ProfilesWorkspace key={ws?.teamId ?? "loading"} />;
+}
+
+function ProfilesWorkspace() {
+  const workspace = useWorkspace();
+  const ws = workspace.data;
+  const owner = ws?.role === "owner";
   const qc = useQueryClient();
   const listFn = useServerFn(listProfiles);
   const saveFn = useServerFn(saveProfile);
-  const delFn = useServerFn(deleteProfile);
   const cloneFn = useServerFn(cloneProfile);
-  const bulkFn = useServerFn(bulkCreateProfiles);
+  const createMany = useServerFn(bulkCreateProfiles);
   const proxiesFn = useServerFn(listProxies);
-  const launchFn = useServerFn(launchProfile);
-  const closeFn = useServerFn(closeProfileSession);
-  const beatFn = useServerFn(heartbeatProfile);
-  const saveSessionFn = useServerFn(saveProfileSession);
-
+  const runtime = useDesktopProfileLifecycle();
   const [search, setSearch] = useState("");
-  const [folder, setFolder] = useState<string>(ALL_FOLDERS);
-  const [open, setOpen] = useState(false);
+  const [folder, setFolder] = useState(ALL);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [action, setAction] = useState<{ mode: BulkAction; ids: string[] } | null>(null);
+  const [cookiesId, setCookiesId] = useState<string | null>(null);
+  const [editing, setEditing] = useState<Edit | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
-  const [running, setRunning] = useState<string[]>([]);
   const [bulkForm, setBulkForm] = useState({ prefix: "Профиль", count: "10", folder: "" });
-  const [editing, setEditing] = useState<{
-    id?: string;
-    name: string;
-    folder: string;
-    tags: string;
-    notes: string;
-    proxyId: string;
-    fingerprint: Fingerprint;
-  } | null>(null);
-
-  const runningRef = useRef<string[]>([]);
-  runningRef.current = running;
-
-  const profiles = useQuery({
-    queryKey: ["profiles", ws?.teamId],
-    queryFn: () => listFn({ data: { teamId: ws!.teamId } }),
-    enabled: !!ws?.teamId,
-    refetchInterval: 20_000,
-  });
-
-  const proxies = useQuery({
-    queryKey: ["proxies", ws?.teamId],
-    queryFn: () => proxiesFn({ data: { teamId: ws!.teamId } }),
-    enabled: !!ws?.teamId,
-  });
-
-  const invalidate = () => qc.invalidateQueries({ queryKey: ["profiles"] });
-
-  // Профиль закрыт в приложении — сохраняем сессии сайтов и снимаем блокировку.
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const profiles = useQuery({ queryKey: ["profiles", ws?.teamId], queryFn: () => listFn({ data: { teamId: ws!.teamId } }), enabled: !!ws, refetchInterval: 20_000 });
+  const proxies = useQuery({ queryKey: ["proxies", ws?.teamId], queryFn: () => proxiesFn({ data: { teamId: ws!.teamId } }), enabled: !!ws });
+  const running = new Set(runtime.running.map((p) => p.profileId));
+  const pending = new Set([...runtime.pending, ...runtime.busy]);
+  const locked = (id: string) => running.has(id) || pending.has(id) || !!profiles.data?.find((p) => p.id === id)?.lock;
+  const folders = useMemo(() => [...new Set((profiles.data ?? []).map((p) => p.folder).filter(Boolean))].sort(), [profiles.data]);
+  const rows = (profiles.data ?? []).filter((p) => (folder === ALL || p.folder === folder) && (p.name + " " + p.folder + " " + p.tags.join(" ")).toLowerCase().includes(search.toLowerCase()));
+  const visibleIds = rows.map((p) => p.id);
+  const visibleSelected = visibleIds.filter((id) => selected.includes(id)).length;
+  const cookiesProfile = profiles.data?.find((p) => p.id === cookiesId);
   useEffect(() => {
-    const b = desktop();
-    if (!b) return;
-    return b.onProfileClosed(async ({ profileId, cookies }) => {
-      try {
-        await closeFn({ data: { profileId, ...(cookies ? { cookies } : {}) } });
-        toast.success("Сессии профиля сохранены");
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Не удалось сохранить сессии профиля");
-      }
-      setRunning((r) => r.filter((id) => id !== profileId));
-      invalidate();
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Пока профиль открыт — держим блокировку и периодически сохраняем сессии.
-  useEffect(() => {
-    const b = desktop();
-    if (!b) return;
-    const timer = setInterval(async () => {
-      for (const profileId of runningRef.current) {
-        await beatFn({ data: { profileId } }).catch(() => {});
-        const snap = await b.profileCookies(profileId).catch(() => null);
-        if (snap?.cookies) {
-          await saveSessionFn({ data: { profileId, cookies: snap.cookies } }).catch(() => {});
-        }
-      }
-    }, 120_000);
-    return () => clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const saveMut = useMutation({
-    mutationFn: () =>
-      saveFn({
-        data: {
-          id: editing?.id,
-          teamId: ws!.teamId,
-          name: editing!.name,
-          folder: editing!.folder,
-          tags: editing!.tags
-            .split(",")
-            .map((t) => t.trim())
-            .filter(Boolean),
-          notes: editing!.notes,
-          proxyId: editing!.proxyId === NO_PROXY ? null : editing!.proxyId,
-          fingerprint: editing!.fingerprint,
-        },
-      }),
-    onSuccess: () => {
-      toast.success("Профиль сохранён");
-      setOpen(false);
-      setEditing(null);
-      invalidate();
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  const bulkMut = useMutation({
-    mutationFn: () => {
-      const count = Math.min(Number(bulkForm.count) || 0, 200);
-      return bulkFn({
-        data: {
-          teamId: ws!.teamId,
-          prefix: bulkForm.prefix,
-          count,
-          folder: bulkForm.folder,
-          fingerprints: Array.from({ length: count }, () => generateFingerprint()),
-        },
-      });
-    },
-    onSuccess: (r) => {
-      toast.success(`Создано профилей: ${r.added}`);
-      setBulkOpen(false);
-      invalidate();
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  async function start(profileId: string) {
-    const b = desktop();
-    if (!b) {
-      toast.error("Запуск профиля доступен в приложении Umbra для Windows");
-      return;
-    }
-    try {
-      const data = await launchFn({ data: { profileId, device: b.platform } });
-      const r = await b.launchProfile({
-        profileId: data.profileId,
-        name: data.name,
-        fingerprint: data.fingerprint,
-        proxy: data.proxy,
-        cookies: data.cookies,
-      });
-      if (!r.ok) throw new Error(r.error || "Не удалось открыть профиль");
-      setRunning((list) => [...new Set([...list, profileId])]);
-      invalidate();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Не удалось запустить профиль");
-    }
-  }
-
-  async function stop(profileId: string) {
-    const b = desktop();
-    if (!b) return;
-    await b.closeProfile(profileId);
-  }
-
-  const proxyLabel = useMemo(() => {
-    const map = new Map((proxies.data ?? []).map((p) => [p.id, `${p.label} (${p.host})`]));
-    return (id: string | null) => (id ? (map.get(id) ?? "—") : "—");
-  }, [proxies.data]);
-
-  const folders = useMemo(() => {
-    const set = new Set((profiles.data ?? []).map((p) => p.folder).filter(Boolean));
-    return [...set].sort();
+    if (!profiles.data) return;
+    const ids = new Set(profiles.data.map((p) => p.id));
+    setSelected((current) => current.filter((id) => ids.has(id)));
   }, [profiles.data]);
 
-  const rows = (profiles.data ?? [])
-    .filter((p) => folder === ALL_FOLDERS || p.folder === folder)
-    .filter((p) =>
-      (p.name + p.folder + p.tags.join(" ")).toLowerCase().includes(search.toLowerCase()),
-    );
-
-  function openNew() {
-    const proxy = proxies.data?.[0];
-    setEditing({
-      name: `Профиль ${(profiles.data?.length ?? 0) + 1}`,
-      folder: folder === ALL_FOLDERS ? "" : folder,
-      tags: "",
-      notes: "",
-      proxyId: NO_PROXY,
-      fingerprint: generateFingerprint(proxy?.country ?? undefined),
-    });
-    setOpen(true);
+  function refresh() { void qc.invalidateQueries({ queryKey: ["profiles"] }); void qc.invalidateQueries({ queryKey: ["team"] }); }
+  async function perform(key: string, operation: () => Promise<unknown>, onSuccess?: () => void) {
+    if (busy) return;
+    setBusy(key); setError(null);
+    try { await operation(); onSuccess?.(); refresh(); }
+    catch { setError("Операция не выполнена. Проверьте поля, права доступа, блокировки и подключение."); }
+    finally { setBusy(null); }
   }
+  function save() {
+    if (!ws || !owner || !editing || !editing.name.trim() || fingerprintError(editing.fingerprint) || (editing.id && locked(editing.id))) return;
+    void perform("save", () => saveFn({ data: { ...editing, teamId: ws.teamId, fingerprint: profileFingerprintPayload(editing.fingerprint), tags: splitTags(editing.tags), proxyId: editing.proxyId === "none" ? null : editing.proxyId } }), () => setEditing(null));
+  }
+  const count = Number(bulkForm.count);
+  const validCount = Number.isInteger(count) && count >= 1 && count <= 200;
+  function bulkCreate() {
+    if (!ws || !owner || !validCount || !bulkForm.prefix.trim()) return;
+    void perform("create", () => createMany({ data: { teamId: ws.teamId, prefix: bulkForm.prefix, count, folder: bulkForm.folder, fingerprints: Array.from({ length: count }, () => generateFingerprint()) } }), () => setBulkOpen(false));
+  }
+  function newProfile() { setError(null); setEditing({ name: "Профиль " + ((profiles.data?.length ?? 0) + 1), folder: folder === ALL ? "" : folder, tags: "", notes: "", proxyId: "none", fingerprint: generateFingerprint() }); }
 
-  return (
-    <div className="flex gap-6">
-      <div className="hidden w-48 shrink-0 lg:block">
-        <p className="mono px-2 text-[11px] uppercase tracking-wide text-muted-foreground">Папки</p>
-        <div className="mt-2 space-y-0.5">
-          {[{ id: ALL_FOLDERS, label: "Все профили" }, ...folders.map((f) => ({ id: f, label: f }))].map(
-            (f) => (
-              <button
-                key={f.id}
-                type="button"
-                onClick={() => setFolder(f.id)}
-                className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
-                  folder === f.id
-                    ? "bg-secondary text-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <span className="truncate">{f.label}</span>
-                <span className="mono text-[11px]">
-                  {f.id === ALL_FOLDERS
-                    ? (profiles.data ?? []).length
-                    : (profiles.data ?? []).filter((p) => p.folder === f.id).length}
-                </span>
-              </button>
-            ),
-          )}
-        </div>
+  if (workspace.isPending) return <p role="status" className="text-sm text-muted-foreground">Загрузка рабочего пространства…</p>;
+  if (workspace.isError) return <p role="alert" className="text-sm text-destructive">Не удалось загрузить команду. <Button variant="outline" onClick={() => workspace.refetch()}>Повторить</Button></p>;
+
+  return <div className="space-y-4">
+    <div className="flex flex-wrap items-center gap-3">
+      <h1 className="text-2xl font-semibold">Профили <span className="text-sm font-normal text-muted-foreground">{profiles.data?.length ?? 0}</span></h1>
+      <div className="ml-auto flex flex-wrap gap-2">
+        <Button size="icon" variant="outline" title="Обновить список" aria-label="Обновить список" disabled={profiles.isFetching} onClick={() => profiles.refetch()}><RefreshCw className={profiles.isFetching ? "size-4 animate-spin" : "size-4"} /></Button>
+        {owner && <><Button variant="outline" disabled={!!busy} onClick={() => { setError(null); setBulkOpen(true); }}><Plus className="size-4" />Создать пачкой</Button><Button disabled={!!busy} onClick={newProfile}><Plus className="size-4" />Новый профиль</Button></>}
       </div>
-
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold">Профили</h1>
-            <p className="text-sm text-muted-foreground">
-              Сессии сайтов сохраняются в профиль — команда продолжает работу с того же места.
-            </p>
-          </div>
-          <div className="ml-auto flex gap-2">
-            <Input
-              placeholder="Поиск"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-48"
-            />
-            <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
-              <DialogTrigger asChild>
-                <Button variant="outline">Создать пачкой</Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Создать несколько профилей</DialogTitle>
-                </DialogHeader>
-                <div className="grid gap-4">
-                  <div className="space-y-2">
-                    <Label>Название-основа</Label>
-                    <Input
-                      value={bulkForm.prefix}
-                      onChange={(e) => setBulkForm({ ...bulkForm, prefix: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Сколько (до 200)</Label>
-                    <Input
-                      inputMode="numeric"
-                      value={bulkForm.count}
-                      onChange={(e) => setBulkForm({ ...bulkForm, count: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Папка</Label>
-                    <Input
-                      value={bulkForm.folder}
-                      onChange={(e) => setBulkForm({ ...bulkForm, folder: e.target.value })}
-                    />
-                  </div>
-                </div>
-                <DialogFooter>
-                  <Button onClick={() => bulkMut.mutate()} disabled={bulkMut.isPending}>
-                    Создать
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-            <Button onClick={openNew}>Новый профиль</Button>
-          </div>
-        </div>
-
-        <div className="mt-6 overflow-hidden rounded-xl border border-border bg-card">
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead className="w-10" />
-                <TableHead>Название</TableHead>
-                <TableHead>Папка</TableHead>
-                <TableHead>Прокси</TableHead>
-                <TableHead>Отпечаток</TableHead>
-                <TableHead>Состояние</TableHead>
-                <TableHead />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((p) => {
-                const isRunning = running.includes(p.id);
-                return (
-                  <TableRow key={p.id}>
-                    <TableCell>
-                      <span
-                        className={`block h-2 w-2 rounded-full ${
-                          isRunning ? "bg-primary" : p.lock ? "bg-warning" : "bg-success"
-                        }`}
-                      />
-                    </TableCell>
-                    <TableCell className="font-medium">
-                      {p.name}
-                      {p.tags.length > 0 && (
-                        <span className="ml-2 space-x-1">
-                          {p.tags.map((t) => (
-                            <Badge key={t} variant="outline" className="text-[10px]">
-                              {t}
-                            </Badge>
-                          ))}
-                        </span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {p.folder || "—"}
-                    </TableCell>
-                    <TableCell className="mono text-xs">{proxyLabel(p.proxy_id)}</TableCell>
-                    <TableCell className="mono text-xs text-muted-foreground">
-                      {describeFingerprint(p.fingerprint)}
-                    </TableCell>
-                    <TableCell>
-                      {isRunning ? (
-                        <Badge className="bg-primary/15 text-primary">открыт у вас</Badge>
-                      ) : p.lock ? (
-                        <Badge className="bg-warning/15 text-warning">занят</Badge>
-                      ) : (
-                        <Badge className="bg-success/15 text-success">свободен</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right whitespace-nowrap">
-                      {isRunning ? (
-                        <Button variant="outline" size="sm" onClick={() => stop(p.id)}>
-                          Закрыть
-                        </Button>
-                      ) : (
-                        <Button size="sm" disabled={!!p.lock} onClick={() => start(p.id)}>
-                          Старт
-                        </Button>
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setEditing({
-                            id: p.id,
-                            name: p.name,
-                            folder: p.folder,
-                            tags: p.tags.join(", "),
-                            notes: p.notes,
-                            proxyId: p.proxy_id ?? NO_PROXY,
-                            fingerprint: p.fingerprint,
-                          });
-                          setOpen(true);
-                        }}
-                      >
-                        Изменить
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() =>
-                          cloneFn({ data: { id: p.id } })
-                            .then(invalidate)
-                            .catch((e: Error) => toast.error(e.message))
-                        }
-                      >
-                        Копия
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() =>
-                          delFn({ data: { id: p.id } })
-                            .then(invalidate)
-                            .catch((e: Error) => toast.error(e.message))
-                        }
-                      >
-                        Удалить
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-              {!profiles.isLoading && rows.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={7} className="py-12 text-center text-sm text-muted-foreground">
-                    Профилей пока нет — создайте первый
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </div>
-      </div>
-
-      <Dialog
-        open={open}
-        onOpenChange={(v) => {
-          setOpen(v);
-          if (!v) setEditing(null);
-        }}
-      >
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>{editing?.id ? "Профиль" : "Новый профиль"}</DialogTitle>
-          </DialogHeader>
-          {editing && (
-            <div className="grid gap-4">
-              <div className="space-y-2">
-                <Label>Название</Label>
-                <Input
-                  value={editing.name}
-                  onChange={(e) => setEditing({ ...editing, name: e.target.value })}
-                />
-              </div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Папка</Label>
-                  <Input
-                    value={editing.folder}
-                    onChange={(e) => setEditing({ ...editing, folder: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Метки через запятую</Label>
-                  <Input
-                    value={editing.tags}
-                    onChange={(e) => setEditing({ ...editing, tags: e.target.value })}
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Прокси</Label>
-                <Select
-                  value={editing.proxyId}
-                  onValueChange={(v) => setEditing({ ...editing, proxyId: v })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Без прокси" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NO_PROXY}>Без прокси</SelectItem>
-                    {(proxies.data ?? []).map((p) => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {p.label} · {p.host}:{p.port}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Заметки</Label>
-                <Textarea
-                  rows={3}
-                  value={editing.notes}
-                  onChange={(e) => setEditing({ ...editing, notes: e.target.value })}
-                />
-              </div>
-              <div className="rounded-md border border-border bg-secondary/40 p-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">Отпечаток Windows</span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const country = (proxies.data ?? []).find(
-                        (p) => p.id === editing.proxyId,
-                      )?.country;
-                      setEditing({
-                        ...editing,
-                        fingerprint: generateFingerprint(country ?? undefined),
-                      });
-                    }}
-                  >
-                    Сгенерировать заново
-                  </Button>
-                </div>
-                <p className="mono mt-2 text-xs leading-relaxed text-muted-foreground">
-                  {describeFingerprint(editing.fingerprint)}
-                </p>
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button onClick={() => saveMut.mutate()} disabled={saveMut.isPending}>
-              Сохранить
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
-  );
+    <p className="text-xs text-muted-foreground">В облаке синхронизируются только cookies. Local Storage остаётся на этом компьютере.</p>
+    <div className="flex flex-wrap gap-2">
+      <Input aria-label="Поиск профилей" placeholder="Поиск по названию, папке и меткам" value={search} onChange={(e) => setSearch(e.target.value)} className="min-w-48 flex-1" />
+      <Select value={folder === ALL ? "all" : `folder:${folder}`} onValueChange={(value) => setFolder(value === "all" ? ALL : value.slice(7))}><SelectTrigger aria-label="Фильтр папки" className="w-48"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">Все папки</SelectItem><SelectItem value="folder:">Без папки</SelectItem>{folders.map((f) => <SelectItem key={f} value={`folder:${f}`}>{f}</SelectItem>)}</SelectContent></Select>
+    </div>
+    {selected.length > 0 && owner && <div className="flex flex-wrap items-center gap-2 border-y border-border bg-secondary/40 px-2 py-2">
+      <span className="text-sm">Выбрано: {selected.length}{selected.length > visibleSelected ? " · скрыто фильтром: " + (selected.length - visibleSelected) : ""}</span>
+      <Button variant="ghost" size="icon" title="Снять выбор" aria-label="Снять выбор" onClick={() => setSelected([])}><X className="size-4" /></Button>
+      <Button variant="outline" size="sm" disabled={!!busy} onClick={() => setAction({ mode: "edit", ids: [...selected] })}><Pencil className="size-4" />Изменить</Button>
+      <Button variant="outline" size="sm" disabled={!!busy} onClick={() => setAction({ mode: "move", ids: [...selected] })}><FolderInput className="size-4" />В папку</Button>
+      <Button variant="outline" size="sm" disabled={!!busy} onClick={() => setAction({ mode: "access", ids: [...selected] })}><UserPlus className="size-4" />Доступ</Button>
+      <Button variant="outline" size="icon" title="Удалить выбранные профили" aria-label="Удалить выбранные профили" disabled={!!busy} onClick={() => setAction({ mode: "delete", ids: [...selected] })}><Trash2 className="size-4 text-destructive" /></Button>
+    </div>}
+    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+    {profiles.isError && <p role="alert" className="text-sm text-destructive">Не удалось обновить профили. <Button size="sm" variant="outline" onClick={() => profiles.refetch()}>Повторить</Button></p>}
+    {proxies.isError && <p role="alert" className="text-sm text-warning">Прокси недоступны. <Button size="sm" variant="outline" onClick={() => proxies.refetch()}>Повторить</Button></p>}
+    <div className="overflow-x-auto border-y border-border">
+      <Table className="min-w-[850px]"><TableHeader><TableRow>
+        {owner && <TableHead className="w-10"><Checkbox aria-label="Выбрать видимые профили" disabled={!rows.length} checked={visibleSelected === 0 ? false : visibleSelected === rows.length ? true : "indeterminate"} onCheckedChange={(checked) => setSelected((current) => toggleVisibleSelection(current, visibleIds, checked === true))} /></TableHead>}
+        <TableHead>Название</TableHead><TableHead>Папка</TableHead><TableHead>Прокси</TableHead><TableHead>Отпечаток</TableHead><TableHead>Состояние</TableHead><TableHead className="text-right">Действия</TableHead>
+      </TableRow></TableHeader><TableBody>
+        {profiles.isPending && <TableRow><TableCell colSpan={owner ? 7 : 6} className="py-8 text-center" role="status">Загрузка профилей…</TableCell></TableRow>}
+        {rows.map((profile) => {
+          const active = running.has(profile.id);
+          const processing = runtime.busy.includes(profile.id);
+          const proxy = proxies.data?.find((p) => p.id === profile.proxy_id);
+          return <TableRow key={profile.id} data-state={selected.includes(profile.id) ? "selected" : undefined}>
+            {owner && <TableCell><Checkbox aria-label={"Выбрать " + profile.name} checked={selected.includes(profile.id)} onCheckedChange={(v) => setSelected((current) => toggleVisibleSelection(current, [profile.id], v === true))} /></TableCell>}
+            <TableCell className="max-w-60"><div className="break-words font-medium">{profile.name}</div><div className="mt-1 flex flex-wrap gap-1">{profile.tags.map((tag) => <Badge key={tag} variant="outline" className="max-w-40 break-all text-[10px]">{tag}</Badge>)}</div></TableCell>
+            <TableCell className="max-w-36 break-words text-xs text-muted-foreground">{profile.folder || "Без папки"}</TableCell>
+            <TableCell className="max-w-36 break-words text-xs">{profile.proxy_id ? (proxy?.label ?? "Недоступен") : "Без прокси"}</TableCell>
+            <TableCell className="max-w-48 text-xs text-muted-foreground">{describeFingerprint(profile.fingerprint)}</TableCell>
+            <TableCell><Badge variant="outline" className={active ? "text-primary" : profile.lock || pending.has(profile.id) ? "text-warning" : "text-success"}>{processing ? "выполняется" : active ? "открыт у вас" : runtime.pending.includes(profile.id) ? "синхронизация" : profile.lock ? "занят" : "свободен"}</Badge></TableCell>
+            <TableCell><div className="flex items-center justify-end gap-1">
+              <Button variant={active ? "outline" : "default"} size="icon" title={active ? "Закрыть профиль" : runtime.available ? "Запустить профиль" : "Запуск в приложении Windows"} aria-label={(active ? "Закрыть " : "Запустить ") + profile.name} disabled={!runtime.available || !runtime.ready || runtime.restoring || processing || (!active && locked(profile.id))} onClick={() => { void (active ? runtime.stop(profile.id) : runtime.start(profile.id)).catch((e: Error) => toast.error(e.message)); }}>{processing ? <RefreshCw className="size-4 animate-spin" /> : active ? <Square className="size-4" /> : <Play className="size-4" />}</Button>
+              {owner && <>
+                <Button variant="ghost" size="icon" title="Изменить профиль" aria-label={"Изменить " + profile.name} disabled={!!busy || locked(profile.id)} onClick={() => { setError(null); setEditing({ id: profile.id, name: profile.name, folder: profile.folder, tags: profile.tags.join(", "), notes: profile.notes, proxyId: profile.proxy_id ?? "none", fingerprint: profile.fingerprint }); }}><Pencil className="size-4" /></Button>
+                <Button variant="ghost" size="icon" title="Создать копию" aria-label={"Копия " + profile.name} disabled={!!busy} onClick={() => perform(profile.id, () => cloneFn({ data: { id: profile.id } }))}><Copy className="size-4" /></Button>
+                <Button variant="ghost" size="icon" title="Cookies" aria-label={"Cookies " + profile.name} disabled={!!busy} onClick={() => setCookiesId(profile.id)}><Cookie className="size-4" /></Button>
+                <Button variant="ghost" size="icon" title="Удалить профиль" aria-label={"Удалить " + profile.name} disabled={!!busy || locked(profile.id)} onClick={() => setAction({ mode: "delete", ids: [profile.id] })}><Trash2 className="size-4 text-destructive" /></Button>
+              </>}
+            </div></TableCell>
+          </TableRow>;
+        })}
+        {!profiles.isPending && !profiles.isError && !rows.length && <TableRow><TableCell colSpan={owner ? 7 : 6} className="py-10 text-center text-sm text-muted-foreground">{search || folder !== ALL ? "По выбранным фильтрам профилей нет" : "Профилей пока нет"}</TableCell></TableRow>}
+      </TableBody></Table>
+    </div>
+
+    {action && ws && <ProfileBulkDialog action={action.mode} ids={action.ids} teamId={ws.teamId} isOwner={owner} blocked={action.ids.some(locked)} proxies={proxies.data ?? []} onClose={() => setAction(null)} onSaved={() => { setSelected([]); refresh(); }} />}
+    {cookiesProfile && <ProfileCookies profileId={cookiesProfile.id} name={cookiesProfile.name} isOwner={owner} locked={locked(cookiesProfile.id)} onClose={() => setCookiesId(null)} onSaved={refresh} />}
+    <Dialog open={!!editing} onOpenChange={(open) => { if (!open && !busy) setEditing(null); }}><DialogContent className="max-h-[90dvh] w-[calc(100%-2rem)] overflow-y-auto sm:max-w-2xl">
+      <DialogHeader><DialogTitle>{editing?.id ? "Изменить профиль" : "Новый профиль"}</DialogTitle><DialogDescription>Настройки профиля Windows</DialogDescription></DialogHeader>
+      {editing && <fieldset disabled={!!busy} className="space-y-3">
+        <Label className="grid gap-2">Название<Input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></Label>
+        <div className="grid gap-3 sm:grid-cols-2"><Label className="grid gap-2">Папка<Input value={editing.folder} onChange={(e) => setEditing({ ...editing, folder: e.target.value })} /></Label><Label className="grid gap-2">Метки через запятую<Input value={editing.tags} onChange={(e) => setEditing({ ...editing, tags: e.target.value })} /></Label></div>
+        <div className="space-y-2"><Label>Прокси</Label><Select disabled={!!busy || proxies.isPending || proxies.isError} value={editing.proxyId} onValueChange={(proxyId) => setEditing({ ...editing, proxyId })}><SelectTrigger aria-label="Прокси профиля"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">Без прокси</SelectItem>{(proxies.data ?? []).map((proxy) => <SelectItem key={proxy.id} value={proxy.id}>{proxy.label} · {proxy.host}:{proxy.port}</SelectItem>)}</SelectContent></Select></div>
+        <Label className="grid gap-2">Заметки<Textarea rows={2} value={editing.notes} onChange={(e) => setEditing({ ...editing, notes: e.target.value })} /></Label>
+        <ProfileFingerprint value={editing.fingerprint} onChange={(fingerprint) => setEditing({ ...editing, fingerprint })} disabled={!!busy} country={proxies.data?.find((p) => p.id === editing.proxyId)?.country} />
+      </fieldset>}
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+      <DialogFooter><Button variant="outline" disabled={!!busy} onClick={() => setEditing(null)}>Отмена</Button><Button disabled={!owner || !!busy || !editing?.name.trim() || !!(editing && fingerprintError(editing.fingerprint)) || !!(editing?.id && locked(editing.id))} onClick={save}>{busy === "save" ? "Сохранение…" : "Сохранить"}</Button></DialogFooter>
+    </DialogContent></Dialog>
+    <Dialog open={bulkOpen} onOpenChange={(open) => { if (!busy) setBulkOpen(open); }}><DialogContent className="w-[calc(100%-2rem)]"><DialogHeader><DialogTitle>Создать несколько профилей</DialogTitle><DialogDescription>У каждого профиля будет отдельный отпечаток.</DialogDescription></DialogHeader>
+      <fieldset disabled={!!busy} className="space-y-3"><Label className="grid gap-2">Название-основа<Input value={bulkForm.prefix} onChange={(e) => setBulkForm({ ...bulkForm, prefix: e.target.value })} /></Label><Label className="grid gap-2">Количество, 1–200<Input type="number" min={1} max={200} step={1} value={bulkForm.count} onChange={(e) => setBulkForm({ ...bulkForm, count: e.target.value })} /></Label><Label className="grid gap-2">Папка<Input value={bulkForm.folder} onChange={(e) => setBulkForm({ ...bulkForm, folder: e.target.value })} /></Label></fieldset>
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+      <DialogFooter><Button variant="outline" disabled={!!busy} onClick={() => setBulkOpen(false)}>Отмена</Button><Button disabled={!owner || !!busy || !validCount || !bulkForm.prefix.trim()} onClick={bulkCreate}>{busy === "create" ? "Создание…" : "Создать"}</Button></DialogFooter>
+    </DialogContent></Dialog>
+  </div>;
 }

@@ -170,9 +170,13 @@ function AgentsPage() {
               <Button
                 size="sm"
                 variant="secondary"
-                onClick={() => {
-                  void navigator.clipboard.writeText(fresh);
-                  toast.success("Скопировано");
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(fresh);
+                    toast.success("Скопировано");
+                  } catch {
+                    toast.error("Не удалось скопировать ключ. Разрешите доступ к буферу обмена.");
+                  }
                 }}
               >
                 Скопировать
@@ -187,7 +191,11 @@ function AgentsPage() {
 
       <section className="rounded-lg border border-border bg-card">
         <h2 className="border-b border-border px-5 py-3 text-sm font-medium">Выданные ключи</h2>
-        {(keys.data ?? []).length === 0 ? (
+        {keys.isPending ? (
+          <p role="status" className="px-5 py-6 text-sm text-muted-foreground">Загрузка ключей…</p>
+        ) : keys.isError ? (
+          <p role="alert" className="px-5 py-6 text-sm text-destructive">Не удалось загрузить ключи. <Button size="sm" variant="outline" onClick={() => keys.refetch()}>Повторить</Button></p>
+        ) : (keys.data ?? []).length === 0 ? (
           <p className="px-5 py-6 text-sm text-muted-foreground">Пока ни одного ключа.</p>
         ) : (
           <ul className="divide-y divide-border">
@@ -232,7 +240,11 @@ function AgentsPage() {
 
       <section className="rounded-lg border border-border bg-card">
         <h2 className="border-b border-border px-5 py-3 text-sm font-medium">Действия агентов</h2>
-        {(log.data ?? []).length === 0 ? (
+        {log.isPending ? (
+          <p role="status" className="px-5 py-6 text-sm text-muted-foreground">Загрузка действий…</p>
+        ) : log.isError ? (
+          <p role="alert" className="px-5 py-6 text-sm text-destructive">Не удалось загрузить действия. <Button size="sm" variant="outline" onClick={() => log.refetch()}>Повторить</Button></p>
+        ) : (log.data ?? []).length === 0 ? (
           <p className="px-5 py-6 text-sm text-muted-foreground">Агенты пока ничего не делали.</p>
         ) : (
           <ul className="divide-y divide-border">

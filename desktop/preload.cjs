@@ -1,13 +1,19 @@
 const { contextBridge, ipcRenderer } = require("electron");
-const { version } = require("./package.json");
+const readArgument = (prefix) => process.argv.find((value) => value.startsWith(prefix))?.slice(prefix.length);
+const version = readArgument("--umbra-version=") || "unknown";
+const trustedOrigin = decodeURIComponent(readArgument("--umbra-app-origin=") || "");
 
-contextBridge.exposeInMainWorld("umbra", {
+if (window.location.origin === trustedOrigin) contextBridge.exposeInMainWorld("umbra", {
   isDesktop: true,
   version,
   platform: process.platform,
   launchProfile: (payload) => ipcRenderer.invoke("umbra:launch-profile", payload),
   closeProfile: (profileId) => ipcRenderer.invoke("umbra:close-profile", profileId),
   profileCookies: (profileId) => ipcRenderer.invoke("umbra:profile-cookies", profileId),
+  listRunningProfiles: () => ipcRenderer.invoke("umbra:list-running-profiles"),
+  pendingProfileClosures: () => ipcRenderer.invoke("umbra:pending-profile-closures"),
+  acknowledgeProfileClosure: (snapshotId) => ipcRenderer.invoke("umbra:acknowledge-profile-closure", snapshotId),
+  archiveProfileClosure: (snapshotId) => ipcRenderer.invoke("umbra:archive-profile-closure", snapshotId),
   onProfileClosed: (cb) => {
     const handler = (_e, payload) => cb(payload);
     ipcRenderer.on("umbra:profile-closed", handler);

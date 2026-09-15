@@ -1,123 +1,39 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { toast } from "sonner";
-import { desktop, type UpdateStatus } from "@/lib/desktop";
+import { Download, Monitor, RefreshCw } from "lucide-react";
+import { useDesktopProfileLifecycle } from "@/hooks/useDesktopProfileLifecycle";
 import { Button } from "@/components/ui/button";
 
-export const Route = createFileRoute("/_authenticated/app/desktop")({
-  component: ClientPage,
-});
-
+export const Route = createFileRoute("/_authenticated/app/desktop")({ component: ClientPage });
 const RELEASES = "https://github.com/trafoleeeeg/proxy-pals-hub/releases/latest";
 
-const STEPS = [
-  "Скачайте приложение для своей системы и установите его.",
-  "Войдите в приложении почтой и паролем — увидите те же профили, что и здесь.",
-  "Запускайте профили из приложения: оно открывает отдельный изолированный браузер.",
-  "Сессии сайтов сохраняются в профиль: при следующем запуске входы остаются.",
-  "Пока профиль открыт у одного сотрудника, другие увидят его как занятый.",
-];
-
-function ClientPage() {
-  const bridge = desktop();
-  const [version, setVersion] = useState<string | null>(null);
-  const [status, setStatus] = useState<UpdateStatus | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    const b = desktop();
-    if (!b) return;
-    b.appVersion().then(setVersion);
-    return b.onUpdateStatus(setStatus);
-  }, []);
-
-  async function check() {
-    const b = desktop();
-    if (!b) return;
-    setBusy(true);
-    const r = await b.checkUpdate();
-    setBusy(false);
-    if (!r.ok) toast.error(r.error || "Не удалось проверить обновления");
-  }
-
-  async function update() {
-    const b = desktop();
-    if (!b) return;
-    setBusy(true);
-    const r = await b.downloadUpdate();
-    setBusy(false);
-    if (!r.ok) toast.error(r.error || "Не удалось скачать обновление");
-  }
-
-  return (
-    <div className="max-w-3xl">
-      <h1 className="text-2xl font-semibold">Настольное приложение</h1>
-      <p className="mt-2 text-muted-foreground">
-        Профили запускаются только из приложения — так данные аккаунтов не пересекаются с вашим
-        обычным браузером.
+export function ClientPage() {
+  const runtime = useDesktopProfileLifecycle();
+  const { status, version, busy, error } = runtime.update;
+  return <div className="max-w-3xl space-y-6">
+    <div><h1 className="flex items-center gap-2 text-2xl font-semibold"><Monitor className="size-6" />Umbra для Windows</h1><p className="mt-2 text-sm text-muted-foreground">Windows 10 и 11, 64 бита</p></div>
+    {runtime.available ? <section className="space-y-4 border-y border-border py-5">
+      <h2 className="text-base font-semibold">Обновление приложения</h2>
+      <p className="font-mono text-xs text-muted-foreground">Установленная версия: {version ?? "Загрузка…"}</p>
+      <p role="status" className="text-sm">
+        {!status && "Получение статуса обновления…"}
+        {status?.state === "none" && "Доступных обновлений нет."}
+        {status?.state === "checking" && "Проверка обновлений…"}
+        {status?.state === "available" && "Доступна версия " + status.version}
+        {status?.state === "downloading" && "Загрузка обновления: " + status.percent + "%"}
+        {status?.state === "downloaded" && "Версия " + status.version + " готова к установке."}
       </p>
-
-      {bridge ? (
-        <div className="mt-8 rounded-lg border border-border bg-card p-6">
-          <h2 className="font-semibold">Обновление</h2>
-          <p className="mono mt-1 text-xs text-muted-foreground">
-            установленная версия {version ?? "…"}
-          </p>
-          <p className="mt-3 text-sm text-muted-foreground">
-            {!status && "Приложение само проверяет новые версии каждые 15 минут."}
-            {status?.state === "checking" && "Проверяем наличие новой версии…"}
-            {status?.state === "none" && "У вас последняя версия."}
-            {status?.state === "available" && `Доступна версия ${status.version}.`}
-            {status?.state === "downloading" &&
-              `Новая версия загружается автоматически… ${status.percent}%`}
-            {status?.state === "downloaded" &&
-              `Версия ${status.version} готова. Нажмите «Обновить и перезапустить» — приложение установит новые файлы поверх старых, все профили и данные сохранятся и откроется снова.`}
-            {status?.state === "error" && `Ошибка: ${status.error}`}
-          </p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Button variant="outline" onClick={check} disabled={busy}>
-              Проверить обновления
-            </Button>
-            {status?.state === "available" && (
-              <Button onClick={update} disabled={busy}>
-                Скачать обновление
-              </Button>
-            )}
-            {status?.state === "downloaded" && (
-              <Button onClick={() => bridge.installUpdate()}>Обновить и перезапустить</Button>
-            )}
-          </div>
-        </div>
-      ) : (
-        <div className="mt-8 grid gap-4 sm:grid-cols-2">
-          <div className="rounded-lg border border-border bg-card p-6">
-            <h2 className="font-semibold">Windows</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Windows 10 и 11, 64 бита</p>
-            <a
-              href={RELEASES}
-              target="_blank"
-              rel="noreferrer"
-              className="mono mt-4 inline-block text-xs text-primary hover:underline"
-            >
-              скачать последнюю версию →
-            </a>
-          </div>
-          <div className="rounded-lg border border-border bg-card p-6">
-            <h2 className="font-semibold">macOS</h2>
-            <p className="mt-1 text-sm text-muted-foreground">macOS 12 и новее</p>
-            <p className="mono mt-4 text-xs text-muted-foreground">сборка готовится</p>
-          </div>
-        </div>
-      )}
-
-      <ol className="mt-8 space-y-3">
-        {STEPS.map((s, i) => (
-          <li key={s} className="flex gap-3 text-sm">
-            <span className="mono text-primary">{String(i + 1).padStart(2, "0")}</span>
-            <span className="text-muted-foreground">{s}</span>
-          </li>
-        ))}
-      </ol>
-    </div>
-  );
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+      <div className="flex flex-wrap gap-2">
+        <Button variant="outline" disabled={busy || status?.state === "checking" || status?.state === "downloading"} onClick={() => runtime.updateAction("check")}><RefreshCw className="size-4" />Проверить обновления</Button>
+        {status?.state === "available" && <Button disabled={busy} onClick={() => runtime.updateAction("download")}><Download className="size-4" />Скачать</Button>}
+        {status?.state === "downloaded" && <Button disabled={busy} onClick={() => runtime.updateAction("install")}>Установить и перезапустить</Button>}
+      </div>
+      <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs text-muted-foreground"><span>Открыто профилей: {runtime.running.length}</span><span>Ожидают синхронизации: {runtime.pending.length}</span></div>
+    </section> : <section className="space-y-4 border-y border-border py-5"><h2 className="font-semibold">Установщик Windows</h2><a href={RELEASES} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm text-primary hover:underline"><Download className="size-4" />Скачать установщик из последнего релиза</a></section>}
+    <section className="space-y-2 text-sm text-muted-foreground">
+      <h2 className="font-semibold text-foreground">Данные профилей</h2>
+      <p>Облачная синхронизация переносит только cookies. Local Storage, IndexedDB и остальные локальные данные сайтов остаются на текущем компьютере.</p>
+      <p>Состояние открытых вкладок и полный браузерный профиль между устройствами не переносятся.</p>
+    </section>
+  </div>;
 }

@@ -6,21 +6,48 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.4.2
 
       - name: Установка зависимостей
         run: bun install --frozen-lockfile
 
       - name: Проверка типов
-        run: bunx tsgo --noEmit
+        run: bun run typecheck
+
+      - name: Проверка сценариев и прав доступа
+        run: bun run test
+
+      - name: Сборка панели
+        run: bun run build
+
+      - name: Зависимости клиента
+        working-directory: desktop
+        run: |
+          npm ci
+          node node_modules/electron/install.js
+
+      - name: Тесты клиента
+        working-directory: desktop
+        timeout-minutes: 4
+        run: |
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+          timeout --signal=TERM --kill-after=10s 180s xvfb-run -a npm test
 
       - name: Проверка файлов приложения
         run: |

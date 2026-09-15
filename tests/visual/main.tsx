@@ -1,0 +1,21 @@
+import "./mock-api";
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Toaster } from "sonner";
+import { AppLayout } from "../../src/routes/_authenticated/app";
+import { ProfilesPage } from "../../src/routes/_authenticated/app.index";
+import { TeamPage } from "../../src/routes/_authenticated/app.team";
+import { ClientPage } from "../../src/routes/_authenticated/app.desktop";
+import "../../src/styles.css";
+
+const root = createRootRoute();
+const app = createRoute({ getParentRoute: () => root, path: "app", component: AppLayout });
+const profiles = createRoute({ getParentRoute: () => app, path: "/", component: ProfilesPage });
+const team = createRoute({ getParentRoute: () => app, path: "team", component: TeamPage });
+const desktop = createRoute({ getParentRoute: () => app, path: "desktop", component: ClientPage });
+const auth = createRoute({ getParentRoute: () => root, path: "auth", component: () => <p>Выход выполнен</p> });
+const router = createRouter({ routeTree: root.addChildren([app.addChildren([profiles, team, desktop]), auth]) });
+const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+createRoot(document.getElementById("root")!).render(<StrictMode><QueryClientProvider client={client}><RouterProvider router={router} /><Toaster /></QueryClientProvider></StrictMode>);

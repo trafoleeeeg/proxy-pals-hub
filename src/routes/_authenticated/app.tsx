@@ -1,151 +1,129 @@
 import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { Bot, Download, Globe, LayoutGrid, LogOut, Monitor, RefreshCw, Users } from "lucide-react";
+import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { useWorkspace } from "@/lib/useWorkspace";
-import { desktop, type UpdateStatus } from "@/lib/desktop";
+import { useWorkspace, useWorkspaceSelection, WorkspaceProvider } from "@/lib/useWorkspace";
+import { DesktopProfileProvider, useDesktopProfileLifecycle } from "@/hooks/useDesktopProfileLifecycle";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export const Route = createFileRoute("/_authenticated/app")({
-  head: () => ({
-    meta: [
-      { title: "Панель Umbra" },
-      { name: "description", content: "Управление профилями, прокси и командой." },
-      { property: "og:title", content: "Панель Umbra" },
-      { property: "og:description", content: "Управление профилями, прокси и командой." },
-      { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary_large_image" },
-    ],
-  }),
+  head: () => ({ meta: [
+    { title: "Панель Umbra" },
+    { name: "description", content: "Управление профилями, прокси и командой." },
+    { property: "og:title", content: "Панель Umbra" },
+    { property: "og:description", content: "Управление профилями, прокси и командой." },
+    { property: "og:type", content: "website" },
+    { name: "twitter:card", content: "summary_large_image" },
+  ] }),
   component: AppLayout,
 });
 
 const NAV = [
-  { to: "/app", label: "Профили", icon: "▢", exact: true },
-  { to: "/app/proxies", label: "Прокси", icon: "◇", exact: false },
-  { to: "/app/team", label: "Команда", icon: "◎", exact: false },
-  { to: "/app/agents", label: "Агенты", icon: "⬡", exact: false },
-  { to: "/app/desktop", label: "Приложение", icon: "⬓", exact: false },
+  { to: "/app", label: "Профили", icon: LayoutGrid, exact: true },
+  { to: "/app/proxies", label: "Прокси", icon: Globe, exact: false },
+  { to: "/app/team", label: "Команда", icon: Users, exact: false },
+  { to: "/app/agents", label: "Агенты", icon: Bot, exact: false },
+  { to: "/app/desktop", label: "Приложение", icon: Monitor, exact: false },
 ] as const;
 
 function UpdateBar() {
-  const [status, setStatus] = useState<UpdateStatus | null>(null);
-  const [version, setVersion] = useState<string | null>(null);
-
-  useEffect(() => {
-    const b = desktop();
-    if (!b) return;
-    void b.appVersion().then(setVersion);
-    const off = b.onUpdateStatus(setStatus);
-    // Текущее состояние на случай, если событие пришло до открытия панели.
-    if (typeof b.updateState === "function") void b.updateState().then(setStatus);
-    void b.checkUpdate();
-    const timer = setInterval(() => {
-      void b.checkUpdate();
-    }, 10 * 60 * 1000);
-    return () => {
-      off();
-      clearInterval(timer);
-    };
-  }, []);
-
-  const bridge = desktop();
-  if (!bridge) return null;
-
-  const show =
-    status?.state === "available" ||
-    status?.state === "downloading" ||
-    status?.state === "downloaded";
-  if (!show) return null;
-
-  return (
-    <div className="flex items-center gap-3 border-b border-border bg-primary/10 px-6 py-2 text-sm">
-      <span className="text-foreground">
-        {status.state === "available" && `Доступна новая версия ${status.version}`}
-        {status.state === "downloading" &&
-          `Загружается обновление${status.version ? ` ${status.version}` : ""}… ${status.percent}%`}
-        {status.state === "downloaded" &&
-          `Версия ${status.version} готова к установке — профили и данные сохранятся`}
-      </span>
-      <span className="mono text-xs text-muted-foreground">сейчас {version ?? "…"}</span>
-      <div className="ml-auto">
-        {status.state === "available" && (
-          <Button size="sm" onClick={() => bridge.downloadUpdate()}>
-            Обновить
-          </Button>
-        )}
-        {status.state === "downloaded" && (
-          <Button size="sm" onClick={() => bridge.installUpdate()}>
-            Обновить и перезапустить
-          </Button>
-        )}
-      </div>
+  const { available, update, updateAction } = useDesktopProfileLifecycle();
+  const { status, busy, error } = update;
+  if (!available || (!error && status?.state !== "available" && status?.state !== "downloading" && status?.state !== "downloaded")) return null;
+  return <div className="flex flex-wrap items-center gap-3 border-b border-border bg-secondary/40 px-4 py-2 text-sm" role={error ? "alert" : "status"}>
+    <span className={error ? "min-w-0 break-words text-destructive" : "min-w-0 break-words"}>
+      {error || (status?.state === "available" ? "Доступна версия " + status.version : status?.state === "downloading" ? "Загрузка обновления: " + status.percent + "%" : status?.state === "downloaded" ? "Версия " + status.version + " готова к установке" : "")}
+    </span>
+    <div className="ml-auto flex gap-2">
+      {status?.state === "available" && <Button size="sm" disabled={busy} onClick={() => updateAction("download")}><Download className="size-4" />Скачать</Button>}
+      {status?.state === "downloaded" && <Button size="sm" disabled={busy} onClick={() => updateAction("install")}>Установить и перезапустить</Button>}
+      {error && <Button size="icon" variant="outline" title="Проверить обновление повторно" aria-label="Проверить обновление повторно" disabled={busy} onClick={() => updateAction("check")}><RefreshCw className="size-4" /></Button>}
     </div>
-  );
+  </div>;
 }
 
-function AppLayout() {
-  const { data: ws } = useWorkspace();
+function LifecycleBar() {
+  const runtime = useDesktopProfileLifecycle();
+  const [busy, setBusy] = useState(false);
+  const messages = [...new Set(Object.values(runtime.errors))];
+  const notices = [...new Set(Object.values(runtime.notices))];
+  if (!runtime.available || (!messages.length && !notices.length && !runtime.restoring && !runtime.pending.length)) return null;
+  async function retry() {
+    setBusy(true);
+    try { await runtime.retry(); }
+    catch { toast.error("Синхронизация не завершена. Проверьте подключение."); }
+    finally { setBusy(false); }
+  }
+  return <div className="flex flex-wrap items-start gap-3 border-b border-border px-4 py-2 text-sm" role={messages.length ? "alert" : "status"}>
+    <div className="min-w-0 flex-1 space-y-1">
+      {runtime.restoring && <p>Восстановление открытых профилей…</p>}
+      {runtime.pending.length > 0 && <p className="text-warning">Ожидают сохранения: {runtime.pending.length}</p>}
+      {messages.map((message) => <p key={message} className="break-words text-destructive">{message}</p>)}
+      {notices.map((notice) => <p key={notice} className="break-words text-muted-foreground">{notice}</p>)}
+    </div>
+    {(messages.length > 0 || runtime.pending.length > 0) && <Button variant="outline" size="sm" disabled={busy || runtime.restoring} onClick={retry}><RefreshCw className={busy ? "size-4 animate-spin" : "size-4"} />Повторить</Button>}
+  </div>;
+}
+
+export function AppLayout() {
+  return <WorkspaceProvider><DesktopProfileProvider><AppShell /></DesktopProfileProvider></WorkspaceProvider>;
+}
+
+function AppShell() {
+  const workspace = useWorkspace();
+  const ws = workspace.data;
+  const selection = useWorkspaceSelection();
+  const runtime = useDesktopProfileLifecycle();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
-
+  const [signingOut, setSigningOut] = useState(false);
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
   async function signOut() {
-    await qc.cancelQueries();
-    qc.clear();
-    await supabase.auth.signOut();
-    navigate({ to: "/auth", replace: true });
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      await runtime.closeAll();
+      const result = await supabase.auth.signOut();
+      if (result.error) throw new Error();
+      await qc.cancelQueries(); qc.clear();
+      await navigate({ to: "/auth", replace: true });
+    } catch { toast.error("Выход не выполнен. Проверьте синхронизацию профилей и подключение."); }
+    finally { setSigningOut(false); }
   }
-
-  return (
-    <div className="flex min-h-screen bg-background">
-      <aside className="flex w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
-        <div className="flex h-14 items-center gap-2 border-b border-sidebar-border px-5">
-          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary text-[11px] font-bold text-primary-foreground">
-            U
-          </span>
-          <span className="text-sm font-semibold tracking-tight">Umbra</span>
-        </div>
-
-        <nav className="flex flex-1 flex-col gap-1 p-3">
-          {NAV.map((item) => {
-            const active = item.exact ? pathname === item.to : pathname.startsWith(item.to);
-            return (
-              <Link
-                key={item.to}
-                to={item.to}
-                className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
-                  active
-                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                    : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground"
-                }`}
-              >
-                <span className={active ? "text-primary" : ""}>{item.icon}</span>
-                {item.label}
-              </Link>
-            );
-          })}
-        </nav>
-
-        <div className="border-t border-sidebar-border p-3">
-          <div className="rounded-md bg-sidebar-accent/50 px-3 py-2">
-            <p className="truncate text-xs font-medium">{ws?.email ?? "—"}</p>
-            <p className="mono text-[11px] text-muted-foreground">
-              {ws ? (ws.role === "owner" ? "владелец" : "сотрудник") : ""} · {ws?.teamName ?? ""}
-            </p>
-          </div>
-          <Button variant="ghost" size="sm" className="mt-2 w-full justify-start" onClick={signOut}>
-            Выйти
-          </Button>
-        </div>
-      </aside>
-
-      <div className="flex min-w-0 flex-1 flex-col">
-        <UpdateBar />
-        <main className="flex-1 px-8 py-7">
-          <Outlet />
-        </main>
+  return <div className="flex min-h-screen bg-background">
+    <aside className="flex w-14 shrink-0 flex-col border-r border-sidebar-border bg-sidebar md:w-56">
+      <div className="flex h-14 items-center justify-center gap-2 border-b border-sidebar-border md:justify-start md:px-4">
+        <span className="flex size-6 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground">U</span>
+        <span className="hidden text-sm font-semibold md:inline">Umbra</span>
       </div>
+      <nav className="flex flex-1 flex-col gap-1 p-2 md:p-3">{NAV.map((item) => {
+        const active = item.exact ? pathname === item.to || pathname === "/app/" : pathname.startsWith(item.to);
+        const Icon = item.icon;
+        return <Link key={item.to} to={item.to} title={item.label} aria-label={item.label} aria-current={active ? "page" : undefined}
+          className={"flex items-center justify-center gap-3 rounded-md px-2 py-2 text-sm md:justify-start " + (active ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground")}>
+          <Icon className={"size-4 shrink-0 " + (active ? "text-primary" : "")} /><span className="hidden md:inline">{item.label}</span>
+        </Link>;
+      })}</nav>
+      <div className="border-t border-sidebar-border p-2 md:p-3">
+        <div className="hidden min-w-0 space-y-2 md:block">
+          <p className="truncate text-xs">{ws?.email ?? ""}</p>
+          <Select value={ws?.teamId ?? ""} disabled={selection.workspaces.isPending || signingOut} onValueChange={selection.select}>
+            <SelectTrigger aria-label="Рабочая команда" className="w-full text-xs"><SelectValue placeholder="Команда" /></SelectTrigger>
+            <SelectContent>{(selection.workspaces.data?.length ? selection.workspaces.data : ws ? [ws] : []).map((team) => <SelectItem key={team.teamId} value={team.teamId}>{team.teamName}</SelectItem>)}</SelectContent>
+          </Select>
+          {selection.workspaces.isError && <Button size="sm" variant="ghost" onClick={() => selection.workspaces.refetch()}>Повторить загрузку команд</Button>}
+          <p className="text-xs text-muted-foreground">{ws?.role === "owner" ? "Владелец" : ws ? "Сотрудник" : ""}</p>
+        </div>
+        <Button variant="ghost" size="sm" title="Выйти" aria-label="Выйти" disabled={signingOut || !runtime.ready} className="mt-2 w-full px-0 md:justify-start md:px-2" onClick={signOut}><LogOut className="size-4" /><span className="hidden md:inline">{signingOut ? "Сохранение…" : "Выйти"}</span></Button>
+      </div>
+    </aside>
+    <div className="flex min-w-0 flex-1 flex-col">
+      <UpdateBar /><LifecycleBar />
+      <div className="border-b border-border p-2 md:hidden"><Select value={ws?.teamId ?? ""} disabled={signingOut} onValueChange={selection.select}><SelectTrigger aria-label="Рабочая команда"><SelectValue placeholder="Команда" /></SelectTrigger><SelectContent>{(selection.workspaces.data?.length ? selection.workspaces.data : ws ? [ws] : []).map((team) => <SelectItem key={team.teamId} value={team.teamId}>{team.teamName}</SelectItem>)}</SelectContent></Select></div>
+      <main className="min-w-0 flex-1 px-3 py-5 lg:px-6"><Outlet key={ws?.teamId ?? "loading"} /></main>
     </div>
-  );
+  </div>;
 }

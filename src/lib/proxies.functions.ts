@@ -1,287 +1,175 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/integrations/supabase/types";
+import {
+  DESKTOP_PROXY_CHECK_REQUIRED, normalizeProxyCheck, parseProxyImport,
+  validateProxyFields, validateProxyInput, validateProxyProtocol,
+  validateProxyTarget, validateProxyTeam,
+} from "./proxy-input";
+import type { ProxyCheckResult, ProxyInput, ProxyProtocol } from "./proxy-input";
 
-export type ProxyInput = {
-  id?: string | undefined;
-  teamId: string;
-  label: string;
-  protocol: "http" | "https" | "socks5";
-  host: string;
-  port: number;
-  username?: string | undefined;
-  password?: string | undefined;
-  country?: string | undefined;
-};
+export type { ProxyInput } from "./proxy-input";
+type Context = { supabase: SupabaseClient<Database>; userId: string };
+type Target = { id: string; teamId: string };
+
+async function requireTeam(context: Context, teamId: string, owner = true) {
+  const denied = owner ? "Доступ только для владельца команды" : "Нет доступа к команде";
+  const { data: team, error: teamError } = await context.supabase.from("teams").select("owner_id")
+    .eq("id", teamId).maybeSingle();
+  if (teamError || !team) throw new Error(denied);
+  if (team.owner_id === context.userId) return;
+  if (owner) throw new Error(denied);
+  const { data, error } = await context.supabase.from("team_members").select("role")
+    .eq("team_id", teamId).eq("user_id", context.userId).maybeSingle();
+  if (error || !data) throw new Error(denied);
+}
+
+async function requireProxy(context: Context, target: Target) {
+  await requireTeam(context, target.teamId);
+  const { data, error } = await context.supabase.from("proxies").select("id")
+    .eq("id", target.id).eq("team_id", target.teamId).maybeSingle();
+  if (error || !data) throw new Error("Прокси не найден в выбранной команде");
+}
 
 export const listProxies = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { teamId: string }) => d)
+  .inputValidator((data: { teamId: string }) => validateProxyTeam(data))
   .handler(async ({ data, context }) => {
-    const { data: rows, error } = await context.supabase
-      .from("proxies")
-      .select(
-        "id, label, protocol, host, port, username, country, city, last_checked_at, last_check_ok, last_check_ip, last_check_latency_ms, last_check_error, password_enc",
-      )
-      .eq("team_id", data.teamId)
-      .order("created_at", { ascending: false });
-    if (error) throw new Error(error.message);
-    return (rows ?? []).map(({ password_enc, ...rest }) => ({
+    await requireTeam(context, data.teamId, false);
+    const { data: rows, error } = await context.supabase.from("proxies")
+      .select("id, label, protocol, host, port, username, country, city, last_checked_at, last_check_ok, last_check_ip, last_check_latency_ms, last_check_error, password_enc")
+      .eq("team_id", data.teamId).order("created_at", { ascending: false });
+    if (error) throw new Error("Не удалось загрузить прокси");
+    return (rows ?? []).map(({ password_enc, last_check_error, ...rest }) => ({
       ...rest,
+      // Older records may contain raw transport errors with proxy credentials.
+      last_check_error: last_check_error ? "Прокси не прошёл проверку подключения" : null,
       hasPassword: Boolean(password_enc),
     }));
   });
 
 export const saveProxy = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: ProxyInput) => d)
+  .inputValidator((data: ProxyInput) => validateProxyInput(data))
   .handler(async ({ data, context }) => {
+    if (data.id) await requireProxy(context, { id: data.id, teamId: data.teamId });
+    else await requireTeam(context, data.teamId);
+    if (data.id && data.passwordAction === "preserve" && !data.username) {
+      const { data: existing, error } = await context.supabase.from("proxies").select("password_enc")
+        .eq("id", data.id).eq("team_id", data.teamId).maybeSingle();
+      if (error || !existing) throw new Error("Не удалось прочитать настройки прокси");
+      if (existing.password_enc) throw new Error("Чтобы удалить логин, удалите также пароль прокси");
+    }
     const { encryptSecret } = await import("./crypto.server");
     const payload = {
-      team_id: data.teamId,
-      label: data.label,
-      protocol: data.protocol,
-      host: data.host.trim(),
-      port: data.port,
-      username: data.username?.trim() || null,
-      country: data.country?.toUpperCase() || null,
-      created_by: context.userId,
-      ...(data.password ? { password_enc: encryptSecret(data.password) } : {}),
+      label: data.label, protocol: data.protocol, host: data.host, port: data.port,
+      username: data.username || null, country: data.country || null,
+      ...(data.passwordAction === "replace" ? { password_enc: encryptSecret(data.password!) } : {}),
+      ...(data.passwordAction === "clear" ? { password_enc: null } : {}),
     };
-
     if (data.id) {
-      const { error } = await context.supabase.from("proxies").update(payload).eq("id", data.id);
-      if (error) throw new Error(error.message);
-      return { id: data.id };
+      const { data: row, error } = await context.supabase.from("proxies").update({
+        ...payload, last_checked_at: null, last_check_ok: null, last_check_ip: null,
+        last_check_latency_ms: null, last_check_error: null, city: null,
+      }).eq("id", data.id).eq("team_id", data.teamId).select("id").maybeSingle();
+      if (error?.code === "55P03") throw new Error("Закройте профили, использующие этот прокси, перед изменением подключения");
+      if (error || !row) throw new Error("Не удалось обновить прокси: проверьте доступ и повторите попытку");
+      return { id: row.id };
     }
-    const { data: row, error } = await context.supabase
-      .from("proxies")
-      .insert(payload)
-      .select("id")
-      .single();
-    if (error) throw new Error(error.message);
-    await context.supabase.from("audit_log").insert({
-      team_id: data.teamId,
-      user_id: context.userId,
-      action: "proxy.created",
-      target_type: "proxy",
-      target_id: row.id,
-      meta: { host: data.host },
+    const { data: row, error } = await context.supabase.from("proxies")
+      .insert({ ...payload, team_id: data.teamId, created_by: context.userId })
+      .select("id").single();
+    if (error || !row) throw new Error("Не удалось сохранить прокси");
+    const { error: auditError } = await context.supabase.from("audit_log").insert({
+      team_id: data.teamId, user_id: context.userId, action: "proxy.created",
+      target_type: "proxy", target_id: row.id,
     });
+    if (auditError) throw new Error("Прокси сохранён, но запись в журнале действий не создана. Обновите список прокси");
     return { id: row.id };
   });
 
 export const deleteProxy = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { id: string }) => d)
+  .inputValidator((data: Target) => validateProxyTarget(data))
   .handler(async ({ data, context }) => {
-    const { error } = await context.supabase.from("proxies").delete().eq("id", data.id);
-    if (error) throw new Error(error.message);
+    await requireProxy(context, data);
+    const inUse = "Прокси используется профилями. Сначала назначьте им другой прокси";
+    const { data: profiles, error: profilesError } = await context.supabase.from("browser_profiles")
+      .select("id").eq("proxy_id", data.id).limit(1);
+    if (profilesError) throw new Error("Не удалось проверить использование прокси");
+    if (profiles?.length) throw new Error(inUse);
+    // The FK's ON DELETE RESTRICT also protects concurrent profile assignments.
+    const { data: row, error } = await context.supabase.from("proxies").delete()
+      .eq("id", data.id).eq("team_id", data.teamId).select("id").maybeSingle();
+    if (error?.code === "23503") throw new Error(inUse);
+    if (error || !row) throw new Error("Не удалось удалить прокси: проверьте доступ и повторите попытку");
     return { ok: true };
   });
 
-/** Массовый импорт: scheme://user:pass@host:port или host:port:login:pass */
 export const importProxies = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
-    (d: { teamId: string; text: string; protocol?: "http" | "https" | "socks5" | undefined }) => d,
-  )
+  .inputValidator((data: { teamId: string; text: string; protocol?: ProxyProtocol | undefined }) => {
+    const team = validateProxyTeam(data);
+    return { ...team, ...parseProxyImport(data.text, validateProxyProtocol(data.protocol ?? "http")) };
+  })
   .handler(async ({ data, context }) => {
+    await requireTeam(context, data.teamId);
+    if (data.issues.length) return { added: 0, issues: data.issues };
     const { encryptSecret } = await import("./crypto.server");
-    const rows: {
-      team_id: string;
-      label: string;
-      protocol: "http" | "https" | "socks5";
-      host: string;
-      port: number;
-      username: string | null;
-      password_enc: string | null;
-      created_by: string;
-    }[] = [];
-
-    for (const line of data.text.split(/\r?\n/)) {
-      const t = line.trim();
-      if (!t) continue;
-
-      const schemeMatch = /^(https?|socks5):\/\//i.exec(t);
-      const protocol = (schemeMatch?.[1]?.toLowerCase() ?? data.protocol ?? "http") as
-        | "http"
-        | "https"
-        | "socks5";
-      let rest = t.replace(/^\w+:\/\//, "");
-
-      let user: string | undefined;
-      let pass: string | undefined;
-      let host: string | undefined;
-      let portRaw: string | undefined;
-
-      if (rest.includes("@")) {
-        const at = rest.lastIndexOf("@");
-        const cred = rest.slice(0, at).split(":");
-        rest = rest.slice(at + 1);
-        user = cred[0];
-        pass = cred[1];
-        [host, portRaw] = rest.split(":");
-      } else {
-        const parts = rest.split(":");
-        [host, portRaw, user, pass] = parts;
-      }
-
-      const port = Number(portRaw);
-      if (!host || !Number.isFinite(port) || port <= 0) continue;
-
-      rows.push({
-        team_id: data.teamId,
-        label: `${host}:${port}`,
-        protocol,
-        host,
-        port,
-        username: user || null,
-        password_enc: pass ? encryptSecret(pass) : null,
-        created_by: context.userId,
-      });
-    }
-
-    if (!rows.length) return { added: 0 };
-    const { error } = await context.supabase.from("proxies").insert(rows);
-    if (error) throw new Error(error.message);
-    return { added: rows.length };
+    const rows = data.rows.map(({ password, username, country, ...proxy }) => ({
+      ...proxy, username: username || null, country: country || null,
+      team_id: data.teamId, created_by: context.userId,
+      password_enc: password ? encryptSecret(password) : null,
+    }));
+    const { data: inserted, error } = await context.supabase.from("proxies").insert(rows).select("id");
+    if (error || inserted?.length !== rows.length) throw new Error("Не удалось импортировать прокси");
+    return { added: inserted.length, issues: [] };
   });
 
-/** Данные прокси для проверки внутри настольного приложения. */
+/** This endpoint is consumed only by the desktop check flow, never cached in queries. */
 export const proxyForCheck = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { id: string }) => d)
+  .inputValidator((data: Target) => validateProxyTarget(data))
   .handler(async ({ data, context }) => {
-    const { data: proxy, error } = await context.supabase
-      .from("proxies")
+    await requireTeam(context, data.teamId);
+    const { data: proxy, error } = await context.supabase.from("proxies")
       .select("id, protocol, host, port, username, password_enc")
-      .eq("id", data.id)
-      .single();
-    if (error || !proxy) throw new Error("Прокси не найден");
+      .eq("id", data.id).eq("team_id", data.teamId).maybeSingle();
+    if (error || !proxy) throw new Error("Прокси не найден в выбранной команде");
     const { decryptSecret } = await import("./crypto.server");
+    let password = "";
+    try { password = proxy.password_enc ? decryptSecret(proxy.password_enc) : ""; }
+    catch { throw new Error("Не удалось прочитать пароль прокси. Сохраните его заново"); }
+    if (proxy.password_enc && !password) throw new Error("Не удалось прочитать пароль прокси. Сохраните его заново");
+    const fields = validateProxyFields({ ...proxy, username: proxy.username ?? undefined, password });
     return {
-      id: proxy.id,
-      protocol: proxy.protocol,
-      host: proxy.host,
-      port: proxy.port,
-      username: proxy.username,
-      password: proxy.password_enc ? decryptSecret(proxy.password_enc) : "",
+      id: proxy.id, protocol: fields.protocol, host: fields.host, port: fields.port,
+      username: fields.username || null, password: fields.password,
     };
   });
 
-/** Сохраняет результат проверки, сделанной в настольном приложении. */
 export const recordProxyCheck = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
-    (d: {
-      id: string;
-      ok: boolean;
-      ip?: string | undefined;
-      country?: string | undefined;
-      city?: string | undefined;
-      latency?: number | undefined;
-      error?: string | undefined;
-    }) => d,
-  )
+  .inputValidator((data: Target & ProxyCheckResult) => ({ ...validateProxyTarget(data), ...normalizeProxyCheck(data) }))
   .handler(async ({ data, context }) => {
-    const { error } = await context.supabase
-      .from("proxies")
-      .update({
-        last_checked_at: new Date().toISOString(),
-        last_check_ok: data.ok,
-        last_check_ip: data.ip ?? null,
-        last_check_latency_ms: data.latency ?? null,
-        last_check_error: data.error ?? null,
-        ...(data.ok ? { country: data.country ?? null, city: data.city ?? null } : {}),
-      })
-      .eq("id", data.id);
-    if (error) throw new Error(error.message);
+    await requireProxy(context, data);
+    const { data: row, error } = await context.supabase.from("proxies").update({
+      last_checked_at: new Date().toISOString(), last_check_ok: data.ok,
+      last_check_ip: data.ip ?? null, last_check_latency_ms: data.latency ?? null,
+      last_check_error: data.ok ? null : data.error ?? null,
+      ...(data.ok && data.country ? { country: data.country } : {}),
+      ...(data.ok && data.city ? { city: data.city } : {}),
+    }).eq("id", data.id).eq("team_id", data.teamId).select("id").maybeSingle();
+    if (error || !row) throw new Error("Проверка завершена, но результат не сохранён. Проверьте доступ и повторите попытку");
     return { ok: true };
   });
 
-/** Проверка прокси: реальный IP, страна, задержка. */
+/** Cloudflare fetch cannot implement an arbitrary HTTP CONNECT / SOCKS tunnel. */
 export const checkProxy = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { id: string }) => d)
+  .inputValidator((data: Target) => validateProxyTarget(data))
   .handler(async ({ data, context }) => {
-    const { decryptSecret } = await import("./crypto.server");
-    const { data: proxy, error } = await context.supabase
-      .from("proxies")
-      .select("id, team_id, protocol, host, port, username, password_enc")
-      .eq("id", data.id)
-      .single();
-    if (error || !proxy) throw new Error("Прокси не найден");
-
-    const started = Date.now();
-    let result: {
-      ok: boolean;
-      ip?: string | undefined;
-      country?: string | undefined;
-      city?: string | undefined;
-      error?: string | undefined;
-      latency?: number | undefined;
-    };
-
-    if (proxy.protocol === "socks5") {
-      result = {
-        ok: false,
-        error: "SOCKS5 проверяется в настольном приложении",
-      };
-    } else {
-      try {
-        const password = proxy.password_enc ? decryptSecret(proxy.password_enc) : "";
-        const auth =
-          proxy.username || password
-            ? "Basic " + btoa(`${proxy.username ?? ""}:${password}`)
-            : undefined;
-
-        const headers: Record<string, string> = { Host: "ip-api.com" };
-        if (auth) headers["Proxy-Authorization"] = auth;
-
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 12000);
-        const res = await fetch(
-          `http://${proxy.host}:${proxy.port}/json/?fields=status,countryCode,city,query`,
-          { headers, signal: controller.signal },
-        );
-        clearTimeout(timer);
-
-        const json = (await res.json()) as {
-          status?: string;
-          query?: string;
-          countryCode?: string;
-          city?: string;
-        };
-        result =
-          json.status === "success"
-            ? {
-                ok: true,
-                ip: json.query,
-                country: json.countryCode,
-                city: json.city,
-                latency: Date.now() - started,
-              }
-            : { ok: false, error: "Прокси ответил, но IP определить не удалось" };
-      } catch (e) {
-        result = {
-          ok: false,
-          error: e instanceof Error ? e.message : "Прокси не отвечает",
-          latency: Date.now() - started,
-        };
-      }
-    }
-
-    await context.supabase
-      .from("proxies")
-      .update({
-        last_checked_at: new Date().toISOString(),
-        last_check_ok: result.ok,
-        last_check_ip: result.ip ?? null,
-        last_check_latency_ms: result.latency ?? null,
-        last_check_error: result.error ?? null,
-        ...(result.ok ? { country: result.country ?? null, city: result.city ?? null } : {}),
-      })
-      .eq("id", proxy.id);
-
-    return result;
+    await requireProxy(context, data);
+    return DESKTOP_PROXY_CHECK_REQUIRED;
   });

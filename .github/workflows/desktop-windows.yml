@@ -36,7 +36,9 @@ jobs:
 
       - name: Install dependencies
         working-directory: desktop
-        run: npm ci
+        run: |
+          npm ci
+          node node_modules/electron/install.js
 
       - name: Test Windows runtime
         working-directory: desktop

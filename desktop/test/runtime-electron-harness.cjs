@@ -1,5 +1,10 @@
 // Invoked by runtime-electron.test.cjs, never against the application's userData.
 if (process.versions.electron) {
+  // Report callback exceptions instead of opening Electron's modal error dialog in CI.
+  process.on("uncaughtException", (error) => {
+    process.stdout.write(`UMBRA_NATIVE_TEST_FAILED ${error.name}: ${error.message}\n${error.stack}\n`);
+    process.exit(1);
+  });
   const electron = require("electron");
   const { app, session, net: electronNet, BrowserWindow, safeStorage } = electron;
   const path = require("node:path");
@@ -58,8 +63,8 @@ if (process.versions.electron) {
     });
     return ses;
   }
-  async function waitUntil(predicate, attempts = 100) {
-    for (let index = 0; index < attempts; index++) { if (predicate()) return; await new Promise((resolve) => setTimeout(resolve, 25)); }
+  async function waitUntil(predicate) {
+    for (let index = 0; index < 100; index++) { if (predicate()) return; await new Promise((resolve) => setTimeout(resolve, 25)); }
     throw new Error("Native fixture did not reach expected state");
   }
 
@@ -227,10 +232,8 @@ if (process.versions.electron) {
     assert.equal(popup.webContents.getWebRTCIPHandlingPolicy(), "disable_non_proxied_udp");
     assert.equal((await popup.webContents.executeJavaScript("firstDocument")).timezone, "Asia/Tokyo");
 
-    const toolbarBefore = await shell.webContents.executeJavaScript("({bridge:typeof window.profileBrowser,ready:document.readyState,error:document.getElementById('error')?.textContent || '',tabs:document.querySelectorAll('#tabs .tab').length})");
-    process.stdout.write(`NATIVE_TOOLBAR_BEFORE ${JSON.stringify(toolbarBefore)}\n`);
     await shell.webContents.executeJavaScript("document.getElementById('new').click()");
-    try { await waitUntil(() => runtime.getRunningProfile(ID).tabCount === 3, 400); }
+    try { await waitUntil(() => runtime.getRunningProfile(ID).tabCount === 3); }
     catch (failure) {
       const profile = runtime.getRunningProfile(ID);
       const toolbar = await shell.webContents.executeJavaScript("({bridge:typeof window.profileBrowser,ready:document.readyState,error:document.getElementById('error')?.textContent || '',tabs:document.querySelectorAll('#tabs .tab').length})").catch(() => null);

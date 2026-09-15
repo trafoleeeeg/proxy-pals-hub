@@ -39,6 +39,7 @@ async function createProfileBrowser(electron, { name, fp, partition, openTab, cl
     webPreferences: { session: shellSession, preload: path.join(__dirname, "browser-preload.cjs"), contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, devTools: false },
   });
   const tabs = new Map();
+  const shellContents = shell.webContents;
   let activeId;
   let error = "";
   let destroyed = false;
@@ -60,7 +61,7 @@ async function createProfileBrowser(electron, { name, fp, partition, openTab, cl
     }
   }
   function select(tab) {
-    if (!tab || tab.isDestroyed()) return;
+    if (shell.isDestroyed() || !tab || tab.isDestroyed()) return;
     activeId = tab.id; layout(); tab.webContents.focus(); publish();
   }
   async function command(message) {
@@ -116,7 +117,7 @@ async function createProfileBrowser(electron, { name, fp, partition, openTab, cl
     if (input.alt && key === "arrowright") action = "forward";
     if (action) { event.preventDefault(); void dispatch({ action }); }
   }
-  registry.set(shell.webContents, dispatch);
+  registry.set(shellContents, dispatch);
   shell.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   for (const event of ["will-navigate", "will-redirect", "will-attach-webview"]) shell.webContents.on(event, (event) => event.preventDefault());
   shell.webContents.on("before-input-event", shortcuts);
@@ -125,7 +126,7 @@ async function createProfileBrowser(electron, { name, fp, partition, openTab, cl
   shell.on("close", (event) => { event.preventDefault(); void closeProfile().catch(() => { error = "Profile could not be saved. Close again to retry."; publish(); }); });
   shell.on("closed", () => {
     destroyed = true;
-    registry.delete(shell.webContents);
+    registry.delete(shellContents);
     for (const tab of [...tabs.values()]) tab.destroy();
     if (!registry.size) { ipcMain.removeHandler("umbra-runtime:browser"); handlers.delete(ipcMain); }
   });

@@ -227,11 +227,13 @@ if (process.versions.electron) {
     assert.equal(popup.webContents.getWebRTCIPHandlingPolicy(), "disable_non_proxied_udp");
     assert.equal((await popup.webContents.executeJavaScript("firstDocument")).timezone, "Asia/Tokyo");
 
+    const toolbarBefore = await shell.webContents.executeJavaScript("({bridge:typeof window.profileBrowser,ready:document.readyState,error:document.getElementById('error')?.textContent || '',tabs:document.querySelectorAll('#tabs .tab').length})");
+    process.stdout.write(`NATIVE_TOOLBAR_BEFORE ${JSON.stringify(toolbarBefore)}\n`);
     await shell.webContents.executeJavaScript("document.getElementById('new').click()");
     try { await waitUntil(() => runtime.getRunningProfile(ID).tabCount === 3, 400); }
     catch (failure) {
       const profile = runtime.getRunningProfile(ID);
-      const toolbar = await shell.webContents.executeJavaScript("({error:document.getElementById('error')?.textContent || '',tabs:document.querySelectorAll('#tabs .tab').length})").catch(() => null);
+      const toolbar = await shell.webContents.executeJavaScript("({bridge:typeof window.profileBrowser,ready:document.readyState,error:document.getElementById('error')?.textContent || '',tabs:document.querySelectorAll('#tabs .tab').length})").catch(() => null);
       throw new Error(`${failure.message}: ${JSON.stringify({ profile, toolbar })}`);
     }
     const fresh = profileTabs(ses).find((view) => view !== win && view !== popup);

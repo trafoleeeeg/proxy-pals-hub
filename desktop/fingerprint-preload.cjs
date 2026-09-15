@@ -1,80 +1,83 @@
-// Подмена отпечатка внутри окна профиля. Базовый уровень: экран, ядра, память,
-// языки, часовой пояс, WebGL-строки и шум Canvas/Audio.
-const arg = process.argv.find((a) => a.startsWith("--umbra-fingerprint="));
-let fp = {};
-try {
-  if (arg) fp = JSON.parse(decodeURIComponent(arg.split("=").slice(1).join("=")));
-} catch {
-  fp = {};
-}
-
-function define(obj, key, value) {
-  try {
-    Object.defineProperty(obj, key, { get: () => value, configurable: true });
-  } catch {
-    /* ignore */
-  }
-}
-
-if (fp.hardware_concurrency) define(navigator, "hardwareConcurrency", fp.hardware_concurrency);
-if (fp.device_memory) define(navigator, "deviceMemory", fp.device_memory);
-if (fp.languages) {
+// Registered only by CDP in document main worlds before page scripts run.
+// This is not an Electron preload and does not configure workers or OOPIFs.
+function applyDocumentFingerprint(fp) {
+  const define = (object, key, value) => {
+    Object.defineProperty(object, key, { get: () => value, configurable: true });
+  };
+  define(navigator, "hardwareConcurrency", fp.hardwareConcurrency);
+  define(navigator, "deviceMemory", fp.deviceMemory);
+  define(navigator, "doNotTrack", fp.doNotTrack ? "1" : null);
   define(navigator, "languages", Object.freeze([...fp.languages]));
   define(navigator, "language", fp.languages[0]);
-}
-if (fp.platform) define(navigator, "platform", fp.platform);
-if (fp.screen_width) {
-  define(screen, "width", fp.screen_width);
-  define(screen, "availWidth", fp.screen_width);
-}
-if (fp.screen_height) {
-  define(screen, "height", fp.screen_height);
-  define(screen, "availHeight", fp.screen_height - 40);
-}
-if (fp.color_depth) define(screen, "colorDepth", fp.color_depth);
-
-if (fp.timezone) {
-  const OriginalDTF = Intl.DateTimeFormat;
-  const patched = function (locale, options) {
-    return new OriginalDTF(locale || (fp.languages && fp.languages[0]), {
-      ...options,
-      timeZone: (options && options.timeZone) || fp.timezone,
-    });
-  };
-  patched.supportedLocalesOf = OriginalDTF.supportedLocalesOf;
-  Intl.DateTimeFormat = patched;
-}
-
-if (fp.webgl_vendor || fp.webgl_renderer) {
-  const patch = (proto) => {
-    if (!proto) return;
-    const orig = proto.getParameter;
-    proto.getParameter = function (p) {
-      if (p === 37445) return fp.webgl_vendor || orig.call(this, p);
-      if (p === 37446) return fp.webgl_renderer || orig.call(this, p);
-      return orig.call(this, p);
+  define(screen, "width", fp.screen.width);
+  define(screen, "height", fp.screen.height);
+  define(screen, "availWidth", fp.screen.width);
+  define(screen, "availHeight", Math.max(1, fp.screen.height - 40));
+  define(screen, "colorDepth", fp.screen.colorDepth);
+  define(screen, "pixelDepth", fp.screen.colorDepth);
+  for (const ctor of [globalThis.WebGLRenderingContext, globalThis.WebGL2RenderingContext]) {
+    if (!ctor) continue;
+    const original = ctor.prototype.getParameter;
+    ctor.prototype.getParameter = function (parameter) {
+      if (parameter === 37445 && fp.gpu.vendor) return fp.gpu.vendor;
+      if (parameter === 37446 && fp.gpu.renderer) return fp.gpu.renderer;
+      return original.call(this, parameter);
     };
+  }
+  const delta = (seed, index) => {
+    let value = (seed ^ Math.imul(index + 1, 0x45d9f3b)) >>> 0;
+    value = Math.imul(value ^ (value >>> 16), 0x45d9f3b) >>> 0;
+    return (value & 1) ? 1 : -1;
   };
-  patch(window.WebGLRenderingContext && window.WebGLRenderingContext.prototype);
-  patch(window.WebGL2RenderingContext && window.WebGL2RenderingContext.prototype);
-}
-
-if (fp.canvas_noise) {
-  const seed = Number(fp.canvas_noise) || 1;
-  const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
-  HTMLCanvasElement.prototype.toDataURL = function (...args) {
-    try {
-      const ctx = this.getContext("2d");
-      if (ctx && this.width && this.height) {
-        const img = ctx.getImageData(0, 0, this.width, this.height);
-        for (let i = 0; i < img.data.length; i += 997) {
-          img.data[i] = (img.data[i] + (seed % 3)) % 256;
-        }
-        ctx.putImageData(img, 0, 0);
+  if (fp.canvasNoise && globalThis.CanvasRenderingContext2D) {
+    const originalGet = CanvasRenderingContext2D.prototype.getImageData;
+    const perturb = (data, width, height) => {
+      for (let index = 0; index < data.length; index += 128) data[index] = Math.max(0, Math.min(255, data[index] + delta(fp.canvasNoise ^ width ^ height, index)));
+    };
+    CanvasRenderingContext2D.prototype.getImageData = function (...args) {
+      const result = originalGet.apply(this, args);
+      perturb(result.data, result.width, result.height);
+      return result;
+    };
+    const copy = (canvas) => {
+      const cloned = document.createElement("canvas");
+      cloned.width = canvas.width; cloned.height = canvas.height;
+      if (canvas.width && canvas.height) {
+        const context = cloned.getContext("2d");
+        context.drawImage(canvas, 0, 0);
+        const pixels = originalGet.call(context, 0, 0, canvas.width, canvas.height);
+        perturb(pixels.data, pixels.width, pixels.height);
+        context.putImageData(pixels, 0, 0);
       }
-    } catch {
-      /* ignore */
+      return cloned;
+    };
+    for (const method of ["toDataURL", "toBlob"]) {
+      const original = HTMLCanvasElement.prototype[method];
+      HTMLCanvasElement.prototype[method] = function (...args) { return original.apply(copy(this), args); };
     }
-    return origToDataURL.apply(this, args);
-  };
+  }
+  if (fp.audioNoise) {
+    const perturb = (data) => {
+      for (let index = 0; index < data.length; index += 97) if (Number.isFinite(data[index])) data[index] += delta(fp.audioNoise, index) * 1e-7;
+    };
+    if (globalThis.AudioBuffer) {
+      const original = AudioBuffer.prototype.copyFromChannel;
+      AudioBuffer.prototype.copyFromChannel = function (destination, ...args) {
+        const result = original.call(this, destination, ...args);
+        perturb(destination);
+        return result;
+      };
+    }
+    if (globalThis.AnalyserNode) {
+      for (const method of ["getFloatFrequencyData", "getFloatTimeDomainData"]) {
+        const original = AnalyserNode.prototype[method];
+        AnalyserNode.prototype[method] = function (destination) { const result = original.call(this, destination); perturb(destination); return result; };
+      }
+    }
+  }
+  // This document-level switch supplements the native non-proxied UDP policy.
+  if (fp.webrtc === "disabled") {
+    define(globalThis, "RTCPeerConnection", undefined);
+    define(globalThis, "webkitRTCPeerConnection", undefined);
+  }
 }

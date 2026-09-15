@@ -1,46 +1,34 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { Activity, CheckCheck, Loader2, Pencil, Plus, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "@/lib/useWorkspace";
+import { listProxies, saveProxy, deleteProxy, importProxies, checkProxy, proxyForCheck, recordProxyCheck } from "@/lib/proxies.functions";
 import {
-  listProxies,
-  saveProxy,
-  deleteProxy,
-  importProxies,
-  checkProxy,
-  proxyForCheck,
-  recordProxyCheck,
-} from "@/lib/proxies.functions";
+  PROXY_LIMITS, ProxyCheckQueue, parseProxyPort, performDesktopProxyCheck,
+  proxyAddress, validateProxyInput,
+} from "@/lib/proxy-input";
+import type { PasswordAction, ProxyImportIssue, ProxyProtocol } from "@/lib/proxy-input";
 import { desktop } from "@/lib/desktop";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-export const Route = createFileRoute("/_authenticated/app/proxies")({
-  component: ProxiesPage,
-});
+export const Route = createFileRoute("/_authenticated/app/proxies")({ component: ProxiesPage });
 
-type Protocol = "http" | "https" | "socks5";
+const emptyForm = {
+  id: undefined as string | undefined, label: "", protocol: "http" as ProxyProtocol,
+  host: "", port: "", username: "", password: "", country: "",
+  passwordAction: "replace" as PasswordAction,
+};
+type ProxyRow = Awaited<ReturnType<typeof listProxies>>[number];
 
 function ProxiesPage() {
   const { data: ws } = useWorkspace();
@@ -52,296 +40,282 @@ function ProxiesPage() {
   const check = useServerFn(checkProxy);
   const forCheck = useServerFn(proxyForCheck);
   const record = useServerFn(recordProxyCheck);
-
   const [open, setOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
-  const [form, setForm] = useState({
-    label: "",
-    protocol: "http" as Protocol,
-    host: "",
-    port: "",
-    username: "",
-    password: "",
-    country: "",
-  });
+  const [importProtocol, setImportProtocol] = useState<ProxyProtocol>("http");
+  const [importIssues, setImportIssues] = useState<ProxyImportIssue[]>([]);
+  const [form, setForm] = useState(emptyForm);
+  const [checking, setChecking] = useState<Set<string>>(new Set());
+  const [checkErrors, setCheckErrors] = useState<Record<string, string>>({});
+  const queue = useRef(new ProxyCheckQueue(3));
+  const owner = ws?.role === "owner";
 
   const proxies = useQuery({
     queryKey: ["proxies", ws?.teamId],
     queryFn: () => list({ data: { teamId: ws!.teamId } }),
     enabled: !!ws?.teamId,
   });
-
   const invalidate = () => qc.invalidateQueries({ queryKey: ["proxies"] });
-
+  const teamId = () => {
+    if (!ws?.teamId) throw new Error("Команда ещё загружается");
+    return ws.teamId;
+  };
   const saveMut = useMutation({
     mutationFn: () => {
-      if (!ws?.teamId) throw new Error("Команда ещё загружается, попробуйте через секунду");
-      return save({
-        data: {
-          teamId: ws.teamId,
-          label: form.label || `${form.host}:${form.port}`,
-          protocol: form.protocol,
-          host: form.host,
-          port: Number(form.port),
-          username: form.username || undefined,
-          password: form.password || undefined,
-          country: form.country || undefined,
-        },
+      const data = validateProxyInput({
+        ...form, teamId: teamId(), port: parseProxyPort(form.port),
+        passwordAction: !form.id && !form.password ? "clear" : form.passwordAction,
       });
+      return save({ data });
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       toast.success("Прокси сохранён");
       setOpen(false);
-      setForm({
-        label: "",
-        protocol: "http",
-        host: "",
-        port: "",
-        username: "",
-        password: "",
-        country: "",
-      });
-      invalidate();
+      setForm(emptyForm);
+      await invalidate();
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (error: Error) => toast.error(error.message),
   });
-
   const importMut = useMutation({
-    mutationFn: () => {
-      if (!ws?.teamId) throw new Error("Команда ещё загружается, попробуйте через секунду");
-      return bulk({ data: { teamId: ws.teamId, text: importText } });
-    },
-    onSuccess: (r) => {
-      toast.success(`Добавлено прокси: ${r.added}`);
+    mutationFn: () => bulk({ data: { teamId: teamId(), text: importText, protocol: importProtocol } }),
+    onSuccess: async (result) => {
+      setImportIssues(result.issues);
+      if (result.issues.length) {
+        toast.error("Импорт не выполнен. Исправьте отмеченные строки");
+        return;
+      }
+      toast.success(`Добавлено прокси: ${result.added}`);
       setImportOpen(false);
       setImportText("");
-      invalidate();
+      await invalidate();
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (error: Error) => toast.error(error.message),
+  });
+  const removeMut = useMutation({
+    mutationFn: (id: string) => remove({ data: { id, teamId: teamId() } }),
+    onSuccess: async () => { toast.success("Прокси удалён"); await invalidate(); },
+    onError: (error: Error) => toast.error(error.message),
   });
 
   const checkMut = useMutation({
-    mutationFn: async (id: string) => {
-      const b = desktop();
-      // В приложении проверяем сами — так работают и SOCKS5, и прокси с паролем.
-      if (b && typeof b.checkProxy === "function") {
-        const target = await forCheck({ data: { id } });
-        const r = await b.checkProxy({
-          id: target.id,
-          protocol: target.protocol,
-          host: target.host,
-          port: target.port,
-          username: target.username,
-          password: target.password,
-        });
-        const res = r.result ?? { ok: false, error: r.error ?? "Проверка не удалась" };
-        await record({
-          data: {
-            id,
-            ok: res.ok,
-            ip: res.ip,
-            country: res.country,
-            city: res.city,
-            latency: res.latency,
-            error: res.error,
-          },
-        });
-        return res;
+    mutationFn: async (ids: string[]) => {
+      const selectedTeam = teamId();
+      const bridge = desktop();
+      if (!bridge?.checkProxy) {
+        const firstId = ids[0];
+        if (firstId) {
+          const result = await check({ data: { id: firstId, teamId: selectedTeam } });
+          toast.info(result.error);
+        }
+        return;
       }
-      return check({ data: { id } });
+      setChecking(new Set(ids));
+      const results = await Promise.all(ids.map((id) => queue.current.run(id, async () => {
+        try {
+          const result = await performDesktopProxyCheck({
+            load: () => forCheck({ data: { id, teamId: selectedTeam } }),
+            check: (target) => bridge.checkProxy!(target),
+            record: (result) => record({ data: { id, teamId: selectedTeam, ...result } }),
+          });
+          setCheckErrors((old) => {
+            const next = { ...old };
+            if (result.ok) delete next[id];
+            else next[id] = result.error ?? "Прокси не прошёл проверку";
+            return next;
+          });
+          return result.ok;
+        } catch (error) {
+          setCheckErrors((old) => ({ ...old, [id]: error instanceof Error ? error.message : "Проверка не выполнена" }));
+          return false;
+        } finally {
+          setChecking((old) => { const next = new Set(old); next.delete(id); return next; });
+        }
+      })));
+      const passed = results.filter(Boolean).length;
+      if (passed === results.length) toast.success(`Проверено: ${passed}. Все прокси работают`);
+      else toast.error(`Работают: ${passed} из ${results.length}. Ошибки показаны в списке`);
     },
-    onSuccess: (r) => {
-      if (r.ok) toast.success(`Работает · ${r.ip ?? ""} ${r.country ?? ""}`.trim());
-      else toast.error(r.error ?? "Прокси не отвечает");
-      invalidate();
-    },
-    onError: (e: Error) => toast.error(e.message),
+    onSettled: async () => { setChecking(new Set()); await invalidate(); },
+    onError: () => toast.error("Не удалось выполнить проверку. Проверьте доступ и подключение"),
   });
+
+  const edit = (proxy?: ProxyRow) => {
+    saveMut.reset();
+    setForm(proxy ? {
+      id: proxy.id, label: proxy.label, protocol: proxy.protocol, host: proxy.host,
+      port: String(proxy.port), username: proxy.username ?? "", password: "",
+      country: proxy.country ?? "", passwordAction: "preserve",
+    } : emptyForm);
+    setOpen(true);
+  };
+  const closeForm = (value: boolean) => {
+    if (saveMut.isPending) return;
+    setOpen(value);
+    if (!value) setForm(emptyForm);
+  };
 
   return (
     <div>
       <div className="flex flex-wrap items-center gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">Прокси</h1>
-          <p className="text-sm text-muted-foreground">
-            Пароли хранятся в зашифрованном виде и не показываются после сохранения.
-          </p>
-        </div>
-        <div className="ml-auto flex gap-2">
-          <Dialog open={importOpen} onOpenChange={setImportOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline">Импорт списком</Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Импорт прокси</DialogTitle>
-              </DialogHeader>
-              <p className="text-sm text-muted-foreground">
-                По одному в строке, например: <span className="mono">socks5://user:pass@1.2.3.4:1080</span>{" "}
-                или <span className="mono">1.2.3.4:8080:user:pass</span>
-              </p>
-              <Textarea
-                rows={10}
-                value={importText}
-                onChange={(e) => setImportText(e.target.value)}
-                className="mono text-xs"
-              />
-              <DialogFooter>
-                <Button onClick={() => importMut.mutate()} disabled={importMut.isPending}>
-                  Добавить
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-
-          <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild>
-              <Button>Добавить прокси</Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Новый прокси</DialogTitle>
-              </DialogHeader>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2 sm:col-span-2">
-                  <Label>Название</Label>
-                  <Input
-                    value={form.label}
-                    onChange={(e) => setForm({ ...form, label: e.target.value })}
-                    placeholder="Например, Германия 1"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Тип</Label>
-                  <Select
-                    value={form.protocol}
-                    onValueChange={(v) => setForm({ ...form, protocol: v as Protocol })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="http">HTTP</SelectItem>
-                      <SelectItem value="https">HTTPS</SelectItem>
-                      <SelectItem value="socks5">SOCKS5</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Страна</Label>
-                  <Input
-                    value={form.country}
-                    maxLength={2}
-                    placeholder="DE"
-                    onChange={(e) => setForm({ ...form, country: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Адрес</Label>
-                  <Input
-                    value={form.host}
-                    onChange={(e) => setForm({ ...form, host: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Порт</Label>
-                  <Input
-                    value={form.port}
-                    inputMode="numeric"
-                    onChange={(e) => setForm({ ...form, port: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Логин</Label>
-                  <Input
-                    value={form.username}
-                    onChange={(e) => setForm({ ...form, username: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Пароль</Label>
-                  <Input
-                    type="password"
-                    value={form.password}
-                    onChange={(e) => setForm({ ...form, password: e.target.value })}
-                  />
-                </div>
-              </div>
-              <DialogFooter>
-                <Button
-                  onClick={() => saveMut.mutate()}
-                  disabled={saveMut.isPending || !form.host || !form.port}
-                >
-                  Сохранить
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        </div>
+        <h1 className="text-2xl font-semibold">Прокси</h1>
+        {owner && <div className="ml-auto flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => checkMut.mutate((proxies.data ?? []).map((p) => p.id))}
+            disabled={checkMut.isPending || !proxies.data?.length}>
+            {checkMut.isPending ? <Loader2 className="size-4 animate-spin" /> : <CheckCheck className="size-4" />}
+            Проверить все
+          </Button>
+          <Button variant="outline" onClick={() => { importMut.reset(); setImportIssues([]); setImportOpen(true); }}>
+            <Upload className="size-4" />Импорт
+          </Button>
+          <Button onClick={() => edit()}><Plus className="size-4" />Добавить прокси</Button>
+        </div>}
       </div>
 
-      <div className="mt-6 rounded-lg border border-border bg-card">
+      <Dialog open={importOpen} onOpenChange={(value) => {
+        if (importMut.isPending) return;
+        setImportOpen(value);
+        if (!value) { setImportText(""); setImportIssues([]); }
+      }}>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Импорт прокси</DialogTitle></DialogHeader>
+          <Label htmlFor="proxy-import-protocol">Тип по умолчанию</Label>
+          <Select value={importProtocol} disabled={importMut.isPending}
+            onValueChange={(value) => { setImportProtocol(value as ProxyProtocol); setImportIssues([]); }}>
+            <SelectTrigger id="proxy-import-protocol"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="http">HTTP</SelectItem><SelectItem value="https">HTTPS</SelectItem>
+              <SelectItem value="socks5">SOCKS5</SelectItem>
+            </SelectContent>
+          </Select>
+          <Label htmlFor="proxy-import-text">Список прокси</Label>
+          <Textarea id="proxy-import-text" rows={10} value={importText} maxLength={PROXY_LIMITS.importBytes}
+            disabled={importMut.isPending} spellCheck={false} autoComplete="off"
+            onChange={(event) => { setImportText(event.target.value); setImportIssues([]); importMut.reset(); }}
+            placeholder={"socks5://user:pass@[2001:db8::1]:1080\nproxy.example:8080:user:pass"}
+            className="mono text-xs" aria-invalid={!!importIssues.length || importMut.isError} />
+          {!!importIssues.length && <ul role="alert" className="max-h-48 space-y-1 overflow-auto text-sm text-destructive">
+            {importIssues.map((issue) => <li key={issue.line}>Строка {issue.line}: {issue.message}</li>)}
+          </ul>}
+          {importMut.isError && <p role="alert" className="text-sm text-destructive">{importMut.error.message}</p>}
+          <DialogFooter><Button onClick={() => importMut.mutate()} disabled={importMut.isPending || !importText.trim()}>
+            {importMut.isPending && <Loader2 className="size-4 animate-spin" />}Добавить
+          </Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={open} onOpenChange={closeForm}>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto">
+          <DialogHeader><DialogTitle>{form.id ? "Редактирование прокси" : "Новый прокси"}</DialogTitle></DialogHeader>
+          <form onSubmit={(event) => { event.preventDefault(); if (!saveMut.isPending) saveMut.mutate(); }}>
+            <fieldset disabled={saveMut.isPending} className="grid min-w-0 gap-4 sm:grid-cols-2">
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="proxy-label">Название</Label>
+                <Input id="proxy-label" value={form.label} maxLength={PROXY_LIMITS.label}
+                  onChange={(event) => setForm({ ...form, label: event.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="proxy-protocol">Тип</Label>
+                <Select value={form.protocol} onValueChange={(value) => setForm({ ...form, protocol: value as ProxyProtocol })}>
+                  <SelectTrigger id="proxy-protocol"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="http">HTTP</SelectItem><SelectItem value="https">HTTPS</SelectItem>
+                    <SelectItem value="socks5">SOCKS5</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="proxy-country">Страна</Label>
+                <Input id="proxy-country" value={form.country} maxLength={2} placeholder="DE"
+                  onChange={(event) => setForm({ ...form, country: event.target.value })} />
+              </div>
+              <div className="min-w-0 space-y-2">
+                <Label htmlFor="proxy-host">Адрес</Label>
+                <Input id="proxy-host" value={form.host} maxLength={PROXY_LIMITS.host + 2} required
+                  onChange={(event) => setForm({ ...form, host: event.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="proxy-port">Порт</Label>
+                <Input id="proxy-port" value={form.port} inputMode="numeric" pattern="[0-9]{1,5}" maxLength={5} required
+                  onChange={(event) => setForm({ ...form, port: event.target.value })} />
+              </div>
+              <div className="min-w-0 space-y-2">
+                <Label htmlFor="proxy-username">Логин</Label>
+                <Input id="proxy-username" value={form.username} maxLength={PROXY_LIMITS.credentialBytes} autoComplete="off"
+                  onChange={(event) => setForm({ ...form, username: event.target.value })} />
+              </div>
+              <div className="min-w-0 space-y-2">
+                <Label htmlFor="proxy-password">Пароль</Label>
+                {form.id && <Select value={form.passwordAction}
+                  onValueChange={(value) => setForm({ ...form, passwordAction: value as PasswordAction, password: "" })}>
+                  <SelectTrigger aria-label="Действие с паролем"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="preserve">Сохранить текущий</SelectItem>
+                    <SelectItem value="replace">Заменить</SelectItem>
+                    <SelectItem value="clear">Удалить пароль</SelectItem>
+                  </SelectContent>
+                </Select>}
+                <Input id="proxy-password" type="password" value={form.password} autoComplete="new-password"
+                  disabled={form.passwordAction !== "replace"} maxLength={PROXY_LIMITS.credentialBytes}
+                  required={!!form.id && form.passwordAction === "replace"}
+                  onChange={(event) => setForm({ ...form, password: event.target.value })} />
+              </div>
+            </fieldset>
+            {saveMut.isError && <p role="alert" className="mt-4 text-sm text-destructive">{saveMut.error.message}</p>}
+            <DialogFooter className="mt-4"><Button type="submit" disabled={saveMut.isPending || !ws?.teamId}>
+              {saveMut.isPending && <Loader2 className="size-4 animate-spin" />}Сохранить
+            </Button></DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <div className="mt-6">
         <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Название</TableHead>
-              <TableHead>Тип</TableHead>
-              <TableHead>Адрес</TableHead>
-              <TableHead>Страна</TableHead>
-              <TableHead>Проверка</TableHead>
-              <TableHead />
-            </TableRow>
-          </TableHeader>
+          <TableHeader><TableRow>
+            <TableHead>Название</TableHead><TableHead>Тип</TableHead><TableHead>Адрес</TableHead>
+            <TableHead>Страна</TableHead><TableHead>Проверка</TableHead><TableHead><span className="sr-only">Действия</span></TableHead>
+          </TableRow></TableHeader>
           <TableBody>
-            {(proxies.data ?? []).map((p) => (
-              <TableRow key={p.id}>
-                <TableCell className="font-medium">{p.label}</TableCell>
-                <TableCell className="mono text-xs uppercase">{p.protocol}</TableCell>
-                <TableCell className="mono text-xs">
-                  {p.host}:{p.port}
-                  {p.username ? ` · ${p.username}` : ""}
-                </TableCell>
-                <TableCell className="mono text-xs">{p.country ?? "—"}</TableCell>
-                <TableCell>
-                  {p.last_check_ok === true ? (
-                    <Badge className="bg-primary/15 text-primary">работает</Badge>
-                  ) : p.last_check_ok === false ? (
-                    <Badge variant="destructive">ошибка</Badge>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">не проверялся</span>
-                  )}
-                </TableCell>
-                <TableCell className="text-right">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => checkMut.mutate(p.id)}
-                    disabled={checkMut.isPending}
-                  >
-                    Проверить
+            {(proxies.data ?? []).map((proxy) => <TableRow key={proxy.id}>
+              <TableCell className="max-w-52 break-words font-medium">{proxy.label}</TableCell>
+              <TableCell className="mono text-xs uppercase">{proxy.protocol}</TableCell>
+              <TableCell className="mono max-w-64 break-all text-xs">{proxyAddress(proxy.host, proxy.port)}</TableCell>
+              <TableCell className="mono text-xs">{proxy.country ?? "—"}</TableCell>
+              <TableCell className="min-w-36 max-w-72">
+                {checking.has(proxy.id) ? <span role="status" className="flex items-center gap-2 text-xs">
+                  <Loader2 className="size-3 animate-spin" />Проверяется
+                </span> : proxy.last_check_ok === true ? <Badge className="bg-primary/15 text-primary">работает</Badge>
+                  : proxy.last_check_ok === false ? <Badge variant="destructive">ошибка</Badge>
+                  : <span className="text-xs text-muted-foreground">не проверялся</span>}
+                {proxy.last_check_ip && <div className="mono mt-1 break-all text-xs">{proxy.last_check_ip}
+                  {proxy.last_check_latency_ms != null ? ` · ${proxy.last_check_latency_ms} мс` : ""}</div>}
+                {(checkErrors[proxy.id] || proxy.last_check_error) && <p role="status" className="mt-1 break-words text-xs text-destructive">
+                  {checkErrors[proxy.id] || proxy.last_check_error}
+                </p>}
+              </TableCell>
+              <TableCell className="text-right">
+                {owner && <div className="flex justify-end gap-1">
+                  <Button variant="ghost" size="icon" title="Проверить прокси" aria-label="Проверить прокси"
+                    disabled={checkMut.isPending || removeMut.isPending} onClick={() => checkMut.mutate([proxy.id])}>
+                    <Activity className="size-4" />
                   </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() =>
-                      remove({ data: { id: p.id } })
-                        .then(invalidate)
-                        .catch((e: Error) => toast.error(e.message))
-                    }
-                  >
-                    Удалить
+                  <Button variant="ghost" size="icon" title="Редактировать прокси" aria-label="Редактировать прокси"
+                    disabled={checkMut.isPending || removeMut.isPending} onClick={() => edit(proxy)}>
+                    <Pencil className="size-4" />
                   </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-            {!proxies.isLoading && (proxies.data ?? []).length === 0 && (
-              <TableRow>
-                <TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
-                  Пока нет ни одного прокси
-                </TableCell>
-              </TableRow>
-            )}
+                  <Button variant="ghost" size="icon" title="Удалить прокси" aria-label="Удалить прокси"
+                    disabled={checkMut.isPending || removeMut.isPending} onClick={() => removeMut.mutate(proxy.id)}>
+                    {removeMut.isPending && removeMut.variables === proxy.id ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+                  </Button>
+                </div>}
+              </TableCell>
+            </TableRow>)}
+            {(proxies.isPending || proxies.isError || !proxies.data?.length) && <TableRow>
+              <TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
+                {proxies.isPending ? "Загрузка прокси..." : proxies.isError ? "Не удалось загрузить прокси" : "Пока нет ни одного прокси"}
+                {proxies.isError && <Button variant="ghost" onClick={() => { void proxies.refetch(); }}>Повторить</Button>}
+              </TableCell>
+            </TableRow>}
           </TableBody>
         </Table>
       </div>

@@ -17,9 +17,10 @@ export type Fingerprint = {
   audioNoise: number;
   webrtc: "disabled" | "proxy";
   doNotTrack: boolean;
+  startUrl?: string;
 };
 
-const CHROME_VERSIONS = ["139.0.7258.128", "140.0.7339.81", "141.0.7390.54", "142.0.7444.62"];
+const CHROME_VERSIONS = ["152.0.7977.78"];
 const WINDOWS_VERSIONS = ["10.0", "11.0"];
 const SCREENS = [
   { width: 1920, height: 1080 },
@@ -56,7 +57,7 @@ const GPUS = [
   },
 ];
 const CORES = [4, 6, 8, 12, 16];
-const MEMORY = [4, 8, 8, 16, 16, 32];
+const MEMORY = [4, 8];
 const FONT_PRESETS = ["Windows 10 базовый", "Windows 11 базовый", "Windows + MS Office"];
 
 /** Соответствие страны прокси -> язык и часовой пояс, чтобы отпечаток был правдоподобным. */
@@ -95,7 +96,7 @@ export function generateFingerprint(country?: string | null): Fingerprint {
     os: "windows",
     osVersion,
     chromeVersion,
-    userAgent: `Mozilla/5.0 (Windows NT ${osVersion}; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`,
+    userAgent: `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`,
     platform: "Win32",
     screen: { ...screen, colorDepth: 24 },
     gpu,

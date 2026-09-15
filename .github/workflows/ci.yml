@@ -37,7 +37,9 @@ jobs:
 
       - name: Зависимости клиента
         working-directory: desktop
-        run: npm ci
+        run: |
+          npm ci
+          node node_modules/electron/install.js
 
       - name: Тесты клиента
         working-directory: desktop

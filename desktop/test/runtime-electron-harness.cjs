@@ -231,7 +231,7 @@ if (process.versions.electron) {
     try { await waitUntil(() => runtime.getRunningProfile(ID).tabCount === 3, 400); }
     catch (failure) {
       const profile = runtime.getRunningProfile(ID);
-      const toolbar = await shell.webContents.executeJavaScript("({error:document.querySelector('[role=alert]')?.textContent || '',tabs:document.querySelectorAll('[data-tab-id]').length})").catch(() => null);
+      const toolbar = await shell.webContents.executeJavaScript("({error:document.getElementById('error')?.textContent || '',tabs:document.querySelectorAll('#tabs .tab').length})").catch(() => null);
       throw new Error(`${failure.message}: ${JSON.stringify({ profile, toolbar })}`);
     }
     const fresh = profileTabs(ses).find((view) => view !== win && view !== popup);

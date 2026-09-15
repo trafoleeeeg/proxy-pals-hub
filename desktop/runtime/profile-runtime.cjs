@@ -147,6 +147,7 @@ function createProfileRuntime(electron, options = {}) {
       if (options.show !== false) win.show();
       return win;
     } catch (error) {
+      if (!primary) entry.lastError = /^(Profile navigation failed|Unable to apply fingerprint before navigation)/.test(error.message) ? error.message : "Tab launch failed";
       if (!win.isDestroyed()) win.destroy();
       throw error;
     }

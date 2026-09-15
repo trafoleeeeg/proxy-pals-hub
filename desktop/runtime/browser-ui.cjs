@@ -53,7 +53,8 @@ function renderer() {
 }
 
 function browserUrl() {
-  const script = `(${renderer.toString()})();`;
+  // HTML parsing normalizes CRLF even when Git checks out this source with CRLF on Windows.
+  const script = `(${renderer.toString()})();`.replace(/\r\n?/g, "\n");
   const hash = createHash("sha256").update(script).digest("base64");
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-${hash}'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-src 'none'">

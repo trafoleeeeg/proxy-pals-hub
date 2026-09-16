@@ -22,6 +22,7 @@ test("overlapping update checks issue one request", async () => {
 });
 test("periodic checks preserve downloaded update and install is idempotent", async () => {
   const f = fixture();
+  assert.equal(f.updater.autoInstallOnAppQuit, true);
   f.updater.emit("update-downloaded", { version: "0.4.1" });
   await f.controller.check();
   assert.equal(f.checks(), 0);

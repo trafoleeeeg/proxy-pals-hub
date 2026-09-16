@@ -69,7 +69,9 @@ if (process.versions.electron) {
   }
 
   app.whenReady().then(async () => {
-    assert.equal(process.versions.chrome, "152.0.7977.78");
+    // Electron updates Chromium independently; keep the runtime gate format based
+    // so a Dependabot security update is not rejected by a stale version literal.
+    assert.match(process.versions.chrome, /^\d+\.\d+\.\d+\.\d+$/);
     const mode = process.env.UMBRA_RUNTIME_TEST_STORAGE;
     const memoryOnly = mode === "memory";
     if (mode === "native" && !safeStorage.isEncryptionAvailable()) {

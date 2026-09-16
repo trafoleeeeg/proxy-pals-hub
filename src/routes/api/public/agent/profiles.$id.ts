@@ -5,6 +5,7 @@ import {
   authenticateAgent,
   enforceRateLimit,
   jsonError,
+  jsonResponse,
   logAgentAction,
   requireScope,
 } from "@/lib/agent-auth.server";
@@ -19,12 +20,13 @@ const patchSchema = z.object({
 
 async function ownedProfile(teamId: string, id: string) {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from("browser_profiles")
     .select("id")
     .eq("id", id)
     .eq("team_id", teamId)
     .maybeSingle();
+  if (error) throw new AgentError(503, "Не удалось проверить профиль");
   if (!data) throw new AgentError(404, "Профиль не найден");
   return supabaseAdmin;
 }
@@ -57,11 +59,22 @@ export const Route = createFileRoute("/api/public/agent/profiles/$id")({
           if (parsed.data.proxyId !== undefined) patch.proxy_id = parsed.data.proxyId;
           if (Object.keys(patch).length === 0) throw new AgentError(400, "Нечего менять");
 
+          if (parsed.data.proxyId) {
+            const { data: proxy, error } = await db
+              .from("proxies")
+              .select("id")
+              .eq("id", parsed.data.proxyId)
+              .eq("team_id", agent.teamId)
+              .maybeSingle();
+            if (error) throw new AgentError(503, "Не удалось проверить прокси");
+            if (!proxy) throw new AgentError(400, "Прокси не найден в этой команде");
+          }
+
           const { error } = await db.from("browser_profiles").update(patch).eq("id", params.id);
-          if (error) throw new AgentError(500, error.message);
+          if (error) throw new AgentError(500, "Не удалось обновить профиль");
 
           await logAgentAction(agent, "profile.updated", "profile", params.id, patch);
-          return Response.json({ ok: true });
+          return jsonResponse({ ok: true });
         } catch (err) {
           return jsonError(err);
         }
@@ -75,10 +88,10 @@ export const Route = createFileRoute("/api/public/agent/profiles/$id")({
 
           const db = await ownedProfile(agent.teamId, params.id);
           const { error } = await db.from("browser_profiles").delete().eq("id", params.id);
-          if (error) throw new AgentError(500, error.message);
+          if (error) throw new AgentError(500, "Не удалось удалить профиль");
 
           await logAgentAction(agent, "profile.deleted", "profile", params.id);
-          return Response.json({ ok: true });
+          return jsonResponse({ ok: true });
         } catch (err) {
           return jsonError(err);
         }

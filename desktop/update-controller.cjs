@@ -11,7 +11,9 @@ function createUpdateController({ updater, enabled, currentVersion, onState, has
   };
   const errorText = (error) => String(error?.message || error).slice(0, 600);
   updater.autoDownload = true;
-  updater.autoInstallOnAppQuit = false;
+  // Install a verified, downloaded update on the next normal quit. main.cjs
+  // flushes and closes every profile before allowing the quit event through.
+  updater.autoInstallOnAppQuit = true;
   updater.allowPrerelease = false;
   updater.allowDowngrade = false;
   on("checking-for-update", () => setState({ state: "checking" }));

@@ -10,7 +10,11 @@ const { isTrustedSender, isWebUrl } = require("./ipc-policy.cjs");
 const { createUpdateController } = require("./update-controller.cjs");
 const { createSessionOutbox } = require("./session-outbox.cjs");
 
-const APP_URL = process.env.UMBRA_APP_URL || "https://proxy-pals-hub.lovable.app/app";
+const DEFAULT_APP_URL = "https://proxy-pals-hub.lovable.app/app";
+// A packaged client must never let a local environment variable replace the
+// trusted panel origin. This origin controls which page receives the IPC
+// bridge and therefore must be fixed in the release binary.
+const APP_URL = app.isPackaged ? DEFAULT_APP_URL : (process.env.UMBRA_APP_URL || DEFAULT_APP_URL);
 if (!isWebUrl(APP_URL)) throw new Error("Invalid application URL");
 const APP_ORIGIN = new URL(APP_URL).origin;
 if (app.isPackaged && new URL(APP_URL).protocol !== "https:") throw new Error("The installed application requires HTTPS");

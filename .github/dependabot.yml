@@ -1,0 +1,40 @@
+version: 2
+updates:
+  # Electron contains the Chromium, Node.js and V8 runtime shipped to users.
+  # Check every day so a stable Electron security release becomes a tested PR
+  # promptly; the existing Windows native gate must pass before merging.
+  - package-ecosystem: npm
+    directory: /desktop
+    schedule:
+      interval: daily
+    open-pull-requests-limit: 5
+    versioning-strategy: increase
+    labels:
+      - dependencies
+      - electron
+    groups:
+      electron-runtime:
+        patterns:
+          - electron
+        update-types:
+          - patch
+          - minor
+          - major
+
+  # Keep the panel and its build tooling current as well.
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions

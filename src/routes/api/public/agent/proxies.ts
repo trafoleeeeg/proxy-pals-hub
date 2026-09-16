@@ -5,6 +5,7 @@ import {
   authenticateAgent,
   enforceRateLimit,
   jsonError,
+  jsonResponse,
   logAgentAction,
   requireScope,
 } from "@/lib/agent-auth.server";
@@ -37,10 +38,10 @@ export const Route = createFileRoute("/api/public/agent/proxies")({
             .eq("team_id", agent.teamId)
             .order("created_at", { ascending: false })
             .limit(500);
-          if (error) throw new AgentError(500, error.message);
+          if (error) throw new AgentError(500, "Не удалось получить прокси");
 
           // Пароль прокси наружу не отдаём — только признак его наличия.
-          return Response.json({
+          return jsonResponse({
             proxies: (data ?? []).map(({ password_enc, ...rest }) => ({
               ...rest,
               hasPassword: Boolean(password_enc),
@@ -79,10 +80,10 @@ export const Route = createFileRoute("/api/public/agent/proxies")({
             })
             .select("id")
             .single();
-          if (error) throw new AgentError(500, error.message);
+          if (error) throw new AgentError(500, "Не удалось создать прокси");
 
           await logAgentAction(agent, "proxy.created", "proxy", data.id, { host: input.host });
-          return Response.json({ id: data.id }, { status: 201 });
+          return jsonResponse({ id: data.id }, { status: 201 });
         } catch (err) {
           return jsonError(err);
         }

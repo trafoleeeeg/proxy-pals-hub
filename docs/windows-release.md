@@ -1,13 +1,21 @@
-# Windows Reliability Release 0.4.0
+# Windows Reliability and Release
 
 ## Scope
 
 - Windows x64 NSIS installer; one uniquely named executable, its blockmap and `latest.yml`.
-- Background update checks/downloads, visible errors, explicit restart, and installation blocked while profiles run.
+- Background update checks/downloads, visible errors, and installation after a normal quit once profiles are closed.
 - Isolated persistent profile sessions, authenticated HTTP/SOCKS5 proxy tunnels, bounded proxy checks, and no direct fallback after configured-proxy failure.
 - Profile address bar and managed tabs, with remote content separated from privileged browser controls.
 - Encrypted local cookie checkpoints and a retryable encrypted close outbox.
 - Token-owned server leases, atomic bulk mutations, owner-controlled team assignment, and JSON/Netscape cookie import/export.
+
+## Core updates and security
+
+Electron ships the Chromium engine inside the desktop installer, so a Chromium security release is delivered as a tested Electron update. Dependabot checks the desktop manifest daily and opens a PR for stable Electron releases; panel dependencies and GitHub Actions are checked weekly. Every dependency PR must pass the Linux, Windows-native and high-severity audit gates before it can be merged.
+
+Packaged clients check the signed GitHub release manifest in the background and download updates automatically. The downloaded installer is installed on the next normal application quit, after Umbra has flushed profile cookies and closed profile windows. Prerelease and downgrade updates are disabled. The packaged panel URL is fixed to the HTTPS production origin; a local environment override is available only during development.
+
+The repository also runs a daily dependency audit. The lockfiles pin the audited versions of transitive packages, including the current brace-expansion, js-yaml and nanoid security fixes. Keep the Electron update PR and its generated lockfile together so the runtime, Chromium and audit result stay aligned.
 
 ## Release Gates
 
@@ -37,7 +45,7 @@ The Windows CI job enforces both native test gates. Linux CI installs Electron a
 2. Back up the database and retain the current `APP_ENCRYPTION_KEY`. Changing that key makes existing encrypted proxy passwords and cookies unreadable.
 3. Apply migrations in `supabase/migrations/` in timestamp order through the normal Lovable/Supabase deployment process. The 0.4.0 changes are recorded under deployed versions `20260915192121` through `20260915192302`. Their original reviewed sources are archived in `docs/migration-sources/0.4.0/`; do not execute that archive or reapply changes already present in the migration ledger. Do not run migrations from an agent against production directly.
 4. Merge the feature branch only via a PR with green checks, then publish the corresponding web panel. Server functions and the database migration must be deployed together.
-5. Create the matching `v0.4.0` tag. The workflow builds a draft GitHub release. Check installer, blockmap and `latest.yml`, then verify fresh installation and a real installed-version upgrade before publishing the release.
+5. Create the matching `v<desktop version>` tag. The workflow builds a draft GitHub release. Check the installer, blockmap and `latest.yml`, then verify fresh installation and a real installed-version upgrade before publishing the release.
 6. Clients whose old preload/updater bridge is broken may require one manual repair installation. Subsequent installed versions use the corrected update path. Do not uninstall with application-data deletion.
 
 No code-signing certificate is bundled. Configure signing through protected CI secrets before a public signed release; a local unsigned build is a test artifact and may produce a Windows SmartScreen warning.

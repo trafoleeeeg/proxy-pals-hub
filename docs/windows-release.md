@@ -19,6 +19,7 @@ bun run typecheck
 bun test tests/
 bun run build
 npm --prefix desktop ci
+node desktop/node_modules/electron/install.js
 $env:UMBRA_REQUIRE_NATIVE = "1"
 $env:UMBRA_REQUIRE_DPAPI = "1"
 npm --prefix desktop test
@@ -28,13 +29,13 @@ npm --prefix desktop run verify:release
 
 Run the strict native test in a normal Windows user account. A sandbox service account without DPAPI cannot verify OS-encrypted session restart. A skipped test is not a successful encryption check. Production must continue to reject opening profiles when OS encryption is unavailable.
 
-The Windows CI job enforces both native test gates. Linux CI intentionally omits the Electron binary and runs the remaining unit and network tests. Visual tests live under `tests/visual` and use synthetic data, never production credentials.
+The Windows CI job enforces both native test gates. Linux CI installs Electron and runs the native proxy and browser tests under a virtual display with the Chromium sandbox enabled; OS-encrypted restart is verified by the Windows gate. Visual tests live under `tests/visual` and use synthetic data, never production credentials.
 
 ## Coordinated Rollout
 
 1. Close all profiles on every old client and confirm session synchronization. The lease migration invalidates old leases. Schedule this as a coordinated upgrade, not a rolling mixed-client release.
 2. Back up the database and retain the current `APP_ENCRYPTION_KEY`. Changing that key makes existing encrypted proxy passwords and cookies unreadable.
-3. Apply the new migrations in timestamp order through the normal Lovable/Supabase deployment process, starting with `20260915120000_server_access_and_session_leases.sql`. Do not run migrations from an agent against production directly.
+3. Apply migrations in `supabase/migrations/` in timestamp order through the normal Lovable/Supabase deployment process. The 0.4.0 changes are recorded under deployed versions `20260915192121` through `20260915192302`. Their original reviewed sources are archived in `docs/migration-sources/0.4.0/`; do not execute that archive or reapply changes already present in the migration ledger. Do not run migrations from an agent against production directly.
 4. Merge the feature branch only via a PR with green checks, then publish the corresponding web panel. Server functions and the database migration must be deployed together.
 5. Create the matching `v0.4.0` tag. The workflow builds a draft GitHub release. Check installer, blockmap and `latest.yml`, then verify fresh installation and a real installed-version upgrade before publishing the release.
 6. Clients whose old preload/updater bridge is broken may require one manual repair installation. Subsequent installed versions use the corrected update path. Do not uninstall with application-data deletion.

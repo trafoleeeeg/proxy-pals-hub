@@ -151,7 +151,7 @@ function renderer() {
     bookmarksBar.hidden = !state.bookmarkBarVisible;
     bookmarksBar.replaceChildren(...(state.bookmarks || []).map((bookmark) => {
       const button = document.createElement("button"); button.className = "bookmark"; button.draggable = true; button.dataset.id = bookmark.id;
-      const favicon = document.createElement(bookmark.favicon ? "img" : "span"); favicon.className = "bookmark-favicon";
+      const favicon = document.createElement(bookmark.favicon ? "img" : "div"); favicon.className = "bookmark-favicon";
       if (bookmark.favicon) { favicon.src = bookmark.favicon; favicon.alt = ""; } else favicon.innerHTML = icon("globe");
       const label = document.createElement("span"); label.textContent = bookmark.title || new URL(bookmark.url).hostname;
       button.append(favicon, label);

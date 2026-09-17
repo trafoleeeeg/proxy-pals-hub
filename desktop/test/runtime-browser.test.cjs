@@ -2,12 +2,14 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
 const { createProfileBrowser, CHROME_HEIGHT } = require("../runtime/browser.cjs");
+const { browserUrl } = require("../runtime/browser-ui.cjs");
 
 function harness() {
   let handler;
   const stateEvents = [];
   const views = [];
   let layoutCount = 0;
+  let bookmarks = [];
   class Contents extends EventEmitter {
     constructor() {
       super(); this.url = "about:blank"; this.title = ""; this.loading = false;
@@ -54,12 +56,14 @@ function harness() {
     browser = await createProfileBrowser(electron, {
       name: "Тест", fp: { screen: { width: 1280, height: 720 } }, partition: "persist:test",
       openTab, closeProfile: async () => {}, show: false, onTabsChanged: () => changed.push(true),
+      getBookmarks: () => bookmarks,
+      addBookmark: async (bookmark) => { bookmarks = [...bookmarks, { id: "11111111-1111-4111-8111-111111111111", ...bookmark }]; },
     });
     browser.markReady();
     await openTab("https://one.example/");
     await openTab("https://two.example/");
     const event = { sender: browser.shell.webContents, senderFrame: browser.shell.webContents.mainFrame };
-    return { browser, command: (message) => handler(event, message), stateEvents, changed, layoutCount: () => layoutCount };
+    return { browser, command: (message) => handler(event, message), stateEvents, changed, views, getBookmarks: () => bookmarks, layoutCount: () => layoutCount };
   };
   return { start };
 }
@@ -106,5 +110,25 @@ test("chrome height updates layout only after a real height change and never rep
   await h.command({ action: "chrome-height", value: CHROME_HEIGHT + 34 });
   assert.equal(h.layoutCount(), layoutCount + 2);
   assert.equal(h.stateEvents.length, stateCount);
+  h.browser.destroy();
+});
+
+test("browser UI sends chrome height only when it changes", () => {
+  const source = decodeURIComponent(browserUrl().split(",", 2)[1]);
+  assert.match(source, /if \(height === sentChromeHeight\) return;/);
+});
+
+test("saving the current page passes its fetched favicon to the bookmark store", async () => {
+  const h = await harness().start();
+  const favicon = Buffer.from("favicon fixture");
+  const contents = h.views.at(-1).webContents;
+  contents.session.fetch = async () => ({
+    headers: { get: () => "image/png" },
+    arrayBuffer: async () => favicon,
+  });
+  contents.emit("page-favicon-updated", {}, ["https://two.example/favicon.png"]);
+  await new Promise((resolve) => setImmediate(resolve));
+  await h.command({ action: "bookmark" });
+  assert.equal(h.getBookmarks()[0].favicon, `data:image/png;base64,${favicon.toString("base64")}`);
   h.browser.destroy();
 });

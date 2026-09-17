@@ -12,6 +12,9 @@ function renderer() {
   const bookmarkPopover = byId("bookmark-popover");
   const extensionsPopover = byId("extensions-popover");
   const menu = byId("browser-menu");
+  const manager = byId("bookmark-manager");
+  const findbar = byId("findbar");
+  const findInput = byId("find-input");
   const newTab = byId("new");
   let current;
   let latestState = {};
@@ -29,7 +32,7 @@ function renderer() {
     if (result?.error) showError(result.error);
   }).catch(() => showError("Не удалось выполнить действие"));
   const closePopovers = (except) => {
-    for (const popover of [bookmarkPopover, extensionsPopover, menu]) if (popover !== except) popover.hidden = true;
+    for (const popover of [bookmarkPopover, extensionsPopover, menu, manager]) if (popover !== except) popover.hidden = true;
   };
   const togglePopover = (popover, anchor) => {
     const show = popover.hidden;

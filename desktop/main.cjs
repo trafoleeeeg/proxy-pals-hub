@@ -30,6 +30,7 @@ let outbox = null;
 let quitting = false;
 let closing = false;
 let proxyChecks = 0;
+let extensionDownloads = 0;
 function send(channel, payload) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
 }

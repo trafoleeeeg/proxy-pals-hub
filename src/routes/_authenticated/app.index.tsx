@@ -2,7 +2,12 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Globe2, MoreVertical, CircleUserRound, Copy, Cookie, FolderInput, LockKeyhole, Pencil, Play, Plus, RefreshCw, Search, Settings2, Square, Trash2, UserPlus, X } from "lucide-react";
+import { Globe2, MoreVertical, CircleUserRound, Copy, Cookie, FolderInput, LockKeyhole, Pencil, Play, Plus, RefreshCw, Search, Settings2, Square, Tag, Trash2, UserPlus, X } from "lucide-react";
+
+const statusColor: Record<string, string> = {
+  primary: "text-primary", success: "text-success", warning: "text-warning",
+  destructive: "text-destructive", muted: "text-muted-foreground",
+};
 import { toast } from "sonner";
 import { useWorkspace } from "@/lib/useWorkspace";
 import { ALL_FOLDERS, useProfileFolder } from "@/lib/useProfileFolder";
@@ -136,7 +141,7 @@ function ProfilesWorkspace() {
   const shownFields = (metadata.data?.fields ?? []).filter((field) => visibleFields.includes(field.id));
   const columnCount = 2 + visibleColumns.length + shownFields.length + (owner ? 2 : 0);
   const occupied = (profiles.data ?? []).filter((profile) => !!profile.lock && !running.has(profile.id)).length;
-  const available = Math.max(0, (profiles.data?.length ?? 0) - running.size - occupied);
+  
   const withProxy = (profiles.data ?? []).filter((profile) => !!profile.proxy_id).length;
 
   if (workspace.isPending) return <p role="status" className="text-sm text-muted-foreground">Загрузка рабочего пространства…</p>;
@@ -154,11 +159,16 @@ function ProfilesWorkspace() {
         {owner && <><Button variant="outline" disabled={!!busy} onClick={() => { setError(null); setBulkOpen(true); }}><Plus className="size-4" />Создать пачкой</Button><Button disabled={!!busy} onClick={newProfile}><Plus className="size-4" />Новый профиль</Button></>}
       </div>
     </div>
-    <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
+    <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-6">
       {[
         { label: "Всего", value: profiles.data?.length ?? 0, detail: "профилей", icon: CircleUserRound, tone: "text-foreground" },
-        { label: "Открыто", value: running.size, detail: "на этом компьютере", icon: Play, tone: "text-primary" },
-        { label: "Свободно", value: available, detail: "можно запускать", icon: CheckCircle2, tone: "text-success" },
+        ...(metadata.data?.statuses ?? []).map((status) => ({
+          label: status.name,
+          value: (profiles.data ?? []).filter((profile) => profile.status_id === status.id).length,
+          detail: "профилей со статусом",
+          icon: Tag,
+          tone: statusColor[status.color] ?? "text-foreground",
+        })),
         { label: "Занято", value: occupied, detail: "другим пользователем", icon: LockKeyhole, tone: "text-warning" },
         { label: "С прокси", value: withProxy, detail: `${(profiles.data?.length ?? 0) - withProxy} без прокси`, icon: Globe2, tone: "text-primary" },
       ].map((stat) => <div key={stat.label} className="flex min-h-20 items-center gap-3 rounded-md border border-border bg-card px-3 py-2">

@@ -3,6 +3,7 @@ const { createProfileBrowser } = require("./browser.cjs");
 const { createRuntimeProxy, blockSession } = require("./proxy.cjs");
 const { createCookieStore, initializeCookies, canonicalCookies } = require("./cookies.cjs");
 const { createTabStore, sanitizeTabs } = require("./tabs.cjs");
+const { createBookmarkStore } = require("./bookmarks.cjs");
 const { normalizeFingerprint, applyFingerprint } = require("./fingerprint.cjs");
 
 function createProfileRuntime(electron, options = {}) {
@@ -14,8 +15,10 @@ function createProfileRuntime(electron, options = {}) {
   let shuttingDown = false;
   let store;
   let tabStoreRef;
+  let bookmarkStoreRef;
   const cookieStore = () => store ||= options.cookieStore || createCookieStore({ safeStorage, userData: app.getPath("userData") });
   const tabStore = () => tabStoreRef ||= options.tabStore || createTabStore({ safeStorage, userData: app.getPath("userData") });
+  const bookmarkStore = () => bookmarkStoreRef ||= options.bookmarkStore || createBookmarkStore({ safeStorage, userData: app.getPath("userData") });
   const extensionStore = options.extensionStore;
 
   function status(entry) {
@@ -137,7 +140,27 @@ function createProfileRuntime(electron, options = {}) {
         return pending;
       },
       closeProfile: () => closeProfileWindow(entry.profileId),
+      getBookmarks: () => entry.bookmarks || [],
+      getExtensions: () => entry.extensionList || [],
+      addBookmark: (bookmark) => saveBookmarks(entry, [...(entry.bookmarks || []), { ...bookmark }]),
+      removeBookmark: (id) => saveBookmarks(entry, (entry.bookmarks || []).filter((item) => item.id !== id)),
     };
+  }
+
+  function saveBookmarks(entry, list) {
+    entry.bookmarkQueue = (entry.bookmarkQueue || Promise.resolve()).catch(() => {}).then(async () => {
+      entry.bookmarks = await bookmarkStore().write(entry.profileId, list);
+      return entry.bookmarks;
+    }).catch(() => { entry.lastError = "Bookmark save failed"; return entry.bookmarks || []; });
+    return entry.bookmarkQueue;
+  }
+
+  async function reloadExtensionList(entry) {
+    if (!extensionStore) return;
+    const all = await extensionStore.list().catch(() => []);
+    entry.extensionList = all
+      .filter((item) => !entry.extensionsLoaded || entry.extensionsLoaded.has(item.id))
+      .map((item) => ({ id: item.id, name: item.name, version: item.version }));
   }
   function checkConnection(entry) {
     if (entry.checkJob) return entry.checkJob;
@@ -270,7 +293,9 @@ function createProfileRuntime(electron, options = {}) {
       if (extensionStore) {
         const extensionResult = await extensionStore.loadIntoSession(entry.ses, entry.extensionsLoaded);
         entry.extensionErrors = extensionResult.errors;
+        await reloadExtensionList(entry);
       }
+      entry.bookmarks = await bookmarkStore().read(id).catch(() => []);
       const saved = await tabStore().read(id).catch(() => ({ tabs: [], activeIndex: 0 }));
       const plan = url !== "about:blank" ? [url] : (saved.tabs.length ? saved.tabs : ["about:blank"]);
       await makeWindow(entry, plan[0], true);
@@ -362,6 +387,7 @@ function createProfileRuntime(electron, options = {}) {
       entry.extensionsLoaded ||= new Map();
       const extensionResult = await extensionStore.loadIntoSession(entry.ses, entry.extensionsLoaded);
       entry.extensionErrors = extensionResult.errors;
+      await reloadExtensionList(entry);
       entry.browser?.publish?.();
       return extensionResult.errors.length;
     }));

@@ -4,7 +4,7 @@ const { EventEmitter } = require("node:events");
 const { startUrl } = require("./validation.cjs");
 const { browserUrl } = require("./browser-ui.cjs");
 
-const CHROME_HEIGHT = 108;
+const CHROME_HEIGHT = 144;
 const handlers = new WeakMap();
 
 function addressUrl(value) {
@@ -18,7 +18,10 @@ function addressUrl(value) {
   return `https://www.google.com/search?q=${encodeURIComponent(value)}`;
 }
 
-async function createProfileBrowser(electron, { name, fp, partition, openTab, closeProfile, getInfo = () => ({}), checkConnection = async () => {}, show = true }) {
+async function createProfileBrowser(electron, {
+  name, fp, partition, openTab, closeProfile, getInfo = () => ({}), checkConnection = async () => {}, show = true,
+  getBookmarks = () => [], addBookmark = async () => {}, removeBookmark = async () => {}, getExtensions = () => [],
+}) {
   const { BrowserWindow, WebContentsView, session, ipcMain } = electron;
   let registry = handlers.get(ipcMain);
   if (!registry) {
@@ -49,7 +52,11 @@ async function createProfileBrowser(electron, { name, fp, partition, openTab, cl
   function publish() {
     if (shell.isDestroyed()) return;
     layout();
-    shell.webContents.send("umbra-runtime:state", { name, activeId, error, home: isHome(active()), info: getInfo(), tabs: [...tabs.values()].filter((tab) => !tab.isDestroyed()).map((tab) => ({
+    const currentUrl = active()?.webContents.getURL() || active()?.url || "";
+    const bookmarks = getBookmarks();
+    shell.webContents.send("umbra-runtime:state", { name, activeId, error, home: isHome(active()), info: getInfo(),
+      bookmarks, extensions: getExtensions(), bookmarked: bookmarks.some((item) => item.url === currentUrl),
+      tabs: [...tabs.values()].filter((tab) => !tab.isDestroyed()).map((tab) => ({
       id: tab.id, url: tab.webContents.getURL() || tab.url, title: tab.webContents.getTitle(), error: tab.error,
       loading: tab.webContents.isLoading(), canGoBack: tab.webContents.navigationHistory.canGoBack(), canGoForward: tab.webContents.navigationHistory.canGoForward(),
     })) });
@@ -87,6 +94,27 @@ async function createProfileBrowser(electron, { name, fp, partition, openTab, cl
         break;
       }
       case "close-profile": await closeProfile(); break;
+      case "duplicate": {
+        const url = tab?.webContents.getURL() || tab?.url || "about:blank";
+        await openTab(url);
+        break;
+      }
+      case "bookmark": {
+        const url = tab?.webContents.getURL() || tab?.url || "";
+        if (!url || url === "about:blank") { error = "Эту страницу нельзя добавить в закладки"; break; }
+        const saved = getBookmarks().find((item) => item.url === url);
+        if (saved) await removeBookmark(saved.id);
+        else await addBookmark({ url: startUrl(url), title: tab?.webContents.getTitle() || "" });
+        break;
+      }
+      case "open-bookmark": {
+        const saved = getBookmarks().find((item) => item.id === message.id);
+        if (!saved) break;
+        if (message.newTab || !tab) await openTab(saved.url);
+        else { tab.error = ""; void tab.loadURL(saved.url).catch(() => {}); }
+        break;
+      }
+      case "remove-bookmark": await removeBookmark(message.id); break;
       case "navigate": if (tab) { tab.error = ""; void tab.loadURL(addressUrl(message.value)).catch(() => {}); } break;
       case "back": if (tab?.webContents.navigationHistory.canGoBack()) tab.webContents.navigationHistory.goBack(); break;
       case "forward": if (tab?.webContents.navigationHistory.canGoForward()) tab.webContents.navigationHistory.goForward(); break;
@@ -115,6 +143,11 @@ async function createProfileBrowser(electron, { name, fp, partition, openTab, cl
       if (key === "t") action = "new";
       if (key === "w") action = "close-tab";
       if (key === "r") action = "reload";
+      if (key === "d") action = "bookmark";
+      if (/^[1-9]$/.test(key)) {
+        event.preventDefault(); const all = [...tabs.values()];
+        select(key === "9" ? all.at(-1) : all[Number(key) - 1]); return;
+      }
       if (key === "tab") {
         event.preventDefault(); const all = [...tabs.values()];
         select(all[(all.indexOf(active()) + (input.shift ? -1 : 1) + all.length) % all.length]); return;

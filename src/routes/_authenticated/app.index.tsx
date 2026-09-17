@@ -45,6 +45,7 @@ function ProfilesWorkspace() {
   const createMany = useServerFn(bulkCreateProfiles);
   const proxiesFn = useServerFn(listProxies);
   const runtime = useDesktopProfileLifecycle();
+  const proxyOps = useProxyOps(ws?.teamId);
   const [search, setSearch] = useState("");
   const [folder, setFolder] = useState(ALL);
   const [selected, setSelected] = useState<string[]>([]);

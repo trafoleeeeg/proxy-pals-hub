@@ -52,7 +52,11 @@ async function createProfileBrowser(electron, {
   function publish() {
     if (shell.isDestroyed()) return;
     layout();
-    shell.webContents.send("umbra-runtime:state", { name, activeId, error, home: isHome(active()), info: getInfo(), tabs: [...tabs.values()].filter((tab) => !tab.isDestroyed()).map((tab) => ({
+    const currentUrl = active()?.webContents.getURL() || active()?.url || "";
+    const bookmarks = getBookmarks();
+    shell.webContents.send("umbra-runtime:state", { name, activeId, error, home: isHome(active()), info: getInfo(),
+      bookmarks, extensions: getExtensions(), bookmarked: bookmarks.some((item) => item.url === currentUrl),
+      tabs: [...tabs.values()].filter((tab) => !tab.isDestroyed()).map((tab) => ({
       id: tab.id, url: tab.webContents.getURL() || tab.url, title: tab.webContents.getTitle(), error: tab.error,
       loading: tab.webContents.isLoading(), canGoBack: tab.webContents.navigationHistory.canGoBack(), canGoForward: tab.webContents.navigationHistory.canGoForward(),
     })) });

@@ -46,6 +46,7 @@ function ExtensionManager() {
   const bridge = desktop();
   const [extensions, setExtensions] = useState<InstalledExtension[]>([]);
   const [busy, setBusy] = useState(false);
+  const [link, setLink] = useState("");
   const supported = !!(bridge?.listExtensions && bridge.addExtension && bridge.removeExtension);
   const [loadError, setLoadError] = useState(false);
   useEffect(() => {

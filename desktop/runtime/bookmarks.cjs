@@ -119,4 +119,4 @@ function createBookmarkStore({ safeStorage, userData }) {
   };
 }
 
-module.exports = { createBookmarkStore, sanitizeBookmarks, sanitizeBookmarkState, sanitizeFavicon, MAX_BOOKMARKS, MAX_FAVICON_BYTES };
+module.exports = { createBookmarkStore, sanitizeBookmarks, sanitizeBookmarkState, sanitizeFavicon, defaultBookmarks, DEFAULT_BOOKMARKS, MAX_BOOKMARKS, MAX_FAVICON_BYTES };

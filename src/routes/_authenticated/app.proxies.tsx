@@ -179,13 +179,15 @@ export function ProxiesPage() {
       return confirmRotation({
         previousIp: request.previousIp!,
         probe,
-        record: async (result, final) => {
-          await record({ data: { id, teamId: selectedTeam, ...result, rotationRequestedAt: request.requestedAt, rotationFinal: final } });
+        record: async (result, final, confirmed) => {
+          await record({ data: { id, teamId: selectedTeam, ...result, rotationRequestedAt: request.requestedAt, rotationFinal: final, rotationConfirmed: confirmed } });
           void invalidate();
         },
       });
     },
-    onSuccess: (result) => toast.success("Новый IP подтверждён: " + result.ip),
+    onSuccess: (result) => result.rotationConfirmed
+      ? toast.success("Новый IP подтверждён: " + result.ip)
+      : toast.info("IP обновлён. Смена уже завершена в другом окне"),
     onError: (error: Error) => toast.error(error.message),
     onSettled: () => invalidate(),
   });

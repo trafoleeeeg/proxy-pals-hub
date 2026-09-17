@@ -397,7 +397,7 @@ describe("mobile proxy rotation", () => {
       expect(network).toHaveBeenCalledTimes(1);
       expect(f.tables.proxies[0]).toMatchObject({ rotation_status: "changing", rotation_previous_ip: "1.2.3.4" });
       expect(JSON.stringify(results)).not.toContain("private-token");
-      expect(network.mock.calls[0]![1]).toMatchObject({ redirect: "error" });
+      expect(network.mock.calls[0]![1]).toMatchObject({ redirect: "follow" });
     } finally { network.mockRestore(); }
   });
   test("failed or zero-row claims never call the provider", async () => {
@@ -420,9 +420,13 @@ describe("mobile proxy rotation", () => {
     expect(f.tables.proxies[0]!.rotation_status).toBe("changing");
     await invoke("recordProxyCheck", { ...target, ok: false, rotationRequestedAt: requestedAt }, f);
     expect(f.tables.proxies[0]!.rotation_previous_ip).toBe("1.2.3.4");
-    await expect(invoke("recordProxyCheck", { ...target, ok: true, ip: "1.2.3.5", rotationRequestedAt: "2000-01-01T00:00:00Z" }, f)).rejects.toThrow();
-    await invoke("recordProxyCheck", { ...target, ok: true, ip: "1.2.3.5", rotationRequestedAt: requestedAt }, f);
+    await expect(invoke("recordProxyCheck", { ...target, ok: true, ip: "1.2.3.9", rotationRequestedAt: "2000-01-01T00:00:00Z" }, f)).resolves.toMatchObject({ ok: true, staleRotation: true });
+    expect(f.tables.proxies[0]).toMatchObject({ rotation_status: "changing", last_check_ip: "1.2.3.9" });
+    await invoke("recordProxyCheck", { ...target, ok: true, ip: "1.2.3.5", rotationRequestedAt: requestedAt, rotationConfirmed: false }, f);
+    expect(f.tables.proxies[0]!.rotation_status).toBe("changing");
+    await invoke("recordProxyCheck", { ...target, ok: true, ip: "1.2.3.5", rotationRequestedAt: requestedAt, rotationFinal: true, rotationConfirmed: true }, f);
     expect(f.tables.proxies[0]).toMatchObject({ rotation_status: "success", rotation_previous_ip: "1.2.3.4", rotation_new_ip: "1.2.3.5" });
+    await expect(invoke("recordProxyCheck", { ...target, ok: true, ip: "1.2.3.5", rotationRequestedAt: requestedAt }, f)).resolves.toEqual({ ok: true });
     const changedAt = f.tables.proxies[0]!.rotation_changed_at;
     await invoke("recordProxyCheck", { ...target, ok: true, ip: "1.2.3.6" }, f);
     expect(f.tables.proxies[0]).toMatchObject({ rotation_new_ip: "1.2.3.5", rotation_changed_at: changedAt });

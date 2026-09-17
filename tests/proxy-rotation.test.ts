@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { confirmRotation, rotationExpired, rotationOutcome } from "../src/lib/proxy-rotation";
 import { validateRotationUrl } from "../src/lib/proxy-input";
 
-test("rotation requires a different IP; temporary failures and unchanged addresses remain pending", async () => {
+test("rotation requires a stable different IP; temporary failures and unchanged addresses remain pending", async () => {
   expect(rotationOutcome("1.2.3.4", { ok: true, ip: "1.2.3.4" }, false)).toBe("changing");
   expect(rotationOutcome("1.2.3.4", { ok: false }, false)).toBe("changing");
   expect(rotationOutcome(null, { ok: true, ip: "1.2.3.5" }, true)).toBe("error");
@@ -14,13 +14,41 @@ test("rotation requires a different IP; temporary failures and unchanged address
     record: async (...args) => { records.push(args); }, wait: async () => {},
   });
   expect(result.ip).toBe("1.2.3.5");
-  expect(records).toHaveLength(3);
+  expect(result.rotationConfirmed).toBe(true);
+  expect(records).toHaveLength(4);
   const finals: boolean[] = [];
   await expect(confirmRotation({
     previousIp: "1.2.3.4", probe: async () => ({ ok: true, ip: "1.2.3.4" }), attempts: 2,
     record: async (_result, final) => { finals.push(final); }, wait: async () => {},
   })).rejects.toThrow("не подтверждён");
   expect(finals).toEqual([false, true]);
+});
+
+test("rotation ignores a transient changed IP and confirms the stable address", async () => {
+  const ips = ["1.2.3.4", "1.2.3.5", "1.2.3.6", "1.2.3.6"];
+  const records: Array<[unknown, boolean, boolean]> = [];
+  const result = await confirmRotation({
+    previousIp: "1.2.3.4",
+    probe: async () => ({ ok: true, ip: ips.shift() }),
+    record: async (value, final, confirmed) => { records.push([value, final, confirmed]); },
+    wait: async () => {},
+  });
+  expect(result.ip).toBe("1.2.3.6");
+  expect(records).toHaveLength(4);
+  expect(records.at(-1)?.[1]).toBe(true);
+  expect(records.at(-1)?.[2]).toBe(true);
+});
+
+test("a superseded rotation stops quietly after saving the fresh IP", async () => {
+  let probes = 0;
+  const result = await confirmRotation({
+    previousIp: "1.2.3.4",
+    probe: async () => { probes++; return { ok: true, ip: "1.2.3.6" }; },
+    record: async () => ({ ok: true, staleRotation: true }),
+    wait: async () => {},
+  });
+  expect(result).toMatchObject({ ok: true, ip: "1.2.3.6", rotationConfirmed: false });
+  expect(probes).toBe(1);
 });
 
 test("stale rotations recover and private destinations are rejected", () => {

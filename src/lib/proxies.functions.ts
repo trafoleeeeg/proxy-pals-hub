@@ -206,21 +206,30 @@ export const proxyForCheck = createServerFn({ method: "POST" })
 
 export const recordProxyCheck = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: Target & ProxyCheckResult & { rotationRequestedAt?: string; rotationFinal?: boolean }) => {
+  .inputValidator((data: Target & ProxyCheckResult & { rotationRequestedAt?: string; rotationFinal?: boolean; rotationConfirmed?: boolean }) => {
     if (data.rotationRequestedAt !== undefined && (typeof data.rotationRequestedAt !== "string" || !Number.isFinite(Date.parse(data.rotationRequestedAt)))) throw new Error("Некорректная проверка смены IP");
-    return { ...validateProxyTarget(data), ...normalizeProxyCheck(data), rotationRequestedAt: data.rotationRequestedAt, rotationFinal: data.rotationFinal === true };
+    return { ...validateProxyTarget(data), ...normalizeProxyCheck(data), rotationRequestedAt: data.rotationRequestedAt, rotationFinal: data.rotationFinal === true, rotationConfirmed: data.rotationConfirmed === true };
   })
   .handler(async ({ data, context }) => {
     await requireProxy(context, data);
     const db = context.supabase as any;
     const { data: current, error: currentError } = await db.from("proxies")
-      .select("last_check_ip, rotation_status, rotation_changed_at, rotation_previous_ip, rotation_requested_at")
+      .select("last_check_ip, rotation_status, rotation_changed_at, rotation_previous_ip, rotation_new_ip, rotation_requested_at")
       .eq("id", data.id).eq("team_id", data.teamId).maybeSingle();
     if (currentError || !current) throw new Error("Не удалось прочитать состояние прокси");
     const now = new Date().toISOString();
     const confirmsRotation = !!data.rotationRequestedAt && data.rotationRequestedAt === current["rotation_requested_at"] && current["rotation_status"] === "changing";
-    if (data.rotationRequestedAt && !confirmsRotation) throw new Error("Эта проверка относится к предыдущей смене IP");
-    const outcome = confirmsRotation ? rotationOutcome(current["rotation_previous_ip"], data, data.rotationFinal || rotationExpired(current["rotation_requested_at"])) : null;
+    // A server-function response can be retried after the first request has
+    // already committed. The same rotation token is idempotent once terminal;
+    // an older token from another rotation is still rejected below.
+    if (data.rotationRequestedAt && data.rotationRequestedAt === current["rotation_requested_at"] &&
+      (current["rotation_status"] === "success" || current["rotation_status"] === "error")) return { ok: true };
+    const staleRotation = !!data.rotationRequestedAt && !confirmsRotation;
+    const outcome = confirmsRotation ? rotationOutcome(
+      current["rotation_previous_ip"], data,
+      data.rotationFinal || rotationExpired(current["rotation_requested_at"]),
+      data.rotationConfirmed,
+    ) : null;
     const rotation = outcome ? {
       rotation_status: outcome,
       rotation_last_error: outcome === "error" ? "not_confirmed" : null,
@@ -237,7 +246,7 @@ export const recordProxyCheck = createServerFn({ method: "POST" })
     if (confirmsRotation) update = update.eq("rotation_requested_at", data.rotationRequestedAt).eq("rotation_status", "changing");
     const { data: row, error } = await update.select("id").maybeSingle();
     if (error || !row) throw new Error("Проверка завершена, но результат не сохранён. Проверьте доступ и повторите попытку");
-    return { ok: true };
+    return { ok: true, staleRotation };
   });
 
 /** Requests the provider's mobile IP rotation endpoint. The follow-up desktop

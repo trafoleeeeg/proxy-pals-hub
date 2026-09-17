@@ -397,7 +397,7 @@ describe("mobile proxy rotation", () => {
       expect(network).toHaveBeenCalledTimes(1);
       expect(f.tables.proxies[0]).toMatchObject({ rotation_status: "changing", rotation_previous_ip: "1.2.3.4" });
       expect(JSON.stringify(results)).not.toContain("private-token");
-      expect(network.mock.calls[0]![1]).toMatchObject({ redirect: "error" });
+      expect(network.mock.calls[0]![1]).toMatchObject({ redirect: "follow" });
     } finally { network.mockRestore(); }
   });
   test("failed or zero-row claims never call the provider", async () => {

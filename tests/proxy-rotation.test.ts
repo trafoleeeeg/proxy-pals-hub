@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { confirmRotation, rotationExpired, rotationOutcome } from "../src/lib/proxy-rotation";
 import { validateRotationUrl } from "../src/lib/proxy-input";
 
-test("rotation requires a different IP; temporary failures and unchanged addresses remain pending", async () => {
+test("rotation requires a stable different IP; temporary failures and unchanged addresses remain pending", async () => {
   expect(rotationOutcome("1.2.3.4", { ok: true, ip: "1.2.3.4" }, false)).toBe("changing");
   expect(rotationOutcome("1.2.3.4", { ok: false }, false)).toBe("changing");
   expect(rotationOutcome(null, { ok: true, ip: "1.2.3.5" }, true)).toBe("error");

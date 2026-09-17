@@ -217,6 +217,9 @@ async function createProfileBrowser(electron, {
   function focusAddress() {
     if (!shell.isDestroyed()) { shell.webContents.focus(); shell.webContents.send("umbra-runtime:state", { focusAddress: true }); }
   }
+  function focusFind() {
+    if (!shell.isDestroyed()) { shell.webContents.focus(); shell.webContents.send("umbra-runtime:state", { focusFind: true }); }
+  }
   function shortcuts(event, input) {
     if (input.type !== "keyDown") return;
     const key = input.key.toLowerCase();
@@ -229,6 +232,10 @@ async function createProfileBrowser(electron, {
       if (key === "r") action = "reload";
       if (key === "d") action = "bookmark";
       if (key === "b" && input.shift) action = "toggle-bookmark-bar";
+      if (key === "f") { event.preventDefault(); focusFind(); return; }
+      if (key === "=" || key === "+") action = "zoom-in";
+      if (key === "-") action = "zoom-out";
+      if (key === "0") action = "zoom-reset";
       if (/^[1-9]$/.test(key)) {
         event.preventDefault(); const all = tabOrder.map((id) => tabs.get(id)).filter(Boolean);
         select(key === "9" ? all.at(-1) : all[Number(key) - 1]); return;

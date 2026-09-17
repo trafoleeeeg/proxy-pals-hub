@@ -140,7 +140,27 @@ function createProfileRuntime(electron, options = {}) {
         return pending;
       },
       closeProfile: () => closeProfileWindow(entry.profileId),
+      getBookmarks: () => entry.bookmarks || [],
+      getExtensions: () => entry.extensionList || [],
+      addBookmark: (bookmark) => saveBookmarks(entry, [...(entry.bookmarks || []), { ...bookmark }]),
+      removeBookmark: (id) => saveBookmarks(entry, (entry.bookmarks || []).filter((item) => item.id !== id)),
     };
+  }
+
+  function saveBookmarks(entry, list) {
+    entry.bookmarkQueue = (entry.bookmarkQueue || Promise.resolve()).catch(() => {}).then(async () => {
+      entry.bookmarks = await bookmarkStore().write(entry.profileId, list);
+      return entry.bookmarks;
+    }).catch(() => { entry.lastError = "Bookmark save failed"; return entry.bookmarks || []; });
+    return entry.bookmarkQueue;
+  }
+
+  async function reloadExtensionList(entry) {
+    if (!extensionStore) return;
+    const all = await extensionStore.list().catch(() => []);
+    entry.extensionList = all
+      .filter((item) => !entry.extensionsLoaded || entry.extensionsLoaded.has(item.id))
+      .map((item) => ({ id: item.id, name: item.name, version: item.version }));
   }
   function checkConnection(entry) {
     if (entry.checkJob) return entry.checkJob;

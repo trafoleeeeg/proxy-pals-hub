@@ -84,7 +84,7 @@ function harness() {
 
 const payload = () => ({ profileId: ID, deviceId: "test-device", name: "Test", lockToken: "test-lock-token", fingerprint: FP, cookies: "[]", cookiesUpdatedAt: null, proxy: null, startUrl: "https://example.test" });
 
-test("profile browser opens maximized before it becomes visible", async () => {
+test("hidden profile browser stays hidden without maximizing", async () => {
   const calls = [];
   class Shell extends EventEmitter {
     constructor() {
@@ -124,7 +124,7 @@ test("profile browser opens maximized before it becomes visible", async () => {
     closeProfile: async () => {},
     show: false,
   });
-  assert.deepEqual(calls, ["maximize"]);
+  assert.deepEqual(calls, []);
   browser.destroy();
 });
 

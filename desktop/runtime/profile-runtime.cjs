@@ -311,9 +311,14 @@ function createProfileRuntime(electron, options = {}) {
         entry.extensionErrors = extensionResult.errors;
         await reloadExtensionList(entry);
       }
-       const bookmarkState = await (bookmarkStore().readState?.(id) || bookmarkStore().read(id).then((bookmarks) => ({ bookmarks, barVisible: true }))).catch(() => ({ bookmarks: [], barVisible: true }));
+       const bookmarkState = await (bookmarkStore().readState?.(id) || bookmarkStore().read(id).then((bookmarks) => ({ bookmarks, barVisible: true, stored: true }))).catch(() => ({ bookmarks: [], barVisible: true, stored: true }));
        entry.bookmarks = bookmarkState.bookmarks;
        entry.bookmarkBarVisible = bookmarkState.barVisible;
+       // Новый профиль получает стартовый набор рабочих закладок один раз.
+       if (!bookmarkState.stored && !bookmarkState.bookmarks.length) {
+         entry.bookmarks = defaultBookmarks();
+         void saveBookmarks(entry, entry.bookmarks);
+       }
       const saved = await tabStore().read(id).catch(() => ({ tabs: [], activeIndex: 0 }));
       const plan = url !== "about:blank" ? [url] : (saved.tabs.length ? saved.tabs : ["about:blank"]);
       await makeWindow(entry, plan[0], true);

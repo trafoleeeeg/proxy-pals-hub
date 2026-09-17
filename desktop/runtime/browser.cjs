@@ -4,7 +4,7 @@ const { EventEmitter } = require("node:events");
 const { startUrl } = require("./validation.cjs");
 const { browserUrl } = require("./browser-ui.cjs");
 
-const CHROME_HEIGHT = 108;
+const CHROME_HEIGHT = 144;
 const handlers = new WeakMap();
 
 function addressUrl(value) {

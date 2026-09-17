@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { useDesktopProfileLifecycle } from "@/hooks/useDesktopProfileLifecycle";
 import { desktop, type InstalledExtension } from "@/lib/desktop";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 export const Route = createFileRoute("/_authenticated/app/desktop")({ component: ClientPage });
 const RELEASES = "https://github.com/trafoleeeeg/proxy-pals-hub/releases/latest";

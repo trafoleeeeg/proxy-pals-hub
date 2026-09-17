@@ -101,7 +101,7 @@ function AppShell() {
         <span className="flex size-6 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground">U</span>
         <span className="hidden text-sm font-semibold md:inline">Umbra</span>
       </div>
-      <nav className="flex flex-1 flex-col gap-1 p-2 md:p-3">{NAV.map((item) => {
+      <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-2 md:p-3">{NAV.map((item) => {
         const active = item.exact ? pathname === item.to || pathname === "/app/" : pathname.startsWith(item.to);
         const Icon = item.icon;
         return <Link key={item.to} to={item.to} title={item.label} aria-label={item.label} aria-current={active ? "page" : undefined}

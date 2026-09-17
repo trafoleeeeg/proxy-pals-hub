@@ -13,6 +13,7 @@ function createProfileRuntime(electron, options = {}) {
   let shuttingDown = false;
   let store;
   const cookieStore = () => store ||= options.cookieStore || createCookieStore({ safeStorage, userData: app.getPath("userData") });
+  const extensionStore = options.extensionStore;
 
   function status(entry) {
     return {
@@ -25,6 +26,7 @@ function createProfileRuntime(electron, options = {}) {
         fingerprint: entry.fingerprintDiagnostics || null,
         cookieSource: entry.cookieSource || null,
         cookiePersistence: "safeStorage-encrypted-local-snapshot",
+        extensions: { loaded: entry.extensionsLoaded?.size || 0, errors: entry.extensionErrors?.length || 0 },
         lastError: entry.lastError || null,
       },
     };
@@ -79,17 +81,47 @@ function createProfileRuntime(electron, options = {}) {
     finally { clearTimeout(timer); }
   }
 
-  async function makeWindow(entry, url, primary = false, loadOptions = {}) {
-    if (entry.closingRequested) throw new Error("Profile is closing");
-    entry.browserPromise ||= createBrowser(electron, {
+  function browserOptions(entry) {
+    return {
       name: entry.name, fp: entry.fp, partition: entry.partition, show: options.show !== false,
+      getInfo: () => ({
+        name: entry.name, profileId: entry.profileId, startedAt: entry.startedAt,
+        hasProxy: !!entry.proxyTarget, proxy: entry.proxyLabel,
+        ip: entry.connection?.ip, country: entry.connection?.country, city: entry.connection?.city,
+        latency: entry.connection?.latency, checkedAt: entry.checkedAt, checking: !!entry.checkJob,
+        checkError: entry.connection && !entry.connection.ok ? "Прокси недоступен. Прямого обхода нет." : null,
+        timezone: entry.fp.timezone, languages: entry.fp.languages.join(", "),
+        screen: entry.fp.screen.width + " × " + entry.fp.screen.height,
+        hardware: entry.fp.hardwareConcurrency + " ядер · " + entry.fp.deviceMemory + " ГБ",
+        chrome: entry.fp.chromeVersion || process.versions.chrome,
+        extensions: (entry.extensionsLoaded?.size || 0) + " подключено" + (entry.extensionErrors?.length ? " · есть ошибки" : ""),
+        cookies: entry.cookiesUpdatedAt ? "Сохранены с шифрованием" : "Подготовка",
+      }),
+      checkConnection: () => checkConnection(entry),
       openTab: (target) => {
         const pending = makeWindow(entry, target).finally(() => entry.pendingWindows.delete(pending));
         entry.pendingWindows.add(pending);
         return pending;
       },
       closeProfile: () => closeProfileWindow(entry.profileId),
+    };
+  }
+  function checkConnection(entry) {
+    if (entry.checkJob) return entry.checkJob;
+    if (!entry.proxyTarget || !options.checkProxy || entry.state !== "running") return Promise.resolve();
+    const job = Promise.resolve().then(() => options.checkProxy(entry.proxyTarget)).then((result) => {
+      entry.connection = result; entry.checkedAt = new Date().toISOString();
+    }).catch(() => { entry.connection = { ok: false }; }).finally(() => {
+      entry.checkJob = null; entry.browser?.publish?.();
     });
+    entry.checkJob = job;
+    entry.browser?.publish?.();
+    return job;
+  }
+
+  async function makeWindow(entry, url, primary = false, loadOptions = {}) {
+    if (entry.closingRequested) throw new Error("Profile is closing");
+    entry.browserPromise ||= createBrowser(electron, browserOptions(entry));
     entry.browser = await entry.browserPromise;
     entry.primary = entry.browser.shell;
     if (entry.closingRequested) throw new Error("Profile is closing");
@@ -142,6 +174,7 @@ function createProfileRuntime(electron, options = {}) {
         closeProfileWindow(entry.profileId).catch(() => {});
       });
       if (entry.closingRequested) throw new Error("Profile is closing");
+      if (options.show !== false) win.show();
       if (url !== "about:blank") await navigate(win, url, loadOptions);
       if (entry.closingRequested) throw new Error("Profile is closing");
       if (options.show !== false) win.show();
@@ -176,26 +209,45 @@ function createProfileRuntime(electron, options = {}) {
     entry.startPromise = Promise.resolve().then(async () => {
       try {
         entry.ses = session.fromPartition(entry.partition);
+        blockSession(entry.ses);
+        const extensionApi = entry.ses.extensions || entry.ses;
+        for (const extension of extensionApi.getAllExtensions?.() || []) extensionApi.removeExtension(extension.id);
         const defaultUA = entry.ses.getUserAgent().replace(/\s(?:Electron|Umbra)\/[^ ]+/g, "");
         entry.fp = normalizeFingerprint(payload.fingerprint || {}, defaultUA);
+        // Warm the browser chrome while the authenticated proxy and cookies are
+        // being prepared. Fingerprint application still completes before any
+        // remote page is allowed to navigate.
+        entry.browserPromise = createBrowser(electron, browserOptions(entry));
+        void entry.browserPromise.catch(() => {});
         entry.proxyRuntime = await setupProxy(entry.ses, payload.proxy);
+        entry.proxyTarget = payload.proxy;
+        entry.proxyLabel = payload.proxy ? String(payload.proxy.protocol).toUpperCase() + " · " + payload.proxy.host + ":" + payload.proxy.port : "Без прокси";
         entry.ses.setUserAgent(entry.fp.userAgent, entry.fp.languages.join(","));
         // Background permission requests cannot enable arbitrary device access.
         entry.ses.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
         entry.ses.setPermissionCheckHandler(() => false);
-        const initialized = await initializeCookies(entry.ses, cookieStore(), { ...payload, profileId: id });
-        entry.cookiesUpdatedAt = initialized.cookiesUpdatedAt;
-        entry.cookieSignature = initialized.signature;
-        entry.cookieSource = initialized.source;
-        await makeWindow(entry, url, true);
+      const initialized = await initializeCookies(entry.ses, cookieStore(), { ...payload, profileId: id });
+      entry.cookiesUpdatedAt = initialized.cookiesUpdatedAt;
+      entry.cookieSignature = initialized.signature;
+      entry.cookieSource = initialized.source;
+      entry.extensionsLoaded = new Map();
+      if (extensionStore) {
+        const extensionResult = await extensionStore.loadIntoSession(entry.ses, entry.extensionsLoaded);
+        entry.extensionErrors = extensionResult.errors;
+      }
+      await makeWindow(entry, url, true);
         entry.state = "running";
         watchCookies(entry);
+        entry.browser?.publish?.();
+        void checkConnection(entry);
         return status(entry);
       } catch (error) {
         entry.state = "failed";
         unwatchCookies(entry);
         for (const win of entry.windows) if (!win.isDestroyed()) win.destroy();
+        const warmedBrowser = await entry.browserPromise?.catch(() => null);
         entry.browser?.destroy();
+        if (warmedBrowser && warmedBrowser !== entry.browser) warmedBrowser.destroy();
         if (entry.ses) blockSession(entry.ses);
         if (entry.proxyRuntime) await entry.proxyRuntime.dispose().catch(() => {});
         if (!entry.closingRequested) profiles.delete(id);
@@ -235,6 +287,8 @@ function createProfileRuntime(electron, options = {}) {
       }
       const result = entry.cookiesUpdatedAt ? await snapshot(entry) : { profileId: entry.profileId, lockToken: entry.lockToken, deviceId: entry.deviceId, cookies: null, cookiesUpdatedAt: null };
       if (typeof entry.onClosed === "function") await entry.onClosed(result);
+      const extensionApi = entry.ses?.extensions || entry.ses;
+      for (const extensionId of entry.extensionsLoaded?.values() || []) extensionApi?.removeExtension?.(extensionId);
       if (entry.proxyRuntime) await entry.proxyRuntime.dispose();
       for (const win of entry.windows) if (!win.isDestroyed()) win.destroy();
       entry.browser?.destroy();
@@ -257,8 +311,23 @@ function createProfileRuntime(electron, options = {}) {
     } finally { shuttingDown = false; }
   }
 
+  async function refreshExtensions() {
+    if (!extensionStore) return 0;
+    const failures = await Promise.all([...profiles.values()].map(async (entry) => {
+      await entry.startPromise.catch(() => {});
+      if (!entry.ses || entry.state !== "running" || entry.closingRequested) return 0;
+      entry.extensionsLoaded ||= new Map();
+      const extensionResult = await extensionStore.loadIntoSession(entry.ses, entry.extensionsLoaded);
+      entry.extensionErrors = extensionResult.errors;
+      entry.browser?.publish?.();
+      return extensionResult.errors.length;
+    }));
+    return failures.reduce((total, count) => total + count, 0);
+  }
+
   return {
     launchProfileWindow, closeProfileWindow, snapshotProfileCookies, closeAllProfiles,
+    refreshExtensions,
     listRunningProfiles: () => [...profiles.values()].map(status),
     getRunningProfile: (id) => { const entry = profiles.get(profileId(id)); return entry ? status(entry) : null; },
   };

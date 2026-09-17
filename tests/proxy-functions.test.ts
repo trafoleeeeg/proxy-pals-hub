@@ -70,6 +70,7 @@ function fixture() {
     const chain = {
       select(columns = "*") { query.columns = columns; return chain; },
       eq(column: string, value: unknown) { query.filters.push([column, value]); return chain; },
+      is(column: string, value: unknown) { query.filters.push([column, value]); return chain; },
       order() { return chain; },
       limit(limit: number) { query.limit = limit; return chain; },
       update(payload: Row) { query.action = "update"; query.payload = payload; return chain; },
@@ -111,6 +112,7 @@ async function invoke(name: string, data: unknown, f: Fixture) {
 }
 const mutations = (f: Fixture) => f.calls.filter((call) => call.action !== "select");
 const ownerActions: [string, Row][] = [
+  ["rotateProxyIp", target],
   ["saveProxy", fields], ["saveProxy", { ...fields, id }], ["deleteProxy", target],
   ["importProxies", { teamId, text: "proxy.example:80" }], ["proxyForCheck", target],
   ["recordProxyCheck", { ...target, ok: true, ip: "1.2.3.4" }], ["checkProxy", target],
@@ -133,7 +135,7 @@ describe("proxy authorization and team boundaries", () => {
     expect(api.decryptSecret).not.toHaveBeenCalled();
   });
 
-  test.each(["checkProxy", "deleteProxy", "proxyForCheck", "recordProxyCheck", "saveProxy"])("%s cannot access a proxy from another team", async (name) => {
+  test.each(["checkProxy", "deleteProxy", "proxyForCheck", "recordProxyCheck", "saveProxy", "rotateProxyIp"])("%s cannot access a proxy from another team", async (name) => {
     const f = fixture(); f.tables.proxies[0]!.team_id = otherTeam;
     await expect(invoke(name, { ...fields, ...target, ok: true, ip: "1.2.3.4" }, f)).rejects.toThrow();
     expect(mutations(f)).toHaveLength(0);
@@ -376,5 +378,53 @@ describe("proxy check persistence and deletion", () => {
     f.error = undefined;
     expect(await invoke("deleteProxy", target, f)).toEqual({ ok: true });
     expect(f.tables.proxies).toHaveLength(0);
+  });
+});
+
+describe("mobile proxy rotation", () => {
+  const ready = () => {
+    const f = fixture();
+    Object.assign(f.tables.proxies[0]!, { rotation_url_enc: "encrypted-rotation", rotation_status: "ready", rotation_requested_at: null, last_checked_at: new Date().toISOString() });
+    api.decryptSecret.mockImplementation(() => "https://provider.example/rotate?token=private-token");
+    return f;
+  };
+  test("one concurrent request wins; duplicate requests cannot invoke the provider", async () => {
+    const f = ready();
+    const network = spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
+    try {
+      const results = await Promise.allSettled([invoke("rotateProxyIp", target, f), invoke("rotateProxyIp", target, f)]);
+      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+      expect(network).toHaveBeenCalledTimes(1);
+      expect(f.tables.proxies[0]).toMatchObject({ rotation_status: "changing", rotation_previous_ip: "1.2.3.4" });
+      expect(JSON.stringify(results)).not.toContain("private-token");
+      expect(network.mock.calls[0]![1]).toMatchObject({ redirect: "error" });
+    } finally { network.mockRestore(); }
+  });
+  test("failed or zero-row claims never call the provider", async () => {
+    for (const missing of [false, true]) {
+      const f = ready();
+      if (missing) f.missingMutation = true;
+      else f.error = { table: "proxies", action: "update", code: "500" };
+      const network = spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
+      try {
+        await expect(invoke("rotateProxyIp", target, f)).rejects.toThrow();
+        expect(network).not.toHaveBeenCalled();
+      } finally { network.mockRestore(); }
+    }
+  });
+  test("only a matching rotation check with a changed IP records a confirmed transition", async () => {
+    const f = ready();
+    const requestedAt = new Date().toISOString();
+    Object.assign(f.tables.proxies[0]!, { rotation_status: "changing", rotation_requested_at: requestedAt, rotation_previous_ip: "1.2.3.4" });
+    await invoke("recordProxyCheck", { ...target, ok: true, ip: "1.2.3.4", rotationRequestedAt: requestedAt }, f);
+    expect(f.tables.proxies[0]!.rotation_status).toBe("changing");
+    await invoke("recordProxyCheck", { ...target, ok: false, rotationRequestedAt: requestedAt }, f);
+    expect(f.tables.proxies[0]!.rotation_previous_ip).toBe("1.2.3.4");
+    await expect(invoke("recordProxyCheck", { ...target, ok: true, ip: "1.2.3.5", rotationRequestedAt: "2000-01-01T00:00:00Z" }, f)).rejects.toThrow();
+    await invoke("recordProxyCheck", { ...target, ok: true, ip: "1.2.3.5", rotationRequestedAt: requestedAt }, f);
+    expect(f.tables.proxies[0]).toMatchObject({ rotation_status: "success", rotation_previous_ip: "1.2.3.4", rotation_new_ip: "1.2.3.5" });
+    const changedAt = f.tables.proxies[0]!.rotation_changed_at;
+    await invoke("recordProxyCheck", { ...target, ok: true, ip: "1.2.3.6" }, f);
+    expect(f.tables.proxies[0]).toMatchObject({ rotation_new_ip: "1.2.3.5", rotation_changed_at: changedAt });
   });
 });

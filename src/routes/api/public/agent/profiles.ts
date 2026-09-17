@@ -5,6 +5,7 @@ import {
   authenticateAgent,
   enforceRateLimit,
   jsonError,
+  jsonResponse,
   logAgentAction,
   requireScope,
 } from "@/lib/agent-auth.server";
@@ -37,10 +38,10 @@ export const Route = createFileRoute("/api/public/agent/profiles")({
             .eq("team_id", agent.teamId)
             .order("created_at", { ascending: false })
             .limit(500);
-          if (error) throw new AgentError(500, error.message);
+          if (error) throw new AgentError(500, "Не удалось получить профили");
 
           // Cookies и пароли наружу не отдаём никогда.
-          return Response.json({ profiles: data ?? [] });
+          return jsonResponse({ profiles: data ?? [] });
         } catch (err) {
           return jsonError(err);
         }
@@ -60,12 +61,13 @@ export const Route = createFileRoute("/api/public/agent/profiles")({
           const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
           if (input.proxyId) {
-            const { data: proxy } = await supabaseAdmin
+            const { data: proxy, error: proxyError } = await supabaseAdmin
               .from("proxies")
               .select("id")
               .eq("id", input.proxyId)
               .eq("team_id", agent.teamId)
               .maybeSingle();
+            if (proxyError) throw new AgentError(503, "Не удалось проверить прокси");
             if (!proxy) throw new AgentError(400, "Прокси не найден в этой команде");
           }
 
@@ -83,12 +85,12 @@ export const Route = createFileRoute("/api/public/agent/profiles")({
             .from("browser_profiles")
             .insert(rows)
             .select("id, name");
-          if (error) throw new AgentError(500, error.message);
+          if (error) throw new AgentError(500, "Не удалось создать профили");
 
           await logAgentAction(agent, "profile.created", "profile", data?.[0]?.id ?? null, {
             count: data?.length ?? 0,
           });
-          return Response.json({ created: data ?? [] }, { status: 201 });
+          return jsonResponse({ created: data ?? [] }, { status: 201 });
         } catch (err) {
           return jsonError(err);
         }

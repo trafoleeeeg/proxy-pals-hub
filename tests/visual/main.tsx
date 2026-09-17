@@ -8,6 +8,7 @@ import { AppLayout } from "../../src/routes/_authenticated/app";
 import { ProfilesPage } from "../../src/routes/_authenticated/app.index";
 import { TeamPage } from "../../src/routes/_authenticated/app.team";
 import { ClientPage } from "../../src/routes/_authenticated/app.desktop";
+import { ProxiesPage } from "../../src/routes/_authenticated/app.proxies";
 import "../../src/styles.css";
 
 const root = createRootRoute();
@@ -15,7 +16,8 @@ const app = createRoute({ getParentRoute: () => root, path: "app", component: Ap
 const profiles = createRoute({ getParentRoute: () => app, path: "/", component: ProfilesPage });
 const team = createRoute({ getParentRoute: () => app, path: "team", component: TeamPage });
 const desktop = createRoute({ getParentRoute: () => app, path: "desktop", component: ClientPage });
+const proxies = createRoute({ getParentRoute: () => app, path: "proxies", component: ProxiesPage });
 const auth = createRoute({ getParentRoute: () => root, path: "auth", component: () => <p>Выход выполнен</p> });
-const router = createRouter({ routeTree: root.addChildren([app.addChildren([profiles, team, desktop]), auth]) });
+const router = createRouter({ routeTree: root.addChildren([app.addChildren([profiles, team, desktop, proxies]), auth]) });
 const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
 createRoot(document.getElementById("root")!).render(<StrictMode><QueryClientProvider client={client}><RouterProvider router={router} /><Toaster /></QueryClientProvider></StrictMode>);

@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { authenticateAgent, jsonError } from "@/lib/agent-auth.server";
+import { authenticateAgent, enforceRateLimit, jsonError, jsonResponse } from "@/lib/agent-auth.server";
 
 export const Route = createFileRoute("/api/public/agent/me")({
   server: {
@@ -7,7 +7,8 @@ export const Route = createFileRoute("/api/public/agent/me")({
       GET: async ({ request }) => {
         try {
           const agent = await authenticateAgent(request);
-          return Response.json({
+          await enforceRateLimit(agent);
+          return jsonResponse({
             agent: agent.name,
             teamId: agent.teamId,
             scopes: agent.scopes,

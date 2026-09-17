@@ -18,7 +18,7 @@ function addressUrl(value) {
   return `https://www.google.com/search?q=${encodeURIComponent(value)}`;
 }
 
-async function createProfileBrowser(electron, { name, fp, partition, openTab, closeProfile, show = true }) {
+async function createProfileBrowser(electron, { name, fp, partition, openTab, closeProfile, getInfo = () => ({}), checkConnection = async () => {}, show = true }) {
   const { BrowserWindow, WebContentsView, session, ipcMain } = electron;
   let registry = handlers.get(ipcMain);
   if (!registry) {
@@ -45,9 +45,11 @@ async function createProfileBrowser(electron, { name, fp, partition, openTab, cl
   let destroyed = false;
   let commandQueue = Promise.resolve();
   const active = () => tabs.get(activeId);
+  const isHome = (tab) => !!tab && tab.url === "about:blank";
   function publish() {
     if (shell.isDestroyed()) return;
-    shell.webContents.send("umbra-runtime:state", { name, activeId, error, tabs: [...tabs.values()].filter((tab) => !tab.isDestroyed()).map((tab) => ({
+    layout();
+    shell.webContents.send("umbra-runtime:state", { name, activeId, error, home: isHome(active()), info: getInfo(), tabs: [...tabs.values()].filter((tab) => !tab.isDestroyed()).map((tab) => ({
       id: tab.id, url: tab.webContents.getURL() || tab.url, title: tab.webContents.getTitle(), error: tab.error,
       loading: tab.webContents.isLoading(), canGoBack: tab.webContents.navigationHistory.canGoBack(), canGoForward: tab.webContents.navigationHistory.canGoForward(),
     })) });
@@ -57,12 +59,14 @@ async function createProfileBrowser(electron, { name, fp, partition, openTab, cl
     const { width, height } = shell.getContentBounds();
     for (const tab of tabs.values()) {
       tab.view.setBounds({ x: 0, y: CHROME_HEIGHT, width: Math.max(1, width), height: Math.max(1, height - CHROME_HEIGHT) });
-      tab.view.setVisible(tab.id === activeId);
+      tab.view.setVisible(tab.id === activeId && !isHome(tab));
     }
   }
   function select(tab) {
     if (shell.isDestroyed() || !tab || tab.isDestroyed()) return;
-    activeId = tab.id; layout(); tab.webContents.focus(); publish();
+    activeId = tab.id; layout();
+    if (isHome(tab)) shell.webContents.focus(); else tab.webContents.focus();
+    publish();
   }
   async function command(message) {
     if (destroyed || !message || typeof message !== "object") return;
@@ -71,6 +75,8 @@ async function createProfileBrowser(electron, { name, fp, partition, openTab, cl
     switch (message.action) {
       case "state": break;
       case "new": await openTab("about:blank"); focusAddress(); break;
+      case "home": if (tab) await tab.loadURL("about:blank"); break;
+      case "check-connection": await checkConnection(); break;
       case "select": select(tabs.get(message.id)); break;
       case "close-tab": {
         const target = tabs.get(message.id || activeId);
@@ -90,6 +96,8 @@ async function createProfileBrowser(electron, { name, fp, partition, openTab, cl
     publish();
   }
   function dispatch(message) {
+    // Switching existing tabs must not wait for a slow new tab or network check.
+    if (message?.action === "select") { select(tabs.get(message.id)); return Promise.resolve({}); }
     commandQueue = commandQueue.then(() => command(message)).then(() => ({})).catch(() => {
       error = "Unable to complete this action. Check the address or proxy connection."; publish(); return { error };
     });
@@ -153,7 +161,7 @@ async function createProfileBrowser(electron, { name, fp, partition, openTab, cl
         show: () => { if (show && !shell.isDestroyed()) shell.show(); select(tab); },
         destroy: () => { tab.closing = true; if (!wc.isDestroyed()) wc.close({ waitForBeforeUnload: false }); },
         async loadURL(url, options) {
-          tab.url = startUrl(url, { allowBlank: true }); tab.error = "";
+          tab.url = startUrl(url, { allowBlank: true }); tab.error = ""; publish();
           try { await wc.loadURL(tab.url, options); }
           catch (failure) { if (failure.code !== "ERR_ABORTED") tab.error = "Page could not be loaded. Check the address or proxy connection."; throw failure; }
           finally { publish(); }
@@ -161,6 +169,7 @@ async function createProfileBrowser(electron, { name, fp, partition, openTab, cl
       });
       tabs.set(tab.id, tab); shell.contentView.addChildView(view); select(tab);
       wc.on("before-input-event", shortcuts);
+      wc.on("did-navigate", (_event, url) => { tab.url = url; publish(); });
       for (const event of ["did-start-loading", "did-stop-loading", "did-navigate", "did-navigate-in-page", "page-title-updated"]) wc.on(event, publish);
       wc.on("did-fail-load", (_event, code, _description, _url, mainFrame) => { if (mainFrame && code !== -3) { tab.error = "Page could not be loaded. Check the address or proxy connection."; publish(); } });
       wc.on("render-process-gone", () => { tab.error = "This tab stopped. Reload to try again."; publish(); });

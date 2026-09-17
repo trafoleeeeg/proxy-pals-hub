@@ -69,7 +69,9 @@ if (process.versions.electron) {
   }
 
   app.whenReady().then(async () => {
-    assert.equal(process.versions.chrome, "152.0.7977.78");
+    // Electron updates Chromium independently; keep the runtime gate format based
+    // so a Dependabot security update is not rejected by a stale version literal.
+    assert.match(process.versions.chrome, /^\d+\.\d+\.\d+\.\d+$/);
     const mode = process.env.UMBRA_RUNTIME_TEST_STORAGE;
     const memoryOnly = mode === "memory";
     if (mode === "native" && !safeStorage.isEncryptionAvailable()) {
@@ -145,7 +147,14 @@ if (process.versions.electron) {
       return;
     }
     const closed = [];
-    runtime = createProfileRuntime(electron, { show: false, cookieStore, applyFingerprint: async (wc, fp) => {
+    const { createExtensionStore } = require("../extensions.cjs");
+    const extensionStore = createExtensionStore(() => app.getPath("userData"));
+    const extensionSource = path.join(directory, "fixture-extension");
+    fs.mkdirSync(extensionSource, { recursive: true });
+    fs.writeFileSync(path.join(extensionSource, "manifest.json"), JSON.stringify({ name: "Fixture", version: "1.0", manifest_version: 3, content_scripts: [{ matches: ["https://localhost/*"], js: ["content.js"], run_at: "document_end" }] }));
+    fs.writeFileSync(path.join(extensionSource, "content.js"), "document.documentElement.dataset.umbraExtension = 'loaded';");
+    const extension = await extensionStore.addFromDirectory(extensionSource);
+    runtime = createProfileRuntime(electron, { show: false, cookieStore, extensionStore, applyFingerprint: async (wc, fp) => {
       const send = wc.debugger.sendCommand.bind(wc.debugger);
       wc.debugger.sendCommand = async (...args) => {
         process.stdout.write(`NATIVE_CDP_START ${wc.id} ${args[0]}\n`);
@@ -187,6 +196,14 @@ if (process.versions.electron) {
     const shell = profileShell(ses);
     const win = profileTabs(ses)[0];
     assert.equal(shell.isVisible(), false);
+    assert.equal(await win.webContents.executeJavaScript("document.documentElement.dataset.umbraExtension"), "loaded");
+    assert.equal(runtime.getRunningProfile(ID).diagnostics.extensions.loaded, 1);
+    await extensionStore.remove(extension.id);
+    assert.equal(await runtime.refreshExtensions(), 0);
+    assert.equal(runtime.getRunningProfile(ID).diagnostics.extensions.loaded, 0);
+    await extensionStore.addFromDirectory(extensionSource);
+    assert.equal(await runtime.refreshExtensions(), 0);
+    assert.equal(runtime.getRunningProfile(ID).diagnostics.extensions.loaded, 1);
     const first = await win.webContents.executeJavaScript("firstDocument");
     assert.ok(first.ua.includes(`Chrome/${process.versions.chrome}`));
     assert.ok(first.ua.includes("Windows NT 10.0"));
@@ -242,10 +259,16 @@ if (process.versions.electron) {
     const fresh = profileTabs(ses).find((view) => view !== win && view !== popup);
     const freshContents = fresh.webContents;
     await waitUntil(() => !fresh.webContents.isLoading());
+    const home = await shell.webContents.executeJavaScript("({hidden:document.getElementById('home').hidden,text:document.getElementById('home').textContent})");
+    assert.equal(home.hidden, false);
+    assert.match(home.text, /Asia\/Tokyo/);
+    assert.match(home.text, /Показатели профиля/);
+    assert.ok(!home.text.includes("a-pass") && !home.text.includes("lock-"));
     const navigateFromToolbar = (url) => shell.webContents.executeJavaScript(`(() => { const input = document.getElementById('address'); input.value = ${JSON.stringify(url)}; document.getElementById('navigate').requestSubmit(); })()`);
     await navigateFromToolbar(`http://127.0.0.1:${plain.port}/from-toolbar`);
     await waitUntil(() => httpHits.includes("/from-toolbar") && !fresh.webContents.isLoading());
     assert.ok(fresh.webContents.getURL().startsWith("http://127.0.0.1:"));
+    assert.equal(await shell.webContents.executeJavaScript("document.getElementById('home').hidden"), true);
     await navigateFromToolbar(`http://127.0.0.1:${plain.port}/second-page`);
     await waitUntil(() => httpHits.includes("/second-page") && !fresh.webContents.isLoading());
     await shell.webContents.executeJavaScript("document.getElementById('back').click()");

@@ -44,12 +44,20 @@ export class AgentError extends Error {
   }
 }
 
+/** JSON responses from the token-authenticated API must never be cached. */
+export function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
+  const headers = new Headers(init.headers);
+  headers.set("cache-control", "no-store");
+  headers.set("content-type", "application/json; charset=utf-8");
+  return new Response(JSON.stringify(body), { ...init, headers });
+}
+
 export function jsonError(err: unknown): Response {
   if (err instanceof AgentError) {
-    return Response.json({ error: err.message }, { status: err.status });
+    return jsonResponse({ error: err.message }, { status: err.status });
   }
   console.error("agent api error", err);
-  return Response.json({ error: "Внутренняя ошибка" }, { status: 500 });
+  return jsonResponse({ error: "Внутренняя ошибка" }, { status: 500 });
 }
 
 /**
@@ -120,10 +128,33 @@ export async function logAgentAction(
 export async function enforceRateLimit(agent: AgentContext, limit = 120): Promise<void> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const since = new Date(Date.now() - 60_000).toISOString();
-  const { count } = await supabaseAdmin
+  const { count, error } = await supabaseAdmin
     .from("audit_log")
     .select("id", { count: "exact", head: true })
     .eq("agent_key_id", agent.keyId)
     .gte("created_at", since);
+  // A failed limiter query must fail closed. Treating an unavailable audit
+  // store as zero requests would turn a database incident into an unlimited
+  // public API window.
+  if (error) {
+    console.error("agent rate-limit query failed", error);
+    throw new AgentError(503, "Сервис временно недоступен");
+  }
   if ((count ?? 0) >= limit) throw new AgentError(429, "Слишком много запросов, подождите минуту");
+
+  // Record every authenticated request, including reads. This keeps the limit
+  // effective for the whole public API instead of only mutation endpoints.
+  const { error: insertError } = await supabaseAdmin.from("audit_log").insert({
+    team_id: agent.teamId,
+    user_id: null,
+    agent_key_id: agent.keyId,
+    action: "agent.request",
+    target_type: "rate_limit",
+    target_id: null,
+    meta: { agent: agent.name },
+  });
+  if (insertError) {
+    console.error("agent rate-limit write failed", insertError);
+    throw new AgentError(503, "Сервис временно недоступен");
+  }
 }

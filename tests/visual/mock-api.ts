@@ -52,7 +52,12 @@ const workspaces = ["a", "b"].map((id) => ({ teamId: `team-${id}`, teamName: id 
 export const listWorkspaces = api("listWorkspaces", () => workspaces);
 export const getWorkspace = api("getWorkspace", (data) => workspaces.find((team) => team.teamId === (data.teamId ?? "team-a"))!);
 export const listProfiles = api("listProfiles", (data) => fixture.profiles.filter((profile) => profile.teamId === data.teamId));
-export const listProxies = api("listProxies", () => [{ id: "proxy-1", label: "Прокси Германия", host: "proxy.example.com", port: 8080, country: "DE" }]);
+export const listProxies = api("listProxies", () => [{
+  id: "proxy-1", label: "Прокси Германия", protocol: "http", host: "proxy.example.com", port: 8080, country: "DE",
+  last_check_ok: true, last_check_ip: "203.0.113.2", last_check_latency_ms: 140,
+  rotationUrlConfigured: true, rotationStatus: "success", rotationPreviousIp: "203.0.113.1",
+  rotationNewIp: "203.0.113.2", rotationChangedAt: now,
+}]);
 export const bulkUpdateProfiles = api("bulkUpdateProfiles", (data) => {
   for (const profile of fixture.profiles.filter((row) => row.teamId === data.teamId && data.ids.includes(row.id))) {
     const { proxyId, ...changes } = data.changes;
@@ -128,3 +133,17 @@ const bridge: UmbraBridge = {
   onUpdateStatus: (listener) => { updateListeners.add(listener); return () => { updateListeners.delete(listener); }; },
 };
 if (scenario !== "web") window.umbra = bridge;
+
+export const saveProxy = api("saveProxy", () => ({ id: "proxy-1" }));
+export const deleteProxy = api("deleteProxy", () => ({ ok: true }));
+export const importProxies = api("importProxies", () => ({ added: 1, issues: [] }));
+export const checkProxy = api("checkProxy", () => ({ error: "Проверка в Windows" }));
+export const proxyForCheck = api("proxyForCheck", () => ({ id: "proxy-1", protocol: "http", host: "proxy.example", port: 8080, username: null, password: "" }));
+export const recordProxyCheck = api("recordProxyCheck", () => ({ ok: true }));
+export const rotateProxyIp = api("rotateProxyIp", () => ({ ok: true, previousIp: "203.0.113.1", requestedAt: new Date().toISOString() }));
+if (scenario === "extensions") {
+  bridge.listExtensions = async () => ({ ok: true, extensions: [{ id: "fixture-extension", name: "Пример расширения", version: "1.0" }] });
+  bridge.addExtension = async () => ({ ok: true, extension: { id: "fixture-added", name: "Новое расширение", version: "2.0" } });
+  bridge.removeExtension = async () => ({ ok: true });
+}
+bridge.readProxyClipboard = async () => "proxy.example:8080";

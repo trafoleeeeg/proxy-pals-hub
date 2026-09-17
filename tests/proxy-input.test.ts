@@ -3,7 +3,7 @@ import {
   DESKTOP_PROXY_CHECK_REQUIRED, PROXY_LIMITS, ProxyCheckQueue, normalizeProxyCheck,
   normalizeProxyHost, parseProxyImport, parseProxyLine, parseProxyPort,
   performDesktopProxyCheck, proxyAddress, validateProxyFields, validateProxyInput,
-  validateProxyTarget, validateProxyTeam,
+  validateProxyTarget, validateProxyTeam, validateRotationUrl,
 } from "../src/lib/proxy-input";
 
 const teamId = "11111111-1111-4111-8111-111111111111";
@@ -126,6 +126,15 @@ describe("proxy identity and password actions", () => {
       { passwordAction: "invalid" }, { passwordAction: "replace", password: "" },
       { passwordAction: "clear", password: "p" }, { passwordAction: "preserve", password: "p" },
     ]) expect(() => validateProxyInput({ ...input, id, username: "u", ...extra })).toThrow();
+  });
+
+  test("accepts only safe HTTPS rotation links and keeps rotation actions explicit", () => {
+    expect(validateRotationUrl("https://mobile.example/rotate?token=abc")).toBe("https://mobile.example/rotate?token=abc");
+    for (const value of ["http://mobile.example/rotate", "javascript:alert(1)", "https://localhost/rotate", "https://192.168.1.4/rotate", "https://u:p@mobile.example/rotate"]) {
+      expect(() => validateRotationUrl(value)).toThrow();
+    }
+    expect(validateProxyInput({ ...input, rotationUrl: "https://mobile.example/rotate", rotationAction: "replace" }).rotationAction).toBe("replace");
+    expect(() => validateProxyInput({ ...input, rotationUrl: "https://mobile.example/rotate", rotationAction: "clear" })).toThrow();
   });
 });
 

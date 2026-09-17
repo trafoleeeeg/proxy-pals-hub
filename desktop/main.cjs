@@ -3,14 +3,18 @@ const path = require("node:path");
 const { autoUpdater } = require("electron-updater");
 const {
   launchProfileWindow, closeProfileWindow, snapshotProfileCookies,
-  listRunningProfiles, closeAllProfiles,
+  listRunningProfiles, closeAllProfiles, refreshExtensions, extensionStore,
 } = require("./launcher.cjs");
 const { checkProxy } = require("./proxy-check.cjs");
 const { isTrustedSender, isWebUrl } = require("./ipc-policy.cjs");
 const { createUpdateController } = require("./update-controller.cjs");
 const { createSessionOutbox } = require("./session-outbox.cjs");
 
-const APP_URL = process.env.UMBRA_APP_URL || "https://proxy-pals-hub.lovable.app/app";
+const DEFAULT_APP_URL = "https://proxy-pals-hub.lovable.app/app";
+// A packaged client must never let a local environment variable replace the
+// trusted panel origin. This origin controls which page receives the IPC
+// bridge and therefore must be fixed in the release binary.
+const APP_URL = app.isPackaged ? DEFAULT_APP_URL : (process.env.UMBRA_APP_URL || DEFAULT_APP_URL);
 if (!isWebUrl(APP_URL)) throw new Error("Invalid application URL");
 const APP_ORIGIN = new URL(APP_URL).origin;
 if (app.isPackaged && new URL(APP_URL).protocol !== "https:") throw new Error("The installed application requires HTTPS");
@@ -130,6 +134,24 @@ handle("umbra:update-state", () => updates?.getState() || { state: "none" });
 handle("umbra:check-update", () => updates.check());
 handle("umbra:download-update", () => updates.download());
 handle("umbra:install-update", () => updates.install());
+handle("umbra:extensions-list", async () => ({ ok: true, extensions: await extensionStore.list() }));
+// Clipboard reads only happen on the trusted panel's explicit paste action.
+handle("umbra:proxy-clipboard", () => require("electron").clipboard.readText().slice(0, 1_048_576));
+handle("umbra:extensions-add", async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: "Выберите распакованное расширение",
+    properties: ["openDirectory"],
+  });
+  if (result.canceled || !result.filePaths[0]) return { ok: false, error: "Добавление расширения отменено" };
+  const extension = await extensionStore.addFromDirectory(result.filePaths[0]);
+  const failures = await refreshExtensions();
+  return { ok: true, extension, failures };
+});
+handle("umbra:extensions-remove", async (id) => {
+  await extensionStore.remove(id);
+  await refreshExtensions();
+  return { ok: true };
+});
 
 if (!app.requestSingleInstanceLock()) app.quit();
 else {

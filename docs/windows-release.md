@@ -1,13 +1,27 @@
-# Windows Reliability Release 0.4.0
+# Windows Reliability and Release
 
 ## Scope
 
 - Windows x64 NSIS installer; one uniquely named executable, its blockmap and `latest.yml`.
-- Background update checks/downloads, visible errors, explicit restart, and installation blocked while profiles run.
+- Background update checks/downloads, visible errors, and installation after a normal quit once profiles are closed.
 - Isolated persistent profile sessions, authenticated HTTP/SOCKS5 proxy tunnels, bounded proxy checks, and no direct fallback after configured-proxy failure.
 - Profile address bar and managed tabs, with remote content separated from privileged browser controls.
 - Encrypted local cookie checkpoints and a retryable encrypted close outbox.
+- Managed unpacked browser extensions for current and future profiles.
+- Mobile proxy IP rotation links with encrypted storage and visible status/history.
 - Token-owned server leases, atomic bulk mutations, owner-controlled team assignment, and JSON/Netscape cookie import/export.
+
+## Core updates and security
+
+Electron ships the Chromium engine inside the desktop installer, so a Chromium security release is delivered as a tested Electron update. Dependabot checks the desktop manifest daily and opens a PR for stable Electron releases; panel dependencies and GitHub Actions are checked weekly. Every dependency PR must pass the Linux, Windows-native and high-severity audit gates before it can be merged.
+
+Packaged clients check the GitHub release manifest over HTTPS in the background and download updates automatically. The downloaded installer is installed on the next normal application quit, after Umbra has flushed profile cookies and closed profile windows. Prerelease and downgrade updates are disabled. The packaged panel URL is fixed to the HTTPS production origin; a local environment override is available only during development.
+
+The repository also runs a daily dependency audit. The lockfiles pin the audited versions of transitive packages, including the current brace-expansion, js-yaml and nanoid security fixes. Keep the Electron update PR and its generated lockfile together so the runtime, Chromium and audit result stay aligned.
+
+The profile panel can store an HTTPS mobile-provider rotation link encrypted on the server. A rotation request records the previous exit IP, pending state, result, error and last change time; the desktop client performs the follow-up check before showing the new IP. The new migration `20260917100000_3b6c3d41-2e4b-4ad8-a4ef-c7f04647b6e2` must be applied together with the panel/server release.
+
+Extensions are selected as unpacked Manifest V2/V3 folders in the desktop panel. Umbra copies them into its per-user data directory, loads them into active sessions and applies the same set to profiles created later. The extension binaries are local to each computer and are not synchronized through the database.
 
 ## Release Gates
 
@@ -37,7 +51,7 @@ The Windows CI job enforces both native test gates. Linux CI installs Electron a
 2. Back up the database and retain the current `APP_ENCRYPTION_KEY`. Changing that key makes existing encrypted proxy passwords and cookies unreadable.
 3. Apply migrations in `supabase/migrations/` in timestamp order through the normal Lovable/Supabase deployment process. The 0.4.0 changes are recorded under deployed versions `20260915192121` through `20260915192302`. Their original reviewed sources are archived in `docs/migration-sources/0.4.0/`; do not execute that archive or reapply changes already present in the migration ledger. Do not run migrations from an agent against production directly.
 4. Merge the feature branch only via a PR with green checks, then publish the corresponding web panel. Server functions and the database migration must be deployed together.
-5. Create the matching `v0.4.0` tag. The workflow builds a draft GitHub release. Check installer, blockmap and `latest.yml`, then verify fresh installation and a real installed-version upgrade before publishing the release.
+5. Create the matching `v<desktop version>` tag. The workflow builds a draft GitHub release. Check the installer, blockmap and `latest.yml`, then verify fresh installation and a real installed-version upgrade before publishing the release.
 6. Clients whose old preload/updater bridge is broken may require one manual repair installation. Subsequent installed versions use the corrected update path. Do not uninstall with application-data deletion.
 
 No code-signing certificate is bundled. Configure signing through protected CI secrets before a public signed release; a local unsigned build is a test artifact and may produce a Windows SmartScreen warning.

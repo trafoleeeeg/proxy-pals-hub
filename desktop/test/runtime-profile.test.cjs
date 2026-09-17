@@ -17,6 +17,8 @@ function harness() {
   let navigationGate = null;
   let snapshotFailure = false;
   const records = new Map();
+  const tabRecords = new Map();
+  const bookmarkRecords = new Map();
   class Window extends EventEmitter {
     constructor(options) {
       super(); this.options = options; this.destroyed = false;
@@ -68,8 +70,16 @@ function harness() {
       read: async (id) => records.get(id),
       write: async (id, cookies, cookiesUpdatedAt) => { if (snapshotFailure) throw new Error("simulated disk failure"); records.set(id, { cookies, cookiesUpdatedAt }); },
     },
+    tabStore: {
+      read: async (id) => tabRecords.get(id) || { tabs: [], activeIndex: 0 },
+      write: async (id, tabs, activeIndex) => { tabRecords.set(id, { tabs: [...tabs], activeIndex }); },
+    },
+    bookmarkStore: {
+      readState: async (id) => bookmarkRecords.get(id) || { bookmarks: [], barVisible: true },
+      write: async (id, state) => { bookmarkRecords.set(id, structuredClone(state)); return structuredClone(state); },
+    },
   });
-  return { runtime, windows, sessions, records, get configured() { return configured; }, get disposed() { return disposed; }, setFlushGate: (gate) => { flushGate = gate; }, setNavigationGate: (gate) => { navigationGate = gate; }, setSnapshotFailure: (value) => { snapshotFailure = value; } };
+  return { runtime, windows, sessions, records, tabRecords, bookmarkRecords, get configured() { return configured; }, get disposed() { return disposed; }, setFlushGate: (gate) => { flushGate = gate; }, setNavigationGate: (gate) => { navigationGate = gate; }, setSnapshotFailure: (value) => { snapshotFailure = value; } };
 }
 
 const payload = () => ({ profileId: ID, deviceId: "test-device", name: "Test", lockToken: "test-lock-token", fingerprint: FP, cookies: "[]", cookiesUpdatedAt: null, proxy: null, startUrl: "https://example.test" });

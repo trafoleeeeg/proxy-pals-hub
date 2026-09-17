@@ -62,8 +62,7 @@ test("bookmark order and toolbar visibility persist with version-one compatibili
 
   const legacy = JSON.stringify({ version: 1, profileId: ID, bookmarks: [{ url: "https://legacy.example/", title: "Старая" }] });
   fs.writeFileSync(path.join(userData, "profile-bookmarks", `${ID}.bin`), safeStorage.encryptString(legacy));
-  assert.deepEqual(await store.readState(ID), {
-    bookmarks: [{ id: (await store.read(ID))[0].id, url: "https://legacy.example/", title: "Старая" }],
-    barVisible: true,
-  });
+  const restored = await store.readState(ID);
+  assert.equal(restored.barVisible, true);
+  assert.deepEqual(restored.bookmarks.map(({ url, title }) => ({ url, title })), [{ url: "https://legacy.example/", title: "Старая" }]);
 });

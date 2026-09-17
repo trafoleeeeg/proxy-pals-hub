@@ -96,23 +96,25 @@ function AppShell() {
     finally { setSigningOut(false); }
   }
   return <div className="flex min-h-screen bg-background">
-    <aside className="flex w-14 shrink-0 flex-col border-r border-sidebar-border bg-sidebar md:w-56">
-      <div className="flex h-14 items-center justify-center gap-2 border-b border-sidebar-border md:justify-start md:px-4">
-        <span className="flex size-6 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground">U</span>
-        <span className="hidden text-sm font-semibold md:inline">Umbra</span>
+    <aside className={"flex shrink-0 flex-col border-r border-sidebar-border bg-sidebar transition-[width] " + (collapsed ? "w-14" : "w-56")}>
+      <div className={"flex h-14 items-center gap-2 border-b border-sidebar-border " + (collapsed ? "justify-center" : "px-3")}>
+        <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground">U</span>
+        {!collapsed && <><span className="text-sm font-semibold">Umbra</span>
+          <Button variant="ghost" size="icon" className="ml-auto size-7" title="Свернуть меню" aria-label="Свернуть меню" onClick={() => toggleCollapsed()}><PanelLeftClose className="size-4" /></Button></>}
       </div>
-      <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-2 md:p-3">{NAV.map((item) => {
+      {collapsed && <Button variant="ghost" size="icon" className="mx-auto mt-2 size-8" title="Развернуть меню" aria-label="Развернуть меню" onClick={() => toggleCollapsed()}><PanelLeftOpen className="size-4" /></Button>}
+      <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-2">{NAV.map((item) => {
         const active = item.exact ? pathname === item.to || pathname === "/app/" : pathname.startsWith(item.to);
         const Icon = item.icon;
         return <Link key={item.to} to={item.to} title={item.label} aria-label={item.label} aria-current={active ? "page" : undefined}
-          className={"flex items-center justify-center gap-3 rounded-md px-2 py-2 text-sm md:justify-start " + (active ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground")}>
-          <Icon className={"size-4 shrink-0 " + (active ? "text-primary" : "")} /><span className="hidden md:inline">{item.label}</span>
+          className={"flex items-center gap-3 rounded-md px-2 py-2 text-sm " + (collapsed ? "justify-center" : "") + " " + (active ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground")}>
+          <Icon className={"size-4 shrink-0 " + (active ? "text-primary" : "")} />{!collapsed && <span>{item.label}</span>}
         </Link>;
       })}
-        {(pathname === "/app" || pathname === "/app/") && <FoldersNav />}
+        {(pathname === "/app" || pathname === "/app/") && <FoldersNav collapsed={collapsed} />}
       </nav>
-      <div className="border-t border-sidebar-border p-2 md:p-3">
-        <div className="hidden min-w-0 space-y-2 md:block">
+      <div className="border-t border-sidebar-border p-2">
+        <div className={"min-w-0 space-y-2 " + (collapsed ? "hidden" : "block")}>
           <p className="truncate text-xs">{ws?.email ?? ""}</p>
           <Select value={ws?.teamId ?? ""} disabled={selection.workspaces.isPending || signingOut} onValueChange={selection.select}>
             <SelectTrigger aria-label="Рабочая команда" className="w-full text-xs"><SelectValue placeholder="Команда" /></SelectTrigger>

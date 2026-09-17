@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const os = require("node:os");
 const fs = require("node:fs");
 const path = require("node:path");
-const { createBookmarkStore, sanitizeBookmarks } = require("../runtime/bookmarks.cjs");
+const { createBookmarkStore, sanitizeBookmarks, MAX_FAVICON_BYTES } = require("../runtime/bookmarks.cjs");
 
 const ID = "11111111-1111-4111-8111-111111111111";
 const safeStorage = {
@@ -65,4 +65,24 @@ test("bookmark order and toolbar visibility persist with version-one compatibili
   const restored = await store.readState(ID);
   assert.equal(restored.barVisible, true);
   assert.deepEqual(restored.bookmarks.map(({ url, title }) => ({ url, title })), [{ url: "https://legacy.example/", title: "Старая" }]);
+});
+
+test("bookmark favicon persists only for valid size-limited data images", async () => {
+  const valid = "data:image/png;base64," + Buffer.from("safe favicon").toString("base64");
+  const oversized = "data:image/png;base64," + Buffer.alloc(MAX_FAVICON_BYTES + 1).toString("base64");
+  const sanitized = sanitizeBookmarks([
+    { url: "https://valid.example/", favicon: valid },
+    { url: "https://remote.example/", favicon: "https://remote.example/favicon.ico" },
+    { url: "https://svg.example/", favicon: "data:image/svg+xml;base64," + Buffer.from("<svg/>").toString("base64") },
+    { url: "https://large.example/", favicon: oversized },
+  ]);
+  assert.equal(sanitized[0].favicon, valid);
+  assert.equal("favicon" in sanitized[1], false);
+  assert.equal("favicon" in sanitized[2], false);
+  assert.equal("favicon" in sanitized[3], false);
+
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "umbra-bookmarks-favicon-"));
+  const store = createBookmarkStore({ safeStorage, userData });
+  await store.write(ID, { bookmarks: sanitized, barVisible: true });
+  assert.equal((await store.read(ID))[0].favicon, valid);
 });

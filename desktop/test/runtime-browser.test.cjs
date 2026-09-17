@@ -7,6 +7,7 @@ function harness() {
   let handler;
   const stateEvents = [];
   const views = [];
+  let layoutCount = 0;
   class Contents extends EventEmitter {
     constructor() {
       super(); this.url = "about:blank"; this.title = ""; this.loading = false;
@@ -35,7 +36,7 @@ function harness() {
     focus() {}
     destroy() { this.emit("closed"); }
   }
-  class View { constructor() { this.webContents = new Contents(); } setBounds(bounds) { this.bounds = bounds; } setVisible(value) { this.visible = value; } }
+  class View { constructor() { this.webContents = new Contents(); } setBounds(bounds) { this.bounds = bounds; layoutCount++; } setVisible(value) { this.visible = value; } }
   const ipcMain = { handle(_channel, callback) { handler = callback; }, removeHandler() {} };
   const electron = {
     BrowserWindow: Shell, WebContentsView: View, ipcMain,
@@ -58,7 +59,7 @@ function harness() {
     await openTab("https://one.example/");
     await openTab("https://two.example/");
     const event = { sender: browser.shell.webContents, senderFrame: browser.shell.webContents.mainFrame };
-    return { browser, command: (message) => handler(event, message), stateEvents, changed };
+    return { browser, command: (message) => handler(event, message), stateEvents, changed, layoutCount: () => layoutCount };
   };
   return { start };
 }
@@ -88,6 +89,22 @@ test("browser chrome keeps the secure shell height and rejects malformed tab ord
   const h = await harness().start();
   assert.equal(CHROME_HEIGHT, 90);
   const result = await h.command({ action: "reorder-tabs", ids: ["unknown"] });
-  assert.match(result.error, /Не удалось|Unable/);
+  assert.match(result.error, /Не удалось/);
+  h.browser.destroy();
+});
+
+test("chrome height updates layout only after a real height change and never republishes state", async () => {
+  const h = await harness().start();
+  const stateCount = h.stateEvents.length;
+  const layoutCount = h.layoutCount();
+  await h.command({ action: "chrome-height", value: CHROME_HEIGHT });
+  assert.equal(h.layoutCount(), layoutCount);
+  assert.equal(h.stateEvents.length, stateCount);
+  await h.command({ action: "chrome-height", value: CHROME_HEIGHT + 34 });
+  assert.equal(h.layoutCount(), layoutCount + 2);
+  assert.equal(h.stateEvents.length, stateCount);
+  await h.command({ action: "chrome-height", value: CHROME_HEIGHT + 34 });
+  assert.equal(h.layoutCount(), layoutCount + 2);
+  assert.equal(h.stateEvents.length, stateCount);
   h.browser.destroy();
 });

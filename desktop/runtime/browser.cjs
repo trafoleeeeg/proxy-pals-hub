@@ -8,7 +8,7 @@ const CHROME_HEIGHT = 90;
 const handlers = new WeakMap();
 
 function addressUrl(value) {
-  if (typeof value !== "string" || value.length > 8192 || !value.trim()) throw new Error("Enter an address");
+  if (typeof value !== "string" || value.length > 8192 || !value.trim()) throw new Error("Введите адрес или поисковый запрос");
   value = value.trim();
   if (value === "about:blank") return value;
   if (/^[a-z][a-z\d+.-]*:/i.test(value) && !/^[\w.-]+:\d+(?:\/|$)/.test(value)) return startUrl(value);
@@ -133,7 +133,7 @@ async function createProfileBrowser(electron, {
         if (!url || url === "about:blank") { error = "Эту страницу нельзя добавить в закладки"; break; }
         const saved = getBookmarks().find((item) => item.url === url);
         if (saved) await removeBookmark(saved.id);
-        else await addBookmark({ url: startUrl(url), title: tab?.webContents.getTitle() || "" });
+        else await addBookmark({ url: startUrl(url), title: tab?.webContents.getTitle() || "", favicon: tab?.favicon || "" });
         break;
       }
       case "save-bookmark": {
@@ -141,8 +141,8 @@ async function createProfileBrowser(electron, {
         if (!url || url === "about:blank") { error = "Эту страницу нельзя добавить в закладки"; break; }
         const saved = getBookmarks().find((item) => item.url === url);
         const title = String(message.title || tab?.webContents.getTitle() || "").trim().slice(0, 120);
-        if (saved) await updateBookmark({ id: saved.id, title });
-        else await addBookmark({ url: startUrl(url), title });
+        if (saved) await updateBookmark({ id: saved.id, title, favicon: tab?.favicon || "" });
+        else await addBookmark({ url: startUrl(url), title, favicon: tab?.favicon || "" });
         break;
       }
       case "open-bookmark": {
@@ -159,8 +159,9 @@ async function createProfileBrowser(electron, {
       case "manage-extensions": openExtensionManager(); break;
       case "chrome-height": {
         const next = Number(message.value);
-        if (Number.isFinite(next) && next >= 80 && next <= 180) { chromeHeight = Math.round(next); layout(); }
-        break;
+        const rounded = Math.round(next);
+        if (Number.isFinite(next) && rounded >= 80 && rounded <= 180 && rounded !== chromeHeight) { chromeHeight = rounded; layout(); }
+        return;
       }
       case "navigate": if (tab) { tab.error = ""; void tab.loadURL(addressUrl(message.value)).catch(() => {}); } break;
       case "back": if (tab?.webContents.navigationHistory.canGoBack()) tab.webContents.navigationHistory.goBack(); break;
@@ -174,7 +175,7 @@ async function createProfileBrowser(electron, {
     // Switching existing tabs must not wait for a slow new tab or network check.
     if (message?.action === "select") { select(tabs.get(message.id)); return Promise.resolve({}); }
     commandQueue = commandQueue.then(() => command(message)).then(() => ({})).catch(() => {
-      error = "Unable to complete this action. Check the address or proxy connection."; publish(); return { error };
+      error = "Не удалось выполнить действие. Проверьте адрес и подключение прокси."; publish(); return { error };
     });
     return commandQueue;
   }
@@ -213,7 +214,7 @@ async function createProfileBrowser(electron, {
   shell.webContents.on("before-input-event", shortcuts);
   shell.webContents.on("render-process-gone", () => { if (!destroyed) void closeProfile().catch(() => {}); });
   shell.on("resize", layout);
-  shell.on("close", (event) => { event.preventDefault(); void closeProfile().catch(() => { error = "Profile could not be saved. Close again to retry."; publish(); }); });
+  shell.on("close", (event) => { event.preventDefault(); void closeProfile().catch(() => { error = "Не удалось сохранить профиль. Повторите закрытие."; publish(); }); });
   shell.on("closed", () => {
     destroyed = true;
     registry.delete(shellContents);
@@ -224,7 +225,7 @@ async function createProfileBrowser(electron, {
   try {
     await Promise.race([
       shell.loadURL(browserUrl()),
-      new Promise((_, reject) => { loadTimer = setTimeout(() => reject(new Error("Browser toolbar did not load")), 15000); }),
+      new Promise((_, reject) => { loadTimer = setTimeout(() => reject(new Error("Панель браузера не загрузилась")), 15000); }),
     ]);
   }
   catch (failure) { shell.destroy(); throw failure; }
@@ -232,7 +233,7 @@ async function createProfileBrowser(electron, {
   return {
     shell, publish,
     createTab() {
-      if (destroyed || tabs.size >= 32) throw new Error("Profile tab limit reached");
+      if (destroyed || tabs.size >= 32) throw new Error("Достигнут лимит вкладок профиля");
       const view = new WebContentsView({ webPreferences: { partition, contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, devTools: false } });
       const wc = view.webContents;
       const tab = new EventEmitter();
@@ -245,7 +246,7 @@ async function createProfileBrowser(electron, {
         async loadURL(url, options) {
           tab.url = startUrl(url, { allowBlank: true }); tab.error = ""; publish();
           try { await wc.loadURL(tab.url, options); }
-          catch (failure) { if (failure.code !== "ERR_ABORTED") tab.error = "Page could not be loaded. Check the address or proxy connection."; throw failure; }
+          catch (failure) { if (failure.code !== "ERR_ABORTED") tab.error = "Не удалось загрузить страницу. Проверьте адрес и подключение прокси."; throw failure; }
           finally { publish(); }
         },
       });
@@ -264,8 +265,8 @@ async function createProfileBrowser(electron, {
         } catch { /* favicon is optional and never falls back outside the profile session */ }
       });
       for (const event of ["did-start-loading", "did-stop-loading", "did-navigate", "did-navigate-in-page", "page-title-updated"]) wc.on(event, publish);
-      wc.on("did-fail-load", (_event, code, _description, _url, mainFrame) => { if (mainFrame && code !== -3) { tab.error = "Page could not be loaded. Check the address or proxy connection."; publish(); } });
-      wc.on("render-process-gone", () => { tab.error = "This tab stopped. Reload to try again."; publish(); });
+      wc.on("did-fail-load", (_event, code, _description, _url, mainFrame) => { if (mainFrame && code !== -3) { tab.error = "Не удалось загрузить страницу. Проверьте адрес и подключение прокси."; publish(); } });
+      wc.on("render-process-gone", () => { tab.error = "Вкладка остановилась. Обновите страницу и повторите попытку."; publish(); });
       wc.on("destroyed", () => {
         tabs.delete(tab.id);
         tabOrder = tabOrder.filter((id) => id !== tab.id);

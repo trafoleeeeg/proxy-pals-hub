@@ -146,7 +146,7 @@ function createProfileRuntime(electron, options = {}) {
       getBookmarkBarVisible: () => entry.bookmarkBarVisible !== false,
       getExtensions: () => entry.extensionList || [],
       addBookmark: (bookmark) => saveBookmarks(entry, [...(entry.bookmarks || []), { ...bookmark }]),
-      updateBookmark: (bookmark) => saveBookmarks(entry, (entry.bookmarks || []).map((item) => item.id === bookmark.id ? { ...item, title: bookmark.title } : item)),
+      updateBookmark: (bookmark) => saveBookmarks(entry, (entry.bookmarks || []).map((item) => item.id === bookmark.id ? { ...item, title: bookmark.title, favicon: bookmark.favicon || item.favicon } : item)),
       removeBookmark: (id) => saveBookmarks(entry, (entry.bookmarks || []).filter((item) => item.id !== id)),
       reorderBookmarks: (ids) => {
         const byId = new Map((entry.bookmarks || []).map((item) => [item.id, item]));

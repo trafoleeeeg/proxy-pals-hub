@@ -5,6 +5,20 @@ const { profileId, startUrl } = require("./validation.cjs");
 
 const MAX_BOOKMARKS = 64;
 const MAX_BYTES = 256 * 1024;
+const MAX_FAVICON_BYTES = 64 * 1024;
+const FAVICON_PATTERN = /^data:image\/(?:png|jpeg|gif|webp|x-icon|vnd\.microsoft\.icon);base64,([a-z\d+/]+={0,2})$/i;
+
+function sanitizeFavicon(value) {
+  if (typeof value !== "string") return "";
+  const match = value.match(FAVICON_PATTERN);
+  if (!match) return "";
+  const encoded = match[1];
+  if (encoded.length > Math.ceil(MAX_FAVICON_BYTES / 3) * 4) return "";
+  let bytes;
+  try { bytes = Buffer.from(encoded, "base64"); } catch { return ""; }
+  if (!bytes.length || bytes.length > MAX_FAVICON_BYTES || bytes.toString("base64").replace(/=+$/, "") !== encoded.replace(/=+$/, "")) return "";
+  return value;
+}
 
 function sanitizeBookmarks(value) {
   if (!Array.isArray(value)) return [];
@@ -18,7 +32,8 @@ function sanitizeBookmarks(value) {
     if (list.some((saved) => saved.url === url)) continue;
     const title = typeof item.title === "string" ? item.title.replace(/[\r\n\t]+/g, " ").trim().slice(0, 120) : "";
     const id = typeof item.id === "string" && /^[0-9a-f-]{36}$/i.test(item.id) ? item.id : randomUUID();
-    list.push({ id, url, title: title || new URL(url).hostname });
+    const favicon = sanitizeFavicon(item.favicon);
+    list.push({ id, url, title: title || new URL(url).hostname, ...(favicon ? { favicon } : {}) });
   }
   return list;
 }
@@ -76,7 +91,7 @@ function createBookmarkStore({ safeStorage, userData }) {
         await handle.close();
         handle = null;
         await fs.rename(temporary, file);
-      } catch { throw new Error("Unable to save encrypted bookmarks"); }
+      } catch { throw new Error("Не удалось сохранить зашифрованные закладки"); }
       finally {
         if (handle) await handle.close().catch(() => {});
         await fs.unlink(temporary).catch(() => {});
@@ -87,4 +102,4 @@ function createBookmarkStore({ safeStorage, userData }) {
   };
 }
 
-module.exports = { createBookmarkStore, sanitizeBookmarks, sanitizeBookmarkState, MAX_BOOKMARKS };
+module.exports = { createBookmarkStore, sanitizeBookmarks, sanitizeBookmarkState, sanitizeFavicon, MAX_BOOKMARKS, MAX_FAVICON_BYTES };

@@ -54,6 +54,7 @@ function harness() {
       name: "Тест", fp: { screen: { width: 1280, height: 720 } }, partition: "persist:test",
       openTab, closeProfile: async () => {}, show: false, onTabsChanged: () => changed.push(true),
     });
+    browser.markReady();
     await openTab("https://one.example/");
     await openTab("https://two.example/");
     const event = { sender: browser.shell.webContents, senderFrame: browser.shell.webContents.mainFrame };

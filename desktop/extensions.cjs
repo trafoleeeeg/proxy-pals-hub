@@ -62,7 +62,7 @@ function createExtensionStore(getUserData, deps = {}) {
       try {
         const manifest = JSON.parse(await fs.readFile(path.join(entry.path, "manifest.json"), "utf8"));
         if (manifest && typeof manifest.name === "string" && typeof manifest.version === "string") {
-          const item = { id: entry.id, name: manifest.name, version: manifest.version, enabled: true };
+          const item = { id: entry.id, name: manifest.name, version: manifest.version };
           const icons = manifest.icons && typeof manifest.icons === "object" ? Object.values(manifest.icons) : [];
           const icon = icons.map(String).at(-1);
           if (icon && !path.isAbsolute(icon) && !icon.split(/[\\/]/).includes("..")) {

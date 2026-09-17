@@ -24,7 +24,7 @@ export type RunningProfile = {
   cookiesUpdatedAt?: string | null;
   deviceId?: string | null;
 };
-export type InstalledExtension = { id: string; name: string; version: string };
+export type InstalledExtension = { id: string; name: string; version: string; source?: "store" | "url"; url?: string };
 
 export type ProfileRuntimeSnapshot = { profileId: string; cookies: string | null; lockToken?: string | null; cookiesUpdatedAt?: string | null; deviceId?: string | null };
 export type ProfileClosed = ProfileRuntimeSnapshot & { snapshotId: string };

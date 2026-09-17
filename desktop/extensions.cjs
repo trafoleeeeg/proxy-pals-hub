@@ -1,10 +1,14 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
-const { createHash } = require("node:crypto");
+const os = require("node:os");
+const { createHash, randomUUID } = require("node:crypto");
+const { unpackArchive } = require("./crx.cjs");
+const { parseExtensionUrl, fetchBuffer } = require("./extension-source.cjs");
 
 const REGISTRY = "extensions.json";
 
-function createExtensionStore(getUserData) {
+function createExtensionStore(getUserData, deps = {}) {
+  const download = deps.fetchBuffer || fetchBuffer;
   const root = () => path.join(getUserData(), "extensions");
   const registryPath = () => path.join(getUserData(), REGISTRY);
   let queue = Promise.resolve();
@@ -30,11 +34,18 @@ function createExtensionStore(getUserData) {
     try {
       const data = JSON.parse(await fs.readFile(registryPath(), "utf8"));
       if (!Array.isArray(data) || data.some((entry) => !entry || !/^[a-f0-9]{24}$/.test(entry.id))) throw new Error();
-      return data.map(({ id }) => ({ id, path: directory(id) }));
+      return data.map(({ id, source }) => ({ id, path: directory(id), source: normalizeSource(source) }));
     } catch (error) {
       if (error.code === "ENOENT") return [];
       throw new Error("Не удалось прочитать набор расширений");
     }
+  }
+
+  function normalizeSource(source) {
+    if (!source || typeof source !== "object") return undefined;
+    if (source.kind !== "store" && source.kind !== "url") return undefined;
+    if (typeof source.downloadUrl !== "string" || !source.downloadUrl.startsWith("https://")) return undefined;
+    return { kind: source.kind, downloadUrl: source.downloadUrl, pageUrl: typeof source.pageUrl === "string" ? source.pageUrl : source.downloadUrl };
   }
 
   async function write(entries) {
@@ -51,7 +62,9 @@ function createExtensionStore(getUserData) {
       try {
         const manifest = JSON.parse(await fs.readFile(path.join(entry.path, "manifest.json"), "utf8"));
         if (manifest && typeof manifest.name === "string" && typeof manifest.version === "string") {
-          valid.push({ id: entry.id, name: manifest.name, version: manifest.version });
+          const item = { id: entry.id, name: manifest.name, version: manifest.version };
+          if (entry.source) { item.source = entry.source.kind; item.url = entry.source.pageUrl; }
+          valid.push(item);
         }
       } catch { /* a removed folder is omitted from the UI */ }
     }
@@ -62,16 +75,29 @@ function createExtensionStore(getUserData) {
     return (await read()).map((entry) => entry.id);
   }
 
+  function readManifest(manifest) {
+    if (!manifest || typeof manifest.name !== "string" || typeof manifest.version !== "string" ||
+      ![2, 3].includes(manifest.manifest_version)) {
+      throw new Error("Поддерживаются распакованные расширения Manifest V2 или V3");
+    }
+    return manifest;
+  }
+
+  async function loadManifest(folder) {
+    try { return readManifest(JSON.parse(await fs.readFile(path.join(folder, "manifest.json"), "utf8"))); }
+    catch (error) {
+      if (error instanceof SyntaxError || error.code === "ENOENT") throw new Error("В расширении нет корректного manifest.json");
+      throw error;
+    }
+  }
+
   async function addFromDirectory(source) {
     const sourcePath = path.resolve(String(source || ""));
     const manifestPath = path.join(sourcePath, "manifest.json");
     let manifest;
     try { manifest = JSON.parse(await fs.readFile(manifestPath, "utf8")); }
     catch { throw new Error("В выбранной папке нет корректного manifest.json"); }
-    if (!manifest || typeof manifest.name !== "string" || typeof manifest.version !== "string" ||
-      ![2, 3].includes(manifest.manifest_version)) {
-      throw new Error("Поддерживаются распакованные расширения Manifest V2 или V3");
-    }
+    readManifest(manifest);
     const id = createHash("sha256").update(sourcePath + "\0" + manifest.name + "\0" + manifest.version).digest("hex").slice(0, 24);
     const entries = await read();
     const managed = entries.find((entry) => entry.path.toLowerCase() === sourcePath.toLowerCase());
@@ -92,6 +118,38 @@ function createExtensionStore(getUserData) {
     next.push({ id, path: destination });
     await write(next);
     return { id, name: manifest.name, version: manifest.version };
+  }
+
+  // Downloads an extension from the Chrome Web Store or a direct https link.
+  async function installFromSource(parsed, forcedId) {
+    const id = forcedId || createHash("sha256").update(parsed.key).digest("hex").slice(0, 24);
+    const staging = path.join(os.tmpdir(), "umbra-extension-" + randomUUID());
+    try {
+      const archive = await download(parsed.downloadUrl);
+      await unpackArchive(archive, staging);
+      const manifest = await loadManifest(staging);
+      await checkTree(staging);
+      const destination = directory(id);
+      await fs.mkdir(root(), { recursive: true });
+      await fs.rm(destination, { recursive: true, force: true });
+      await fs.cp(staging, destination, { recursive: true, dereference: false });
+      const entries = (await read()).filter((entry) => entry.id !== id);
+      entries.push({ id, source: { kind: parsed.kind, downloadUrl: parsed.downloadUrl, pageUrl: parsed.pageUrl } });
+      await write(entries);
+      return { id, name: manifest.name, version: manifest.version, source: parsed.kind, url: parsed.pageUrl };
+    } finally {
+      await fs.rm(staging, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+
+  async function addFromUrl(value) {
+    return installFromSource(parseExtensionUrl(value));
+  }
+
+  async function updateFromSource(id) {
+    const entry = (await read()).find((item) => item.id === String(id));
+    if (!entry || !entry.source) throw new Error("Это расширение добавлено папкой, обновление по ссылке недоступно");
+    return installFromSource(parseExtensionUrl(entry.source.pageUrl || entry.source.downloadUrl), entry.id);
   }
 
   async function remove(id) {
@@ -134,6 +192,8 @@ function createExtensionStore(getUserData) {
     list: () => serialize(list),
     ids: () => serialize(ids),
     addFromDirectory: (source) => serialize(() => addFromDirectory(source)),
+    addFromUrl: (url) => serialize(() => addFromUrl(url)),
+    update: (id) => serialize(() => updateFromSource(id)),
     remove: (id) => serialize(() => remove(id)),
     loadIntoSession: (ses, loaded) => serialize(() => loadIntoSession(ses, loaded)),
   };

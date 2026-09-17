@@ -30,6 +30,7 @@ let outbox = null;
 let quitting = false;
 let closing = false;
 let proxyChecks = 0;
+let extensionDownloads = 0;
 function send(channel, payload) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
 }
@@ -146,6 +147,26 @@ handle("umbra:extensions-add", async () => {
   const extension = await extensionStore.addFromDirectory(result.filePaths[0]);
   const failures = await refreshExtensions();
   return { ok: true, extension, failures };
+});
+handle("umbra:extensions-add-url", async (url) => {
+  if (typeof url !== "string" || url.length > 2048) throw new Error("Ссылка указана неверно");
+  if (extensionDownloads >= 2) throw new Error("Дождитесь окончания текущей загрузки расширения");
+  extensionDownloads++;
+  try {
+    const extension = await extensionStore.addFromUrl(url);
+    const failures = await refreshExtensions();
+    return { ok: true, extension, failures };
+  } finally { extensionDownloads--; }
+});
+handle("umbra:extensions-update", async (id) => {
+  if (typeof id !== "string") throw new Error("Некорректный идентификатор расширения");
+  if (extensionDownloads >= 2) throw new Error("Дождитесь окончания текущей загрузки расширения");
+  extensionDownloads++;
+  try {
+    const extension = await extensionStore.update(id);
+    const failures = await refreshExtensions();
+    return { ok: true, extension, failures };
+  } finally { extensionDownloads--; }
 });
 handle("umbra:extensions-remove", async (id) => {
   await extensionStore.remove(id);

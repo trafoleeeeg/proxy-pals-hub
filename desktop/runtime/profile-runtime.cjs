@@ -293,7 +293,9 @@ function createProfileRuntime(electron, options = {}) {
       if (extensionStore) {
         const extensionResult = await extensionStore.loadIntoSession(entry.ses, entry.extensionsLoaded);
         entry.extensionErrors = extensionResult.errors;
+        await reloadExtensionList(entry);
       }
+      entry.bookmarks = await bookmarkStore().read(id).catch(() => []);
       const saved = await tabStore().read(id).catch(() => ({ tabs: [], activeIndex: 0 }));
       const plan = url !== "about:blank" ? [url] : (saved.tabs.length ? saved.tabs : ["about:blank"]);
       await makeWindow(entry, plan[0], true);

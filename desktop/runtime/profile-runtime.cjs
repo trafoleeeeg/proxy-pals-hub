@@ -3,6 +3,7 @@ const { createProfileBrowser } = require("./browser.cjs");
 const { createRuntimeProxy, blockSession } = require("./proxy.cjs");
 const { createCookieStore, initializeCookies, canonicalCookies } = require("./cookies.cjs");
 const { createTabStore, sanitizeTabs } = require("./tabs.cjs");
+const { createBookmarkStore } = require("./bookmarks.cjs");
 const { normalizeFingerprint, applyFingerprint } = require("./fingerprint.cjs");
 
 function createProfileRuntime(electron, options = {}) {

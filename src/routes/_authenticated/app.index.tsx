@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Archive, BriefcaseBusiness, CheckCircle2, CircleUserRound, Copy, Cookie, Folder, FolderInput, FolderOpen, Globe2, LockKeyhole, PanelLeftClose, PanelLeftOpen, Pencil, Play, Plus, RefreshCw, Search, Settings2, ShoppingBag, Square, Trash2, UserPlus, UsersRound, X } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "@/lib/useWorkspace";
+import { ALL_FOLDERS, useProfileFolder } from "@/lib/useProfileFolder";
 import { listProfiles, saveProfile, cloneProfile, bulkCreateProfiles } from "@/lib/profiles.functions";
 import { listProxies } from "@/lib/proxies.functions";
 import { useDesktopProfileLifecycle } from "@/hooks/useDesktopProfileLifecycle";
@@ -13,7 +14,7 @@ import { ProfileFingerprint } from "@/components/profile-fingerprint";
 import { ProfileCookies } from "@/components/profile-cookies";
 import { ProfileBulkDialog, type BulkAction } from "@/components/profile-bulk";
 import { ProfileProxyCell, useProxyOps } from "@/components/profile-proxy";
-import { ColumnSettings, InlineText, MetadataManager, type FixedColumn } from "@/components/profile-table-tools";
+import { ColumnSettings, InlineText, MetadataManager, NotesCell, ResizableHead, useColumnWidths, type FixedColumn } from "@/components/profile-table-tools";
 import { createProfileField, createProfileStatus, listProfileMetadata } from "@/lib/profile-metadata.functions";
 import { fingerprintError, profileFingerprintPayload, splitTags, toggleVisibleSelection } from "@/components/profile-model";
 import { Button } from "@/components/ui/button";
@@ -38,7 +39,7 @@ export const Route = createFileRoute("/_authenticated/app/")({
   component: ProfilesPage,
 });
 type Edit = { id?: string; name: string; folder: string; tags: string; notes: string; proxyId: string; fingerprint: Fingerprint; statusId: string | null; customFields: Record<string, string> };
-const ALL = "__all__";
+const ALL = ALL_FOLDERS;
 const DEFAULT_COLUMNS: FixedColumn[] = ["folder", "status", "proxy", "tags", "notes", "fingerprint", "updated"];
 const dateTime = (value: string) => new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
 const statusTone: Record<string, string> = { primary: "border-primary/40 bg-primary/10 text-primary", success: "border-success/40 bg-success/10 text-success", warning: "border-warning/40 bg-warning/10 text-warning", destructive: "border-destructive/40 bg-destructive/10 text-destructive", muted: "border-border bg-muted text-muted-foreground" };
@@ -64,7 +65,7 @@ function ProfilesWorkspace() {
   const runtime = useDesktopProfileLifecycle();
   const proxyOps = useProxyOps(ws?.teamId);
   const [search, setSearch] = useState("");
-  const [folder, setFolder] = useState(ALL);
+  const { folder } = useProfileFolder();
   const [selected, setSelected] = useState<string[]>([]);
   const [action, setAction] = useState<{ mode: BulkAction; ids: string[] } | null>(null);
   const [cookiesId, setCookiesId] = useState<string | null>(null);
@@ -75,7 +76,7 @@ function ProfilesWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [metadataOpen, setMetadataOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
-  const [foldersCollapsed, setFoldersCollapsed] = useState(false);
+  const { widths, setWidth, reset: resetWidths } = useColumnWidths();
   const [visibleColumns, setVisibleColumns] = useState<FixedColumn[]>(DEFAULT_COLUMNS);
   const [visibleFields, setVisibleFields] = useState<string[]>([]);
   const profiles = useQuery({ queryKey: ["profiles", ws?.teamId], queryFn: () => { if (!ws) throw new Error("Команда не загружена"); return listFn({ data: { teamId: ws.teamId } }); }, enabled: !!ws, refetchInterval: 20_000 });
@@ -84,7 +85,6 @@ function ProfilesWorkspace() {
   const running = useMemo(() => new Set(runtime.running.map((p) => p.profileId)), [runtime.running]);
   const pending = useMemo(() => new Set([...runtime.pending, ...runtime.busy]), [runtime.pending, runtime.busy]);
   const locked = (id: string) => running.has(id) || pending.has(id) || !!profiles.data?.find((p) => p.id === id)?.lock;
-  const folders = useMemo(() => [...new Set((profiles.data ?? []).map((p) => p.folder).filter(Boolean))].sort(), [profiles.data]);
   const rows = (profiles.data ?? []).filter((p) => (folder === ALL || p.folder === folder) && (p.name + " " + p.folder + " " + p.tags.join(" ")).toLowerCase().includes(search.toLowerCase()));
   const visibleIds = rows.map((p) => p.id);
   const visibleSelected = visibleIds.filter((id) => selected.includes(id)).length;
@@ -133,7 +133,6 @@ function ProfilesWorkspace() {
   const occupied = (profiles.data ?? []).filter((profile) => !!profile.lock && !running.has(profile.id)).length;
   const available = Math.max(0, (profiles.data?.length ?? 0) - running.size - occupied);
   const withProxy = (profiles.data ?? []).filter((profile) => !!profile.proxy_id).length;
-  const folderIcons = [Folder, BriefcaseBusiness, ShoppingBag, UsersRound, Globe2];
 
   if (workspace.isPending) return <p role="status" className="text-sm text-muted-foreground">Загрузка рабочего пространства…</p>;
   if (workspace.isError) return <p role="alert" className="text-sm text-destructive">Не удалось загрузить команду. <Button variant="outline" onClick={() => workspace.refetch()}>Повторить</Button></p>;

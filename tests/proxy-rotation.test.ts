@@ -14,13 +14,27 @@ test("rotation requires a different IP; temporary failures and unchanged address
     record: async (...args) => { records.push(args); }, wait: async () => {},
   });
   expect(result.ip).toBe("1.2.3.5");
-  expect(records).toHaveLength(3);
+  expect(records).toHaveLength(4);
   const finals: boolean[] = [];
   await expect(confirmRotation({
     previousIp: "1.2.3.4", probe: async () => ({ ok: true, ip: "1.2.3.4" }), attempts: 2,
     record: async (_result, final) => { finals.push(final); }, wait: async () => {},
   })).rejects.toThrow("не подтверждён");
   expect(finals).toEqual([false, true]);
+});
+
+test("rotation ignores a transient changed IP and confirms the stable address", async () => {
+  const ips = ["1.2.3.4", "1.2.3.5", "1.2.3.6", "1.2.3.6"];
+  const records: Array<[unknown, boolean]> = [];
+  const result = await confirmRotation({
+    previousIp: "1.2.3.4",
+    probe: async () => ({ ok: true, ip: ips.shift() }),
+    record: async (value, final) => { records.push([value, final]); },
+    wait: async () => {},
+  });
+  expect(result.ip).toBe("1.2.3.6");
+  expect(records).toHaveLength(4);
+  expect(records.at(-1)?.[1]).toBe(true);
 });
 
 test("stale rotations recover and private destinations are rejected", () => {

@@ -423,6 +423,7 @@ describe("mobile proxy rotation", () => {
     await expect(invoke("recordProxyCheck", { ...target, ok: true, ip: "1.2.3.5", rotationRequestedAt: "2000-01-01T00:00:00Z" }, f)).rejects.toThrow();
     await invoke("recordProxyCheck", { ...target, ok: true, ip: "1.2.3.5", rotationRequestedAt: requestedAt }, f);
     expect(f.tables.proxies[0]).toMatchObject({ rotation_status: "success", rotation_previous_ip: "1.2.3.4", rotation_new_ip: "1.2.3.5" });
+    await expect(invoke("recordProxyCheck", { ...target, ok: true, ip: "1.2.3.5", rotationRequestedAt: requestedAt }, f)).resolves.toEqual({ ok: true });
     const changedAt = f.tables.proxies[0]!.rotation_changed_at;
     await invoke("recordProxyCheck", { ...target, ok: true, ip: "1.2.3.6" }, f);
     expect(f.tables.proxies[0]).toMatchObject({ rotation_new_ip: "1.2.3.5", rotation_changed_at: changedAt });

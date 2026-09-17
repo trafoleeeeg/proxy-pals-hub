@@ -214,11 +214,16 @@ export const recordProxyCheck = createServerFn({ method: "POST" })
     await requireProxy(context, data);
     const db = context.supabase as any;
     const { data: current, error: currentError } = await db.from("proxies")
-      .select("last_check_ip, rotation_status, rotation_changed_at, rotation_previous_ip, rotation_requested_at")
+      .select("last_check_ip, rotation_status, rotation_changed_at, rotation_previous_ip, rotation_new_ip, rotation_requested_at")
       .eq("id", data.id).eq("team_id", data.teamId).maybeSingle();
     if (currentError || !current) throw new Error("Не удалось прочитать состояние прокси");
     const now = new Date().toISOString();
     const confirmsRotation = !!data.rotationRequestedAt && data.rotationRequestedAt === current["rotation_requested_at"] && current["rotation_status"] === "changing";
+    // A server-function response can be retried after the first request has
+    // already committed. The same rotation token is idempotent once terminal;
+    // an older token from another rotation is still rejected below.
+    if (data.rotationRequestedAt && data.rotationRequestedAt === current["rotation_requested_at"] &&
+      (current["rotation_status"] === "success" || current["rotation_status"] === "error")) return { ok: true };
     if (data.rotationRequestedAt && !confirmsRotation) throw new Error("Эта проверка относится к предыдущей смене IP");
     const outcome = confirmsRotation ? rotationOutcome(current["rotation_previous_ip"], data, data.rotationFinal || rotationExpired(current["rotation_requested_at"])) : null;
     const rotation = outcome ? {

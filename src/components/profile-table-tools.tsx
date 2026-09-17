@@ -1,12 +1,15 @@
-import { useState } from "react";
-import { Columns3, Plus, Tag } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { ClipboardPaste, Columns3, Pencil, Plus, Tag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { TableHead } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 
 export type ProfileStatus = { id: string; name: string; color: string; position: number };
 export type ProfileField = { id: string; name: string; field_type: string; position: number };
@@ -59,4 +62,83 @@ export function InlineText({ value, placeholder, disabled, multiline = false, on
   return multiline
     ? <textarea aria-label={placeholder} rows={2} disabled={disabled} value={draft} placeholder={placeholder} onChange={(event) => setDraft(event.target.value)} onBlur={commit} className="min-h-12 w-full resize-none rounded-sm border border-transparent bg-transparent px-1.5 py-1 text-xs outline-none placeholder:text-muted-foreground hover:border-border focus:border-input focus:bg-background" />
     : <Input aria-label={placeholder} disabled={disabled} value={draft} placeholder={placeholder} onChange={(event) => setDraft(event.target.value)} onBlur={commit} className="h-7 min-w-28 border-transparent bg-transparent px-1.5 text-xs shadow-none hover:border-border focus:border-input focus:bg-background" />;
+}
+const WIDTH_KEY = "umbra:column-widths";
+const MIN_WIDTH = 60;
+const MAX_WIDTH = 640;
+
+// Column widths are personal, so they live in the browser of each user.
+export function useColumnWidths() {
+  const [widths, setWidths] = useState<Record<string, number>>({});
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(WIDTH_KEY) || "{}") as Record<string, unknown>;
+      const clean: Record<string, number> = {};
+      for (const [key, value] of Object.entries(stored)) {
+        if (typeof value === "number" && value >= MIN_WIDTH && value <= MAX_WIDTH) clean[key] = value;
+      }
+      setWidths(clean);
+    } catch { /* an unreadable setting falls back to default widths */ }
+  }, []);
+  const setWidth = (key: string, width: number) => {
+    setWidths((current) => {
+      const next = { ...current, [key]: Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(width))) };
+      try { window.localStorage.setItem(WIDTH_KEY, JSON.stringify(next)); } catch { /* storage may be unavailable */ }
+      return next;
+    });
+  };
+  const reset = () => { setWidths({}); try { window.localStorage.removeItem(WIDTH_KEY); } catch { /* ignore */ } };
+  return { widths, setWidth, reset };
+}
+
+export function ResizableHead({ columnKey, widths, setWidth, className, children }: {
+  columnKey: string; widths: Record<string, number>; setWidth: (key: string, width: number) => void;
+  className?: string; children: ReactNode;
+}) {
+  const ref = useRef<HTMLTableCellElement>(null);
+  const width = widths[columnKey];
+  function drag(startX: number, startWidth: number) {
+    const move = (event: PointerEvent) => setWidth(columnKey, startWidth + event.clientX - startX);
+    const stop = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", stop); };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop);
+  }
+  return <TableHead ref={ref} className={"relative " + (className ?? "")} style={width ? { width, minWidth: width, maxWidth: width } : undefined}>
+    <span className="block truncate pr-2">{children}</span>
+    <span role="separator" aria-label="Изменить ширину колонки" tabIndex={0}
+      className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize select-none bg-transparent hover:bg-primary/40"
+      onPointerDown={(event) => { event.preventDefault(); drag(event.clientX, ref.current?.getBoundingClientRect().width ?? MIN_WIDTH); }}
+      onKeyDown={(event) => {
+        const current = ref.current?.getBoundingClientRect().width ?? MIN_WIDTH;
+        if (event.key === "ArrowLeft") { event.preventDefault(); setWidth(columnKey, current - 16); }
+        if (event.key === "ArrowRight") { event.preventDefault(); setWidth(columnKey, current + 16); }
+      }} />
+  </TableHead>;
+}
+
+export function NotesCell({ value, disabled, onSave }: { value: string; disabled: boolean; onSave: (value: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const [pasteError, setPasteError] = useState(false);
+  async function paste() {
+    try {
+      const text = await navigator.clipboard.readText();
+      setDraft((current) => (current ? current + "\n" : "") + text);
+      setPasteError(false);
+    } catch { setPasteError(true); }
+  }
+  return <div className="flex min-w-0 items-center gap-1">
+    <span className="block min-w-0 flex-1 truncate text-muted-foreground" title={value}>{value || "—"}</span>
+    <Popover open={open} onOpenChange={(next) => { setOpen(next); if (next) { setDraft(value); setPasteError(false); } }}>
+      <PopoverTrigger asChild><Button variant="ghost" size="icon" className="size-6 shrink-0" disabled={disabled} title="Изменить заметку" aria-label="Изменить заметку"><Pencil className="size-3.5" /></Button></PopoverTrigger>
+      <PopoverContent align="end" className="w-72 space-y-2">
+        <Textarea aria-label="Заметка профиля" rows={4} value={draft} placeholder="Заметка" onChange={(event) => setDraft(event.target.value)} />
+        {pasteError && <p role="alert" className="text-xs text-destructive">Буфер обмена недоступен. Вставьте текст сочетанием клавиш.</p>}
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => void paste()}><ClipboardPaste className="size-4" />Вставить</Button>
+          <Button size="sm" className="ml-auto" onClick={() => { if (draft !== value) onSave(draft); setOpen(false); }}>Сохранить</Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  </div>;
 }

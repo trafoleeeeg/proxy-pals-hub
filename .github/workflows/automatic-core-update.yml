@@ -1,0 +1,37 @@
+name: Automatic Electron release
+
+on:
+  schedule:
+    - cron: '23 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: automatic-core-release
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Test release policy
+        run: node --test .github/scripts/core-update-policy.test.cjs
+      - name: Update, verify and release the stable engine
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node .github/scripts/automatic-core-update.cjs

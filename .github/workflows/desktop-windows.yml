@@ -7,6 +7,11 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      automatic_release:
+        description: Publish a verified stable core update after the tag build
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -73,7 +78,26 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read
+      pull-requests: read
+    concurrency:
+      group: umbra-release-publication
+      cancel-in-progress: false
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify automatic release provenance
+        if: github.event_name == 'workflow_dispatch' && inputs.automatic_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node .github/scripts/verify-core-release.cjs
+
       - name: Download Windows artifacts
         uses: actions/download-artifact@v4
         with:
@@ -83,7 +107,8 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          draft: true
+          draft: ${{ !(github.event_name == 'workflow_dispatch' && inputs.automatic_release) }}
+          generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
             desktop/dist/*.exe

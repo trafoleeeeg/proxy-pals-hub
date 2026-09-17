@@ -38,3 +38,7 @@ be compatible with that subset. Bundles are not synchronized across computers.
 The daily Electron update configuration opens tested dependency PRs. It does
 not itself merge PRs or publish an installer; automatic client installation
 starts only after a matching GitHub release is published.
+
+Follow-up: the gated `Automatic Electron release` workflow now completes the
+PR, validation, merge and installer publication steps. See windows-release.md
+for its schedule, safeguards and failure recovery.

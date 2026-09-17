@@ -72,7 +72,7 @@ function renderer() {
       close.dataset.focusKey = "close-" + tab.id;
       close.onclick = () => run({ action: "close-tab", id: tab.id });
       item.append(select, close); return item;
-    }), newTab);
+    }));
     if (focusedTab) [...tabs.querySelectorAll("button")].find((button) => button.dataset.focusKey === focusedTab)?.focus();
     newTab.disabled = state.tabs.length >= 32;
     const bookmarks = state.bookmarks || [];

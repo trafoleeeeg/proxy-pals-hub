@@ -294,6 +294,7 @@ export type Database = {
           protocol: Database["public"]["Enums"]["proxy_protocol"]
           rotation_changed_at: string | null
           rotation_last_error: string | null
+          rotation_new_ip: string | null
           rotation_previous_ip: string | null
           rotation_requested_at: string | null
           rotation_status: string
@@ -320,6 +321,7 @@ export type Database = {
           protocol?: Database["public"]["Enums"]["proxy_protocol"]
           rotation_changed_at?: string | null
           rotation_last_error?: string | null
+          rotation_new_ip?: string | null
           rotation_previous_ip?: string | null
           rotation_requested_at?: string | null
           rotation_status?: string
@@ -346,6 +348,7 @@ export type Database = {
           protocol?: Database["public"]["Enums"]["proxy_protocol"]
           rotation_changed_at?: string | null
           rotation_last_error?: string | null
+          rotation_new_ip?: string | null
           rotation_previous_ip?: string | null
           rotation_requested_at?: string | null
           rotation_status?: string

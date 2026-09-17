@@ -7,8 +7,8 @@ export function rotationExpired(requestedAt: string | null | undefined, now = Da
 }
 
 /** A reachable proxy is not proof of rotation: the actual address must differ. */
-export function rotationOutcome(previousIp: string | null, result: ProxyCheckResult, final: boolean): ProxyRotationStatus {
-  if (result.ok && previousIp && result.ip && result.ip !== previousIp) return "success";
+export function rotationOutcome(previousIp: string | null, result: ProxyCheckResult, final: boolean, confirmed = true): ProxyRotationStatus {
+  if (confirmed && result.ok && previousIp && result.ip && result.ip !== previousIp) return "success";
   return final ? "error" : "changing";
 }
 
@@ -17,7 +17,7 @@ export async function confirmRotation({
 }: {
   previousIp: string;
   probe: () => Promise<ProxyCheckResult>;
-  record: (result: ProxyCheckResult, final: boolean) => Promise<unknown>;
+  record: (result: ProxyCheckResult, final: boolean, confirmed: boolean) => Promise<unknown>;
   wait?: (ms: number) => Promise<unknown>;
   attempts?: number;
 }) {
@@ -32,11 +32,11 @@ export async function confirmRotation({
     const changedIp = result.ok && result.ip && result.ip !== previousIp ? result.ip : null;
     const confirmed = changedIp !== null && changedIp === candidateIp;
     if (confirmed) {
-      await record(result, true);
+      await record(result, true, true);
       return result;
     }
     candidateIp = changedIp;
-    await record(result, final);
+    await record(result, final, false);
   }
   throw new Error("Провайдер принял запрос, но новый IP не подтверждён. Повторите проверку позже.");
 }

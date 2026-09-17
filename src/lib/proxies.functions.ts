@@ -206,9 +206,9 @@ export const proxyForCheck = createServerFn({ method: "POST" })
 
 export const recordProxyCheck = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: Target & ProxyCheckResult & { rotationRequestedAt?: string; rotationFinal?: boolean }) => {
+  .inputValidator((data: Target & ProxyCheckResult & { rotationRequestedAt?: string; rotationFinal?: boolean; rotationConfirmed?: boolean }) => {
     if (data.rotationRequestedAt !== undefined && (typeof data.rotationRequestedAt !== "string" || !Number.isFinite(Date.parse(data.rotationRequestedAt)))) throw new Error("Некорректная проверка смены IP");
-    return { ...validateProxyTarget(data), ...normalizeProxyCheck(data), rotationRequestedAt: data.rotationRequestedAt, rotationFinal: data.rotationFinal === true };
+    return { ...validateProxyTarget(data), ...normalizeProxyCheck(data), rotationRequestedAt: data.rotationRequestedAt, rotationFinal: data.rotationFinal === true, rotationConfirmed: data.rotationConfirmed === true };
   })
   .handler(async ({ data, context }) => {
     await requireProxy(context, data);
@@ -225,7 +225,11 @@ export const recordProxyCheck = createServerFn({ method: "POST" })
     if (data.rotationRequestedAt && data.rotationRequestedAt === current["rotation_requested_at"] &&
       (current["rotation_status"] === "success" || current["rotation_status"] === "error")) return { ok: true };
     if (data.rotationRequestedAt && !confirmsRotation) throw new Error("Эта проверка относится к предыдущей смене IP");
-    const outcome = confirmsRotation ? rotationOutcome(current["rotation_previous_ip"], data, data.rotationFinal || rotationExpired(current["rotation_requested_at"])) : null;
+    const outcome = confirmsRotation ? rotationOutcome(
+      current["rotation_previous_ip"], data,
+      data.rotationFinal || rotationExpired(current["rotation_requested_at"]),
+      data.rotationConfirmed,
+    ) : null;
     const rotation = outcome ? {
       rotation_status: outcome,
       rotation_last_error: outcome === "error" ? "not_confirmed" : null,

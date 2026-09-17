@@ -179,8 +179,8 @@ export function ProxiesPage() {
       return confirmRotation({
         previousIp: request.previousIp!,
         probe,
-        record: async (result, final) => {
-          await record({ data: { id, teamId: selectedTeam, ...result, rotationRequestedAt: request.requestedAt, rotationFinal: final } });
+        record: async (result, final, confirmed) => {
+          await record({ data: { id, teamId: selectedTeam, ...result, rotationRequestedAt: request.requestedAt, rotationFinal: final, rotationConfirmed: confirmed } });
           void invalidate();
         },
       });

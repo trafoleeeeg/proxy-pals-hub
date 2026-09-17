@@ -387,6 +387,7 @@ function createProfileRuntime(electron, options = {}) {
       entry.extensionsLoaded ||= new Map();
       const extensionResult = await extensionStore.loadIntoSession(entry.ses, entry.extensionsLoaded);
       entry.extensionErrors = extensionResult.errors;
+      await reloadExtensionList(entry);
       entry.browser?.publish?.();
       return extensionResult.errors.length;
     }));

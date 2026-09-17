@@ -27,7 +27,7 @@ async function capture(page: Page, info: TestInfo, name: string) {
 async function openProfiles(page: Page, scenario = "") {
   await page.goto(`/app${scenario ? `?scenario=${scenario}` : ""}`);
   await expect(page.getByRole("heading", { name: "Профили", exact: false })).toBeVisible();
-  await expect(page.getByRole("checkbox", { name: "Выбрать видимые профили" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Запустить Рабочий профиль", exact: true })).toBeVisible();
 }
 
 test.beforeEach(async ({ page }) => {
@@ -41,6 +41,7 @@ test.afterEach(async ({ page }) => {
 
 test("bulk edit preserves hidden selection and sends only selected fields", async ({ page }, info) => {
   await openProfiles(page);
+  await page.getByRole("button", { name: "Редактировать", exact: true }).click();
   await capture(page, info, "profiles");
   await page.getByRole("checkbox", { name: "Выбрать Рабочий профиль", exact: true }).check();
   await page.getByRole("checkbox", { name: "Выбрать Резервный профиль", exact: true }).check();
@@ -66,6 +67,7 @@ test("bulk edit preserves hidden selection and sends only selected fields", asyn
 
 test("folders can be cleared and deletion requires confirmation with recoverable errors", async ({ page }, info) => {
   await openProfiles(page);
+  await page.getByRole("button", { name: "Редактировать", exact: true }).click();
   await page.getByRole("checkbox", { name: "Выбрать Рабочий профиль", exact: true }).check();
   await page.getByRole("button", { name: "В папку", exact: true }).click();
   await fit(page, '[role="dialog"]');
@@ -242,6 +244,7 @@ test("member and web-only views do not expose unavailable owner actions", async 
 
 test("bulk fingerprint changes and creation validate before sending", async ({ page }, info) => {
   await openProfiles(page);
+  await page.getByRole("button", { name: "Редактировать", exact: true }).click();
   await page.getByRole("checkbox", { name: "Выбрать Рабочий профиль", exact: true }).check();
   await page.getByRole("button", { name: "Изменить", exact: true }).click();
   const dialog = page.getByRole("dialog");
@@ -266,6 +269,7 @@ test("bulk fingerprint changes and creation validate before sending", async ({ p
 
 test("more than 200 selected profiles cannot submit a destructive bulk request", async ({ page }) => {
   await openProfiles(page);
+  await page.getByRole("button", { name: "Редактировать", exact: true }).click();
   await page.evaluate(() => {
     const source = window.fixture.profiles[0]!;
     window.fixture.profiles = Array.from({ length: 201 }, (_, i) => ({ ...source, id: `many-${i}`, name: `Профиль ${i}` }));

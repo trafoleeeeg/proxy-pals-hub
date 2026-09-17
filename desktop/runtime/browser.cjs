@@ -18,7 +18,10 @@ function addressUrl(value) {
   return `https://www.google.com/search?q=${encodeURIComponent(value)}`;
 }
 
-async function createProfileBrowser(electron, { name, fp, partition, openTab, closeProfile, getInfo = () => ({}), checkConnection = async () => {}, show = true }) {
+async function createProfileBrowser(electron, {
+  name, fp, partition, openTab, closeProfile, getInfo = () => ({}), checkConnection = async () => {}, show = true,
+  getBookmarks = () => [], addBookmark = async () => {}, removeBookmark = async () => {}, getExtensions = () => [],
+}) {
   const { BrowserWindow, WebContentsView, session, ipcMain } = electron;
   let registry = handlers.get(ipcMain);
   if (!registry) {

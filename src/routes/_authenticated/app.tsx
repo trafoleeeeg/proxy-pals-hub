@@ -8,6 +8,8 @@ import { useWorkspace, useWorkspaceSelection, WorkspaceProvider } from "@/lib/us
 import { DesktopProfileProvider, useDesktopProfileLifecycle } from "@/hooks/useDesktopProfileLifecycle";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { FoldersNav } from "@/components/folders-nav";
+import { ProfileFolderProvider } from "@/lib/useProfileFolder";
 
 export const Route = createFileRoute("/_authenticated/app")({
   head: () => ({ meta: [

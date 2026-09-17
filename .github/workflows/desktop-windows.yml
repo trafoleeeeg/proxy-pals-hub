@@ -105,7 +105,7 @@ jobs:
           path: desktop/dist
 
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           draft: ${{ !(github.event_name == 'workflow_dispatch' && inputs.automatic_release) }}
           generate_release_notes: true

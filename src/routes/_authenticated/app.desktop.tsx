@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Download, Loader2, Monitor, Puzzle, RefreshCw, Trash2 } from "lucide-react";
+import { Download, Link as LinkIcon, Loader2, Monitor, Puzzle, RefreshCw, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useDesktopProfileLifecycle } from "@/hooks/useDesktopProfileLifecycle";

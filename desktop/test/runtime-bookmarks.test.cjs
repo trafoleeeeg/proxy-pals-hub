@@ -48,3 +48,22 @@ test("bookmarks are capped and skipped without OS encryption", async () => {
   assert.deepEqual(await store.read(ID), []);
   assert.equal(fs.existsSync(path.join(userData, "profile-bookmarks")), false);
 });
+
+test("bookmark order and toolbar visibility persist with version-one compatibility", async () => {
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "umbra-bookmarks-state-"));
+  const store = createBookmarkStore({ safeStorage, userData });
+  const state = await store.write(ID, {
+    bookmarks: [{ url: "https://b.example/", title: "Вторая" }, { url: "https://a.example/", title: "Первая" }],
+    barVisible: false,
+  });
+  assert.equal(state.barVisible, false);
+  assert.deepEqual((await store.readState(ID)).bookmarks.map((item) => item.title), ["Вторая", "Первая"]);
+  assert.equal((await store.readState(ID)).barVisible, false);
+
+  const legacy = JSON.stringify({ version: 1, profileId: ID, bookmarks: [{ url: "https://legacy.example/", title: "Старая" }] });
+  fs.writeFileSync(path.join(userData, "profile-bookmarks", `${ID}.bin`), safeStorage.encryptString(legacy));
+  assert.deepEqual(await store.readState(ID), {
+    bookmarks: [{ id: (await store.read(ID))[0].id, url: "https://legacy.example/", title: "Старая" }],
+    barVisible: true,
+  });
+});

@@ -158,7 +158,37 @@ async function createProfileBrowser(electron, {
         break;
       }
       case "remove-bookmark": await removeBookmark(message.id); break;
-      case "update-bookmark": await updateBookmark({ id: message.id, title: String(message.title || "").slice(0, 120) }); break;
+      case "add-bookmark": {
+        let target;
+        try { target = startUrl(String(message.url || "")); }
+        catch { error = "Неверный адрес закладки"; break; }
+        await addBookmark({ url: target, title: String(message.title || "").slice(0, 120) });
+        break;
+      }
+      case "update-bookmark": {
+        let target;
+        if (message.url != null && String(message.url).trim()) {
+          try { target = startUrl(String(message.url)); }
+          catch { error = "Неверный адрес закладки"; break; }
+        }
+        await updateBookmark({ id: message.id, title: String(message.title || "").slice(0, 120), ...(target ? { url: target } : {}) });
+        break;
+      }
+      case "find": {
+        const query = String(message.value || "").slice(0, 200);
+        if (!tab) break;
+        if (!query) { tab.webContents.stopFindInPage("clearSelection"); break; }
+        tab.webContents.findInPage(query, { findNext: !!message.next, forward: message.forward !== false });
+        break;
+      }
+      case "find-stop": if (tab) tab.webContents.stopFindInPage("clearSelection"); break;
+      case "zoom-in": case "zoom-out": case "zoom-reset": {
+        if (!tab) break;
+        const step = message.action === "zoom-in" ? 0.5 : -0.5;
+        const level = message.action === "zoom-reset" ? 0 : Math.max(-3, Math.min(5, tab.webContents.getZoomLevel() + step));
+        tab.webContents.setZoomLevel(level);
+        break;
+      }
       case "reorder-bookmarks": if (Array.isArray(message.ids)) await reorderBookmarks(message.ids); break;
       case "toggle-bookmark-bar": await setBookmarkBarVisible(!getBookmarkBarVisible()); break;
       case "manage-extensions": openExtensionManager(); break;

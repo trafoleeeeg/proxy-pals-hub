@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 
 const icons = [Folder, BriefcaseBusiness, ShoppingBag, UsersRound, Globe2];
 
-export function FoldersNav() {
+export function FoldersNav({ collapsed = false }: { collapsed?: boolean }) {
   const { data: ws } = useWorkspace();
   const listFn = useServerFn(listProfiles);
   const { folder, setFolder } = useProfileFolder();

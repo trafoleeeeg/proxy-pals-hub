@@ -44,6 +44,8 @@ export type UmbraBridge = {
   openExternal: (url: string) => Promise<{ ok: boolean }>;
   listExtensions?: () => Promise<{ ok: boolean; extensions?: InstalledExtension[]; error?: string }>;
   addExtension?: () => Promise<{ ok: boolean; extension?: InstalledExtension; failures?: number; error?: string }>;
+  addExtensionFromUrl?: (url: string) => Promise<{ ok: boolean; extension?: InstalledExtension; failures?: number; error?: string }>;
+  updateExtension?: (id: string) => Promise<{ ok: boolean; extension?: InstalledExtension; failures?: number; error?: string }>;
   removeExtension?: (id: string) => Promise<{ ok: boolean; error?: string }>;
   readProxyClipboard?: () => Promise<string>;
   checkProxy?: (payload: {

@@ -177,7 +177,6 @@ async function createProfileBrowser(electron, {
     let action;
     if (input.control || input.meta) {
       if (key === "l") { event.preventDefault(); focusAddress(); return; }
-      if (key === "t") action = "new";
       if (key === "w") action = "close-tab";
       if (key === "t" && input.shift) action = "reopen-closed";
       else if (key === "t") action = "new";
@@ -185,7 +184,7 @@ async function createProfileBrowser(electron, {
       if (key === "d") action = "bookmark";
       if (key === "b" && input.shift) action = "toggle-bookmark-bar";
       if (/^[1-9]$/.test(key)) {
-        event.preventDefault(); const all = [...tabs.values()];
+        event.preventDefault(); const all = tabOrder.map((id) => tabs.get(id)).filter(Boolean);
         select(key === "9" ? all.at(-1) : all[Number(key) - 1]); return;
       }
       if (key === "tab") {
@@ -243,7 +242,17 @@ async function createProfileBrowser(electron, {
       tabs.set(tab.id, tab); tabOrder.push(tab.id); shell.contentView.addChildView(view); select(tab);
       wc.on("before-input-event", shortcuts);
       wc.on("did-navigate", (_event, url) => { tab.url = url; publish(); });
-      wc.on("page-favicon-updated", (_event, icons) => { tab.favicon = Array.isArray(icons) ? icons[0] || "" : ""; publish(); });
+      wc.on("page-favicon-updated", async (_event, icons) => {
+        const source = Array.isArray(icons) ? icons.find((icon) => /^https?:/i.test(icon)) : "";
+        if (!source) return;
+        try {
+          const response = await wc.session.fetch(source);
+          const type = response.headers.get("content-type") || "image/png";
+          const bytes = Buffer.from(await response.arrayBuffer());
+          if (!type.startsWith("image/") || bytes.length > 256 * 1024 || wc.isDestroyed()) return;
+          tab.favicon = `data:${type};base64,${bytes.toString("base64")}`; publish();
+        } catch { /* favicon is optional and never falls back outside the profile session */ }
+      });
       for (const event of ["did-start-loading", "did-stop-loading", "did-navigate", "did-navigate-in-page", "page-title-updated"]) wc.on(event, publish);
       wc.on("did-fail-load", (_event, code, _description, _url, mainFrame) => { if (mainFrame && code !== -3) { tab.error = "Page could not be loaded. Check the address or proxy connection."; publish(); } });
       wc.on("render-process-gone", () => { tab.error = "This tab stopped. Reload to try again."; publish(); });

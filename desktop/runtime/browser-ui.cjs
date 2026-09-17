@@ -149,7 +149,10 @@ function renderer() {
   });
   api.subscribe((state) => {
     if (state.focusAddress) { address.focus(); address.select(); return; }
+    if (state.focusFind) { openFind(); return; }
     latestState = state;
+    if (!manager.hidden) renderManager();
+    byId("find-count").textContent = state.find && findInput.value ? `${state.find.active}/${state.find.total}` : "";
     current = state.tabs.find((tab) => tab.id === state.activeId);
     byId("home").hidden = !state.home;
     renderHome(state.info);

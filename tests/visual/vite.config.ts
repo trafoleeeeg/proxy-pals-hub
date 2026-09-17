@@ -12,7 +12,7 @@ export default defineConfig({
   cacheDir: local("./.vite"),
   plugins: [
     { name: "fixture-api", enforce: "pre", resolveId(source) {
-      if (/(?:^|\/)(?:team|profiles|proxies|session)\.functions$/.test(source)) return local("./mock-api.ts");
+      if (/(?:^|\/)(?:team|profiles|proxies|session|profile-metadata)\.functions$/.test(source)) return local("./mock-api.ts");
       return null;
     } },
     react(), tailwindcss(),

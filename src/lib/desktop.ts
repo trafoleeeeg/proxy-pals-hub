@@ -276,6 +276,23 @@ export class DesktopProfileLifecycle {
 
   closed = (event: ProfileClosed): Promise<void> => this.run(event.profileId, async () => {
     if (!event.lockToken || !event.snapshotId) {
+      // Записи старых версий не содержат токена сессии: сервер не может их принять.
+      // Переносим такую запись в локальный архив и разблокируем профиль.
+      if (event.snapshotId && this.bridge.archiveProfileClosure) {
+        try {
+          const ack = await this.bridge.archiveProfileClosure(event.snapshotId);
+          if (!ack.ok) throw new Error();
+          this.outboxFailures.delete(event.profileId);
+          delete this.errors[event.profileId];
+          this.notices[event.profileId] = "Запись закрытия от прежней версии перенесена в локальный архив. Профиль снова доступен; cookies той сессии в облако не загружены.";
+          this.emit();
+          return;
+        } catch {
+          this.outboxFailures.add(event.profileId);
+          this.errors[event.profileId] = "Не удалось перенести старую запись сессии в архив. Повторите синхронизацию.";
+          throw new Error(this.errors[event.profileId]);
+        }
+      }
       this.outboxFailures.add(event.profileId);
       this.errors[event.profileId] = "Сохранённая сессия не содержит токен. Обновите приложение; запись оставлена для восстановления.";
       throw new Error(this.errors[event.profileId]);

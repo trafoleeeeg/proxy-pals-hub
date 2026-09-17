@@ -12,6 +12,7 @@ import { generateFingerprint, describeFingerprint, type Fingerprint } from "@/li
 import { ProfileFingerprint } from "@/components/profile-fingerprint";
 import { ProfileCookies } from "@/components/profile-cookies";
 import { ProfileBulkDialog, type BulkAction } from "@/components/profile-bulk";
+import { ProfileProxyCell, useProxyOps } from "@/components/profile-proxy";
 import { fingerprintError, profileFingerprintPayload, splitTags, toggleVisibleSelection } from "@/components/profile-model";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,6 +45,7 @@ function ProfilesWorkspace() {
   const createMany = useServerFn(bulkCreateProfiles);
   const proxiesFn = useServerFn(listProxies);
   const runtime = useDesktopProfileLifecycle();
+  const proxyOps = useProxyOps(ws?.teamId);
   const [search, setSearch] = useState("");
   const [folder, setFolder] = useState(ALL);
   const [selected, setSelected] = useState<string[]>([]);
@@ -150,7 +152,7 @@ function ProfilesWorkspace() {
             {owner && <TableCell><Checkbox aria-label={"Выбрать " + profile.name} checked={selected.includes(profile.id)} onCheckedChange={(v) => setSelected((current) => toggleVisibleSelection(current, [profile.id], v === true))} /></TableCell>}
             <TableCell className="max-w-60"><div className="break-words font-medium">{profile.name}</div><div className="mt-1 flex flex-wrap gap-1">{profile.tags.map((tag) => <Badge key={tag} variant="outline" className="max-w-40 break-all text-[10px]">{tag}</Badge>)}</div></TableCell>
             <TableCell className="max-w-36 break-words text-xs text-muted-foreground">{profile.folder || "Без папки"}</TableCell>
-            <TableCell className="max-w-36 break-words text-xs">{profile.proxy_id ? (proxy?.label ?? "Недоступен") : "Без прокси"}</TableCell>
+            <TableCell className="min-w-56 max-w-72 text-xs">{profile.proxy_id && !proxy ? <span className="text-xs text-warning">Прокси недоступен</span> : <ProfileProxyCell proxy={proxy} ops={proxyOps} />}</TableCell>
             <TableCell className="max-w-48 text-xs text-muted-foreground">{describeFingerprint(profile.fingerprint)}</TableCell>
             <TableCell><Badge variant="outline" className={active ? "text-primary" : profile.lock || pending.has(profile.id) ? "text-warning" : "text-success"}>{processing ? "выполняется" : active ? "открыт у вас" : runtime.pending.includes(profile.id) ? "синхронизация" : profile.lock ? "занят" : "свободен"}</Badge></TableCell>
             <TableCell><div className="flex items-center justify-end gap-1">

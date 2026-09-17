@@ -291,11 +291,13 @@ describe("desktop profile lifecycle", () => {
     expect(f.state.ackCalls).toHaveLength(0);
   });
 
-  test("outbox records without a token remain unacknowledged and block account sign-out", async () => {
+  test("outbox records without a token are archived locally and stop blocking the profile", async () => {
     const f = fixture(); f.state.outbox = [{ profileId: "a", cookies: "[]", snapshotId: "old-client" }];
     await f.controller.restore();
-    await expect(f.controller.closeAll()).rejects.toThrow();
-    expect(f.controller.hasWork()).toBe(true); expect(f.state.closeCalls).toHaveLength(0); expect(f.state.ackCalls).toHaveLength(0);
+    expect(f.state.closeCalls).toHaveLength(0); expect(f.state.ackCalls).toHaveLength(0);
+    expect(f.state.archiveCalls).toContain("old-client");
+    expect(Object.values(f.controller.getSnapshot().notices).join(" ")).toContain("архив");
+    expect(f.controller.getSnapshot().pending).toHaveLength(0);
   });
 
   test("failed native close keeps its lease and blocks account sign-out", async () => {

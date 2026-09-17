@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState } from "react";
-import { Copy, Cookie, Folder, FolderInput, Pencil, Play, Plus, RefreshCw, Search, Settings2, Square, Trash2, UserPlus, X } from "lucide-react";
+import { Archive, BriefcaseBusiness, CheckCircle2, CircleUserRound, Copy, Cookie, Folder, FolderInput, FolderOpen, Globe2, LockKeyhole, PanelLeftClose, PanelLeftOpen, Pencil, Play, Plus, RefreshCw, Search, Settings2, ShoppingBag, Square, Trash2, UserPlus, UsersRound, X } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "@/lib/useWorkspace";
 import { listProfiles, saveProfile, cloneProfile, bulkCreateProfiles } from "@/lib/profiles.functions";
@@ -74,6 +74,8 @@ function ProfilesWorkspace() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [metadataOpen, setMetadataOpen] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [foldersCollapsed, setFoldersCollapsed] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState<FixedColumn[]>(DEFAULT_COLUMNS);
   const [visibleFields, setVisibleFields] = useState<string[]>([]);
   const profiles = useQuery({ queryKey: ["profiles", ws?.teamId], queryFn: () => { if (!ws) throw new Error("Команда не загружена"); return listFn({ data: { teamId: ws.teamId } }); }, enabled: !!ws, refetchInterval: 20_000 });
@@ -127,7 +129,11 @@ function ProfilesWorkspace() {
   }
   const shown = (key: FixedColumn) => visibleColumns.includes(key);
   const shownFields = (metadata.data?.fields ?? []).filter((field) => visibleFields.includes(field.id));
-  const columnCount = 3 + visibleColumns.length + shownFields.length + (owner ? 1 : 0);
+  const columnCount = 3 + visibleColumns.length + shownFields.length + (owner && editMode ? 1 : 0);
+  const occupied = (profiles.data ?? []).filter((profile) => !!profile.lock && !running.has(profile.id)).length;
+  const available = Math.max(0, (profiles.data?.length ?? 0) - running.size - occupied);
+  const withProxy = (profiles.data ?? []).filter((profile) => !!profile.proxy_id).length;
+  const folderIcons = [Folder, BriefcaseBusiness, ShoppingBag, UsersRound, Globe2];
 
   if (workspace.isPending) return <p role="status" className="text-sm text-muted-foreground">Загрузка рабочего пространства…</p>;
   if (workspace.isError) return <p role="alert" className="text-sm text-destructive">Не удалось загрузить команду. <Button variant="outline" onClick={() => workspace.refetch()}>Повторить</Button></p>;
@@ -136,11 +142,24 @@ function ProfilesWorkspace() {
     <div className="flex flex-wrap items-center gap-3 border-b border-border pb-3">
       <div><h1 className="text-xl font-semibold">Профили</h1><p className="text-xs text-muted-foreground">{profiles.data?.length ?? 0} профилей · {running.size} открыто</p></div>
       <div className="ml-auto flex flex-wrap gap-2">
-        {owner && <Button size="icon" variant="outline" title="Настроить поля" aria-label="Настроить поля" onClick={() => setMetadataOpen(true)}><Settings2 /></Button>}
+        {owner && <Button variant={editMode ? "secondary" : "outline"} onClick={() => setEditMode((value) => !value)}><Pencil className="size-4" />{editMode ? "Готово" : "Редактировать"}</Button>}
+        {owner && editMode && <Button size="icon" variant="outline" title="Настроить поля" aria-label="Настроить поля" onClick={() => setMetadataOpen(true)}><Settings2 /></Button>}
         <ColumnSettings visible={visibleColumns} onChange={setVisibleColumns} fields={metadata.data?.fields ?? []} visibleFields={visibleFields} onFieldChange={setVisibleFields} />
         <Button size="icon" variant="outline" title="Обновить список" aria-label="Обновить список" disabled={profiles.isFetching} onClick={() => profiles.refetch()}><RefreshCw className={profiles.isFetching ? "size-4 animate-spin" : "size-4"} /></Button>
         {owner && <><Button variant="outline" disabled={!!busy} onClick={() => { setError(null); setBulkOpen(true); }}><Plus className="size-4" />Создать пачкой</Button><Button disabled={!!busy} onClick={newProfile}><Plus className="size-4" />Новый профиль</Button></>}
       </div>
+    </div>
+    <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
+      {[
+        { label: "Всего", value: profiles.data?.length ?? 0, detail: "профилей", icon: CircleUserRound, tone: "text-foreground" },
+        { label: "Открыто", value: running.size, detail: "на этом компьютере", icon: Play, tone: "text-primary" },
+        { label: "Свободно", value: available, detail: "можно запускать", icon: CheckCircle2, tone: "text-success" },
+        { label: "Занято", value: occupied, detail: "другим пользователем", icon: LockKeyhole, tone: "text-warning" },
+        { label: "С прокси", value: withProxy, detail: `${(profiles.data?.length ?? 0) - withProxy} без прокси`, icon: Globe2, tone: "text-primary" },
+      ].map((stat) => <div key={stat.label} className="flex min-h-20 items-center gap-3 rounded-md border border-border bg-card px-3 py-2">
+        <stat.icon className={`size-4 shrink-0 ${stat.tone}`} />
+        <div className="min-w-0"><p className="truncate text-xs text-muted-foreground">{stat.label}</p><p className={`text-xl font-semibold leading-6 ${stat.tone}`}>{stat.value}</p><p className="truncate text-[11px] text-muted-foreground">{stat.detail}</p></div>
+      </div>)}
     </div>
     <div className="relative"><Search className="pointer-events-none absolute left-3 top-2.5 size-4 text-muted-foreground" /><Input aria-label="Поиск профилей" placeholder="Поиск по профилям" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" /></div>
     {selected.length > 0 && owner && <div className="flex flex-wrap items-center gap-2 border-y border-border bg-secondary/40 px-2 py-2">
@@ -154,15 +173,19 @@ function ProfilesWorkspace() {
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {profiles.isError && <p role="alert" className="text-sm text-destructive">Не удалось обновить профили. <Button size="sm" variant="outline" onClick={() => profiles.refetch()}>Повторить</Button></p>}
     {proxies.isError && <p role="alert" className="text-sm text-warning">Прокси недоступны. <Button size="sm" variant="outline" onClick={() => proxies.refetch()}>Повторить</Button></p>}
-    <div className="grid min-h-[480px] grid-cols-1 overflow-hidden border-y border-border md:grid-cols-[190px_minmax(0,1fr)]">
-      <aside className="border-b border-border bg-sidebar/40 p-2 md:border-b-0 md:border-r"><p className="px-2 py-2 text-[11px] font-medium uppercase text-muted-foreground">Папки</p>
-        <Button variant={folder === ALL ? "secondary" : "ghost"} className="h-8 w-full justify-start px-2 text-xs" onClick={() => setFolder(ALL)}><Folder />Все профили<span className="ml-auto tabular-nums text-muted-foreground">{profiles.data?.length ?? 0}</span></Button>
-        <Button variant={folder === "" ? "secondary" : "ghost"} className="h-8 w-full justify-start px-2 text-xs" onClick={() => setFolder("")}><Folder />Без папки<span className="ml-auto tabular-nums text-muted-foreground">{(profiles.data ?? []).filter((profile) => !profile.folder).length}</span></Button>
-        {folders.map((item) => <Button key={item} variant={folder === item ? "secondary" : "ghost"} className="h-8 w-full justify-start px-2 text-xs" onClick={() => setFolder(item)}><Folder />{item}<span className="ml-auto tabular-nums text-muted-foreground">{(profiles.data ?? []).filter((profile) => profile.folder === item).length}</span></Button>)}
+    <div className={`grid min-h-[480px] grid-cols-1 overflow-hidden border-y border-border md:${foldersCollapsed ? "grid-cols-[52px_minmax(0,1fr)]" : "grid-cols-[184px_minmax(0,1fr)]"}`}>
+      <aside className="border-b border-border bg-sidebar p-2 md:border-b-0 md:border-r">
+        <div className={`mb-1 flex items-center ${foldersCollapsed ? "justify-center" : "justify-between"}`}>
+          {!foldersCollapsed && <p className="px-2 py-2 text-[11px] font-semibold uppercase text-sidebar-foreground">Папки</p>}
+          <Button variant="ghost" size="icon" className="size-8" title={foldersCollapsed ? "Показать папки" : "Скрыть названия папок"} aria-label={foldersCollapsed ? "Показать папки" : "Скрыть названия папок"} onClick={() => setFoldersCollapsed((value) => !value)}>{foldersCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}</Button>
+        </div>
+        <Button variant={folder === ALL ? "secondary" : "ghost"} title="Все профили" aria-label="Все профили" className={`h-9 w-full px-2 text-xs ${foldersCollapsed ? "justify-center" : "justify-start"}`} onClick={() => setFolder(ALL)}><FolderOpen className="size-4 shrink-0 text-primary" />{!foldersCollapsed && <><span className="truncate">Все профили</span><span className="ml-auto tabular-nums text-muted-foreground">{profiles.data?.length ?? 0}</span></>}</Button>
+        <Button variant={folder === "" ? "secondary" : "ghost"} title="Без папки" aria-label="Без папки" className={`h-9 w-full px-2 text-xs ${foldersCollapsed ? "justify-center" : "justify-start"}`} onClick={() => setFolder("")}><Archive className="size-4 shrink-0 text-warning" />{!foldersCollapsed && <><span className="truncate">Без папки</span><span className="ml-auto tabular-nums text-muted-foreground">{(profiles.data ?? []).filter((profile) => !profile.folder).length}</span></>}</Button>
+        {folders.map((item, index) => { const FolderIcon = folderIcons[index % folderIcons.length]; return <Button key={item} variant={folder === item ? "secondary" : "ghost"} title={item} aria-label={`Папка ${item}`} className={`h-9 w-full px-2 text-xs ${foldersCollapsed ? "justify-center" : "justify-start"}`} onClick={() => setFolder(item)}><FolderIcon className={`size-4 shrink-0 ${folder === item ? "text-primary" : "text-muted-foreground"}`} />{!foldersCollapsed && <><span className="truncate">{item}</span><span className="ml-auto tabular-nums text-muted-foreground">{(profiles.data ?? []).filter((profile) => profile.folder === item).length}</span></>}</Button>; })}
       </aside>
       <div className="min-w-0 overflow-x-auto"><Table className="min-w-max text-xs"><TableHeader className="sticky top-0 z-10 bg-background"><TableRow>
         {owner && <TableHead className="w-10"><Checkbox aria-label="Выбрать видимые профили" disabled={!rows.length} checked={visibleSelected === 0 ? false : visibleSelected === rows.length ? true : "indeterminate"} onCheckedChange={(checked) => setSelected((current) => toggleVisibleSelection(current, visibleIds, checked === true))} /></TableHead>}
-        <TableHead className="min-w-44">Название</TableHead>{shown("folder") && <TableHead>Папка</TableHead>}{shown("status") && <TableHead>Статус</TableHead>}{shown("proxy") && <TableHead className="min-w-60">Прокси</TableHead>}{shown("tags") && <TableHead>Метки</TableHead>}{shown("notes") && <TableHead className="min-w-48">Заметки</TableHead>}{shownFields.map((field) => <TableHead key={field.id}>{field.name}</TableHead>)}{shown("fingerprint") && <TableHead>Отпечаток</TableHead>}{shown("updated") && <TableHead>Изменён</TableHead>}{shown("created") && <TableHead>Создан</TableHead>}<TableHead>Запуск</TableHead><TableHead className="sticky right-0 bg-background text-right">Действия</TableHead>
+        <TableHead className="w-12">Запуск</TableHead><TableHead className="min-w-36">Название</TableHead>{shown("folder") && <TableHead className="max-w-28">Папка</TableHead>}{shown("status") && <TableHead className="max-w-32">Статус</TableHead>}{shown("proxy") && <TableHead className="min-w-52">Прокси</TableHead>}{shown("tags") && <TableHead className="max-w-36">Метки</TableHead>}{shown("notes") && <TableHead className="max-w-40">Заметки</TableHead>}{shownFields.map((field) => <TableHead className="max-w-36" key={field.id}>{field.name}</TableHead>)}{shown("fingerprint") && <TableHead className="max-w-40">Отпечаток</TableHead>}{shown("updated") && <TableHead>Изменён</TableHead>}{shown("created") && <TableHead>Создан</TableHead>}{owner && editMode && <TableHead className="sticky right-0 bg-background text-right">Редактирование</TableHead>}
       </TableRow></TableHeader><TableBody>
         {profiles.isPending && <TableRow><TableCell colSpan={columnCount} className="py-8 text-center" role="status">Загрузка профилей…</TableCell></TableRow>}
         {rows.map((profile) => {
@@ -171,26 +194,23 @@ function ProfilesWorkspace() {
           const proxy = proxies.data?.find((p) => p.id === profile.proxy_id);
           return <TableRow key={profile.id} data-state={selected.includes(profile.id) ? "selected" : undefined}>
             {owner && <TableCell><Checkbox aria-label={"Выбрать " + profile.name} checked={selected.includes(profile.id)} onCheckedChange={(v) => setSelected((current) => toggleVisibleSelection(current, [profile.id], v === true))} /></TableCell>}
-            <TableCell><InlineText value={profile.name} placeholder="Название" disabled={!owner || !!busy || locked(profile.id)} onSave={(name) => patchProfile(profile, { name })} /></TableCell>
-            {shown("folder") && <TableCell><InlineText value={profile.folder} placeholder="Без папки" disabled={!owner || !!busy || locked(profile.id)} onSave={(value) => patchProfile(profile, { folder: value })} /></TableCell>}
-            {shown("status") && <TableCell><Select disabled={!owner || !!busy || locked(profile.id)} value={profile.status_id ?? "none"} onValueChange={(value) => patchProfile(profile, { statusId: value === "none" ? null : value })}><SelectTrigger className="h-7 min-w-32 border-transparent px-2 text-xs shadow-none"><SelectValue placeholder="Без статуса" /></SelectTrigger><SelectContent><SelectItem value="none">Без статуса</SelectItem>{(metadata.data?.statuses ?? []).map((status) => <SelectItem key={status.id} value={status.id}><span className={`rounded border px-1.5 py-0.5 ${statusTone[status.color] ?? statusTone["muted"]}`}>{status.name}</span></SelectItem>)}</SelectContent></Select></TableCell>}
+            <TableCell><Button variant={active ? "outline" : "default"} size="icon" title={active ? "Закрыть профиль" : runtime.available ? "Запустить профиль" : "Запуск в приложении Windows"} aria-label={(active ? "Закрыть " : "Запустить ") + profile.name} disabled={!runtime.available || !runtime.ready || runtime.restoring || processing || (!active && locked(profile.id))} onClick={() => { void (active ? runtime.stop(profile.id) : runtime.start(profile.id)).catch((e: Error) => toast.error(e.message)); }}>{processing ? <RefreshCw className="size-4 animate-spin" /> : active ? <Square className="size-4" /> : <Play className="size-4" />}</Button></TableCell>
+            <TableCell className="max-w-36">{editMode ? <InlineText value={profile.name} placeholder="Название" disabled={!owner || !!busy || locked(profile.id)} onSave={(name) => patchProfile(profile, { name })} /> : <span className="block truncate font-medium" title={profile.name}>{profile.name}</span>}</TableCell>
+            {shown("folder") && <TableCell className="max-w-28">{editMode ? <InlineText value={profile.folder} placeholder="Без папки" disabled={!owner || !!busy || locked(profile.id)} onSave={(value) => patchProfile(profile, { folder: value })} /> : <span className="block truncate text-muted-foreground" title={profile.folder || "Без папки"}>{profile.folder || "—"}</span>}</TableCell>}
+            {shown("status") && <TableCell className="max-w-32">{editMode ? <Select disabled={!owner || !!busy || locked(profile.id)} value={profile.status_id ?? "none"} onValueChange={(value) => patchProfile(profile, { statusId: value === "none" ? null : value })}><SelectTrigger className="h-7 w-28 border-transparent px-2 text-xs shadow-none"><SelectValue placeholder="Без статуса" /></SelectTrigger><SelectContent><SelectItem value="none">Без статуса</SelectItem>{(metadata.data?.statuses ?? []).map((status) => <SelectItem key={status.id} value={status.id}><span className={`rounded border px-1.5 py-0.5 ${statusTone[status.color] ?? statusTone["muted"]}`}>{status.name}</span></SelectItem>)}</SelectContent></Select> : (() => { const status = metadata.data?.statuses.find((item) => item.id === profile.status_id); return status ? <span className={`inline-flex max-w-28 truncate rounded border px-1.5 py-0.5 ${statusTone[status.color] ?? statusTone["muted"]}`}>{status.name}</span> : <span className="text-muted-foreground">—</span>; })()}</TableCell>}
             {shown("proxy") && <TableCell className="max-w-72 text-xs">{profile.proxy_id && !proxy ? <span className="text-warning">Прокси недоступен</span> : <ProfileProxyCell proxy={proxy} ops={proxyOps} />}</TableCell>}
-            {shown("tags") && <TableCell className="max-w-52"><InlineText value={profile.tags.join(", ")} placeholder="Добавить метки" disabled={!owner || !!busy || locked(profile.id)} onSave={(value) => patchProfile(profile, { tags: splitTags(value) })} /></TableCell>}
-            {shown("notes") && <TableCell><InlineText value={profile.notes} placeholder="Добавить заметку" multiline disabled={!owner || !!busy || locked(profile.id)} onSave={(notes) => patchProfile(profile, { notes })} /></TableCell>}
-            {shownFields.map((field) => <TableCell key={field.id}><InlineText value={profile.custom_fields[field.id] ?? ""} placeholder={field.name} disabled={!owner || !!busy || locked(profile.id)} onSave={(value) => patchProfile(profile, { customFields: { ...profile.custom_fields, [field.id]: value } })} /></TableCell>)}
-            {shown("fingerprint") && <TableCell className="max-w-48 text-muted-foreground">{describeFingerprint(profile.fingerprint)}</TableCell>}
+            {shown("tags") && <TableCell className="max-w-36">{editMode ? <InlineText value={profile.tags.join(", ")} placeholder="Добавить метки" disabled={!owner || !!busy || locked(profile.id)} onSave={(value) => patchProfile(profile, { tags: splitTags(value) })} /> : <span className="block truncate text-muted-foreground" title={profile.tags.join(", ")}>{profile.tags.join(", ") || "—"}</span>}</TableCell>}
+            {shown("notes") && <TableCell className="max-w-40">{editMode ? <InlineText value={profile.notes} placeholder="Добавить заметку" multiline disabled={!owner || !!busy || locked(profile.id)} onSave={(notes) => patchProfile(profile, { notes })} /> : <span className="block truncate text-muted-foreground" title={profile.notes}>{profile.notes || "—"}</span>}</TableCell>}
+            {shownFields.map((field) => <TableCell className="max-w-36" key={field.id}>{editMode ? <InlineText value={profile.custom_fields[field.id] ?? ""} placeholder={field.name} disabled={!owner || !!busy || locked(profile.id)} onSave={(value) => patchProfile(profile, { customFields: { ...profile.custom_fields, [field.id]: value } })} /> : <span className="block truncate text-muted-foreground" title={profile.custom_fields[field.id] ?? ""}>{profile.custom_fields[field.id] || "—"}</span>}</TableCell>)}
+            {shown("fingerprint") && <TableCell className="max-w-40"><span className="block truncate text-muted-foreground" title={describeFingerprint(profile.fingerprint)}>{describeFingerprint(profile.fingerprint)}</span></TableCell>}
             {shown("updated") && <TableCell className="whitespace-nowrap text-muted-foreground">{dateTime(profile.updated_at)}</TableCell>}
             {shown("created") && <TableCell className="whitespace-nowrap text-muted-foreground">{dateTime(profile.created_at)}</TableCell>}
-            <TableCell><Badge variant="outline" className={active ? "text-primary" : profile.lock || pending.has(profile.id) ? "text-warning" : "text-success"}>{processing ? "выполняется" : active ? "открыт" : runtime.pending.includes(profile.id) ? "синхронизация" : profile.lock ? "занят" : "свободен"}</Badge></TableCell>
-            <TableCell className="sticky right-0 bg-background"><div className="flex items-center justify-end gap-1">
-              <Button variant={active ? "outline" : "default"} size="icon" title={active ? "Закрыть профиль" : runtime.available ? "Запустить профиль" : "Запуск в приложении Windows"} aria-label={(active ? "Закрыть " : "Запустить ") + profile.name} disabled={!runtime.available || !runtime.ready || runtime.restoring || processing || (!active && locked(profile.id))} onClick={() => { void (active ? runtime.stop(profile.id) : runtime.start(profile.id)).catch((e: Error) => toast.error(e.message)); }}>{processing ? <RefreshCw className="size-4 animate-spin" /> : active ? <Square className="size-4" /> : <Play className="size-4" />}</Button>
-              {owner && <>
+            {owner && editMode && <TableCell className="sticky right-0 bg-background"><div className="flex items-center justify-end gap-1">
                 <Button variant="ghost" size="icon" title="Изменить профиль" aria-label={"Изменить " + profile.name} disabled={!!busy || locked(profile.id)} onClick={() => { setError(null); setEditing({ id: profile.id, name: profile.name, folder: profile.folder, tags: profile.tags.join(", "), notes: profile.notes, proxyId: profile.proxy_id ?? "none", fingerprint: profile.fingerprint, statusId: profile.status_id, customFields: profile.custom_fields }); }}><Pencil className="size-4" /></Button>
                 <Button variant="ghost" size="icon" title="Создать копию" aria-label={"Копия " + profile.name} disabled={!!busy} onClick={() => perform(profile.id, () => cloneFn({ data: { id: profile.id } }))}><Copy className="size-4" /></Button>
                 <Button variant="ghost" size="icon" title="Cookies" aria-label={"Cookies " + profile.name} disabled={!!busy} onClick={() => setCookiesId(profile.id)}><Cookie className="size-4" /></Button>
                 <Button variant="ghost" size="icon" title="Удалить профиль" aria-label={"Удалить " + profile.name} disabled={!!busy || locked(profile.id)} onClick={() => setAction({ mode: "delete", ids: [profile.id] })}><Trash2 className="size-4 text-destructive" /></Button>
-              </>}
-            </div></TableCell>
+            </div></TableCell>}
           </TableRow>;
         })}
         {!profiles.isPending && !profiles.isError && !rows.length && <TableRow><TableCell colSpan={columnCount} className="py-10 text-center text-sm text-muted-foreground">{search || folder !== ALL ? "По выбранным фильтрам профилей нет" : "Профилей пока нет"}</TableCell></TableRow>}

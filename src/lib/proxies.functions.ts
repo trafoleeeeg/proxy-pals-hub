@@ -224,7 +224,7 @@ export const recordProxyCheck = createServerFn({ method: "POST" })
     // an older token from another rotation is still rejected below.
     if (data.rotationRequestedAt && data.rotationRequestedAt === current["rotation_requested_at"] &&
       (current["rotation_status"] === "success" || current["rotation_status"] === "error")) return { ok: true };
-    if (data.rotationRequestedAt && !confirmsRotation) throw new Error("Эта проверка относится к предыдущей смене IP");
+    const staleRotation = !!data.rotationRequestedAt && !confirmsRotation;
     const outcome = confirmsRotation ? rotationOutcome(
       current["rotation_previous_ip"], data,
       data.rotationFinal || rotationExpired(current["rotation_requested_at"]),
@@ -246,7 +246,7 @@ export const recordProxyCheck = createServerFn({ method: "POST" })
     if (confirmsRotation) update = update.eq("rotation_requested_at", data.rotationRequestedAt).eq("rotation_status", "changing");
     const { data: row, error } = await update.select("id").maybeSingle();
     if (error || !row) throw new Error("Проверка завершена, но результат не сохранён. Проверьте доступ и повторите попытку");
-    return { ok: true };
+    return { ok: true, staleRotation };
   });
 
 /** Requests the provider's mobile IP rotation endpoint. The follow-up desktop

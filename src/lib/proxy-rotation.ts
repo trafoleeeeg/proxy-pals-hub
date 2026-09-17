@@ -32,11 +32,17 @@ export async function confirmRotation({
     const changedIp = result.ok && result.ip && result.ip !== previousIp ? result.ip : null;
     const confirmed = changedIp !== null && changedIp === candidateIp;
     if (confirmed) {
-      await record(result, true, true);
-      return result;
+      const saved = await record(result, true, true);
+      if (saved && typeof saved === "object" && "staleRotation" in saved && saved.staleRotation === true) {
+        return { ...result, rotationConfirmed: false };
+      }
+      return { ...result, rotationConfirmed: true };
     }
     candidateIp = changedIp;
-    await record(result, final, false);
+    const saved = await record(result, final, false);
+    if (saved && typeof saved === "object" && "staleRotation" in saved && saved.staleRotation === true) {
+      return { ...result, rotationConfirmed: false };
+    }
   }
   throw new Error("Провайдер принял запрос, но новый IP не подтверждён. Повторите проверку позже.");
 }

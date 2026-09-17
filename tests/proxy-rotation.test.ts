@@ -14,6 +14,7 @@ test("rotation requires a stable different IP; temporary failures and unchanged 
     record: async (...args) => { records.push(args); }, wait: async () => {},
   });
   expect(result.ip).toBe("1.2.3.5");
+  expect(result.rotationConfirmed).toBe(true);
   expect(records).toHaveLength(4);
   const finals: boolean[] = [];
   await expect(confirmRotation({
@@ -36,6 +37,18 @@ test("rotation ignores a transient changed IP and confirms the stable address", 
   expect(records).toHaveLength(4);
   expect(records.at(-1)?.[1]).toBe(true);
   expect(records.at(-1)?.[2]).toBe(true);
+});
+
+test("a superseded rotation stops quietly after saving the fresh IP", async () => {
+  let probes = 0;
+  const result = await confirmRotation({
+    previousIp: "1.2.3.4",
+    probe: async () => { probes++; return { ok: true, ip: "1.2.3.6" }; },
+    record: async () => ({ ok: true, staleRotation: true }),
+    wait: async () => {},
+  });
+  expect(result).toMatchObject({ ok: true, ip: "1.2.3.6", rotationConfirmed: false });
+  expect(probes).toBe(1);
 });
 
 test("stale rotations recover and private destinations are rejected", () => {

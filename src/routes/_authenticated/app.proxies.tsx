@@ -185,7 +185,9 @@ export function ProxiesPage() {
         },
       });
     },
-    onSuccess: (result) => toast.success("Новый IP подтверждён: " + result.ip),
+    onSuccess: (result) => result.rotationConfirmed
+      ? toast.success("Новый IP подтверждён: " + result.ip)
+      : toast.info("IP обновлён. Смена уже завершена в другом окне"),
     onError: (error: Error) => toast.error(error.message),
     onSettled: () => invalidate(),
   });

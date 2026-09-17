@@ -12,6 +12,7 @@ import { generateFingerprint, describeFingerprint, type Fingerprint } from "@/li
 import { ProfileFingerprint } from "@/components/profile-fingerprint";
 import { ProfileCookies } from "@/components/profile-cookies";
 import { ProfileBulkDialog, type BulkAction } from "@/components/profile-bulk";
+import { ProfileProxyCell, useProxyOps } from "@/components/profile-proxy";
 import { fingerprintError, profileFingerprintPayload, splitTags, toggleVisibleSelection } from "@/components/profile-model";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

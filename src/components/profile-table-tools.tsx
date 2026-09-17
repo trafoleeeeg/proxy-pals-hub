@@ -142,3 +142,53 @@ export function NotesCell({ value, disabled, onSave }: { value: string; disabled
     </Popover>
   </div>;
 }
+
+export const statusTone: Record<string, string> = {
+  primary: "border-primary/50 bg-primary/10 text-primary",
+  success: "border-success/50 bg-success/10 text-success",
+  warning: "border-warning/50 bg-warning/10 text-warning",
+  destructive: "border-destructive/50 bg-destructive/10 text-destructive",
+  muted: "border-border bg-muted text-muted-foreground",
+};
+const colorNames: Array<{ value: string; label: string }> = [
+  { value: "success", label: "Зелёный" }, { value: "destructive", label: "Красный" },
+  { value: "warning", label: "Жёлтый" }, { value: "primary", label: "Фиолетовый" }, { value: "muted", label: "Серый" },
+];
+
+export function StatusCell({ statusId, statuses, disabled, canCreate, onSelect, onCreate }: {
+  statusId: string | null; statuses: ProfileStatus[]; disabled: boolean; canCreate: boolean;
+  onSelect: (statusId: string | null) => void; onCreate: (name: string, color: string) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [color, setColor] = useState("success");
+  const [saving, setSaving] = useState(false);
+  const current = statuses.find((status) => status.id === statusId);
+  const chip = "inline-flex max-w-full items-center truncate rounded-md border px-2 py-0.5 text-xs font-medium";
+  async function create() {
+    if (!name.trim() || saving) return;
+    setSaving(true);
+    try { await onCreate(name.trim(), color); setName(""); } finally { setSaving(false); }
+  }
+  return <Popover open={open} onOpenChange={(next) => { if (!disabled || !next) setOpen(next); }}>
+    <PopoverTrigger asChild>
+      <button type="button" disabled={disabled} aria-label="Статус профиля"
+        className={`${chip} ${current ? statusTone[current.color] ?? statusTone["muted"] : "border-border bg-secondary text-muted-foreground"} disabled:opacity-60`}>
+        {current ? current.name : "Без статуса"}
+      </button>
+    </PopoverTrigger>
+    <PopoverContent align="start" className="w-56 space-y-2">
+      <div className="flex flex-wrap gap-1.5">
+        <button type="button" className={`${chip} border-border bg-secondary text-muted-foreground`} onClick={() => { onSelect(null); setOpen(false); }}>Без статуса</button>
+        {statuses.map((status) => <button key={status.id} type="button" className={`${chip} ${statusTone[status.color] ?? statusTone["muted"]}`} onClick={() => { onSelect(status.id); setOpen(false); }}>{status.name}</button>)}
+      </div>
+      {canCreate && <div className="space-y-2 border-t border-border pt-2">
+        <Input aria-label="Новый статус" placeholder="Новый статус" maxLength={80} value={name} onChange={(event) => setName(event.target.value)} />
+        <div className="flex gap-2">
+          <Select value={color} onValueChange={setColor}><SelectTrigger aria-label="Цвет статуса" className="h-8 flex-1 text-xs"><SelectValue /></SelectTrigger><SelectContent>{colorNames.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent></Select>
+          <Button size="sm" disabled={saving || !name.trim()} onClick={() => void create()}>Создать</Button>
+        </div>
+      </div>}
+    </PopoverContent>
+  </Popover>;
+}

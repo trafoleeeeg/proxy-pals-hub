@@ -82,6 +82,10 @@ function renderer() {
     void run({ action });
   });
   byId("manage-extensions").addEventListener("click", () => { extensionsPopover.hidden = true; void run({ action: "manage-extensions" }); });
+  document.addEventListener("click", (event) => {
+    const action = event.target.closest("#browser-menu button")?.dataset.action;
+    if (action === "manage-extensions") { menu.hidden = true; void run({ action }); }
+  });
   address.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && current) { address.value = current.url === "about:blank" ? "" : current.url; address.blur(); }
   });

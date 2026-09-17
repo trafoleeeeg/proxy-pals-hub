@@ -156,7 +156,7 @@ function createProfileRuntime(electron, options = {}) {
         entry.bookmarkBarVisible = !!visible;
         return saveBookmarks(entry, entry.bookmarks || []);
       },
-      openExtensionManager: () => { electron.app?.emit?.("umbra:manage-extensions"); },
+      openExtensionManager: () => { app?.emit?.("umbra:manage-extensions"); },
     };
   }
 

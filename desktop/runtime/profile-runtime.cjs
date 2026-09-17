@@ -49,10 +49,39 @@ function createProfileRuntime(electron, options = {}) {
     return entry.snapshotQueue;
   }
 
+  function openTabUrls(entry) {
+    const urls = [];
+    for (const win of entry.windows) {
+      if (win.isDestroyed()) continue;
+      let current = "";
+      try { current = win.webContents.getURL(); } catch { current = ""; }
+      urls.push(current || win.url || "about:blank");
+    }
+    return sanitizeTabs(urls);
+  }
+
+  function persistTabs(entry) {
+    const tabs = openTabUrls(entry);
+    if (!tabs.length) return Promise.resolve();
+    entry.tabQueue = (entry.tabQueue || Promise.resolve())
+      .catch(() => {})
+      .then(() => tabStore().write(entry.profileId, tabs, 0))
+      .catch(() => { entry.lastError = "Tab snapshot failed"; });
+    return entry.tabQueue;
+  }
+
+  function recordTabs(entry) {
+    if (entry.state !== "running" || entry.closingRequested) return;
+    clearTimeout(entry.tabTimer);
+    entry.tabTimer = setTimeout(() => { void persistTabs(entry); }, 600);
+    entry.tabTimer.unref?.();
+  }
+
   function watchCookies(entry) {
     const checkpoint = () => {
       if (entry.state !== "running") return;
       snapshot(entry).catch(() => { entry.lastError = "Cookie checkpoint failed"; });
+      void persistTabs(entry);
     };
     entry.cookieChanged = () => {
       clearTimeout(entry.cookieTimer);

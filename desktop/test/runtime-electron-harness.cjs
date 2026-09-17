@@ -259,6 +259,7 @@ if (process.versions.electron) {
     const fresh = profileTabs(ses).find((view) => view !== win && view !== popup);
     const freshContents = fresh.webContents;
     await waitUntil(() => !fresh.webContents.isLoading());
+    await waitUntil(() => shell.webContents.executeJavaScript("document.getElementById('home').textContent.includes('Asia/Tokyo')").catch(() => false));
     const home = await shell.webContents.executeJavaScript("({hidden:document.getElementById('home').hidden,text:document.getElementById('home').textContent})");
     assert.equal(home.hidden, false);
     assert.match(home.text, /Asia\/Tokyo/);

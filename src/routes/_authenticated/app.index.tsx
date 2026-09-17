@@ -2,7 +2,12 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Globe2, MoreVertical, CircleUserRound, Copy, Cookie, FolderInput, LockKeyhole, Pencil, Play, Plus, RefreshCw, Search, Settings2, Square, Trash2, UserPlus, X } from "lucide-react";
+import { Globe2, MoreVertical, CircleUserRound, Copy, Cookie, FolderInput, LockKeyhole, Pencil, Play, Plus, RefreshCw, Search, Settings2, Square, Tag, Trash2, UserPlus, X } from "lucide-react";
+
+const statusColor: Record<string, string> = {
+  primary: "text-primary", success: "text-success", warning: "text-warning",
+  destructive: "text-destructive", muted: "text-muted-foreground",
+};
 import { toast } from "sonner";
 import { useWorkspace } from "@/lib/useWorkspace";
 import { ALL_FOLDERS, useProfileFolder } from "@/lib/useProfileFolder";

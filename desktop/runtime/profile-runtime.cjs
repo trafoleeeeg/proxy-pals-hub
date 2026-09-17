@@ -319,6 +319,7 @@ function createProfileRuntime(electron, options = {}) {
       const restoredTabs = [...entry.windows];
       const focusTab = restoredTabs[url !== "about:blank" ? 0 : Math.min(saved.activeIndex, restoredTabs.length - 1)];
       if (focusTab && !focusTab.isDestroyed()) focusTab.show?.();
+        entry.browser?.markReady?.();
         entry.state = "running";
         watchCookies(entry);
         entry.browser?.publish?.();

@@ -52,6 +52,7 @@ async function createProfileBrowser(electron, {
   const shellContents = shell.webContents;
   let activeId;
   let chromeHeight = CHROME_HEIGHT;
+  let ready = false;
   let error = "";
   let destroyed = false;
   let commandQueue = Promise.resolve();
@@ -83,7 +84,7 @@ async function createProfileBrowser(electron, {
     activeId = tab.id; layout();
     if (isHome(tab)) shell.webContents.focus(); else tab.webContents.focus();
     publish();
-    onTabsChanged();
+    if (ready) onTabsChanged();
   }
   function closeTab(target) {
     if (!target || target.isDestroyed()) return;
@@ -119,7 +120,7 @@ async function createProfileBrowser(electron, {
       }
       case "reorder-tabs": {
         if (!Array.isArray(message.ids) || message.ids.length !== tabOrder.length || new Set(message.ids).size !== tabOrder.length || message.ids.some((id) => !tabs.has(id))) throw new Error("Invalid tab order");
-        tabOrder = [...message.ids]; onTabsChanged(); break;
+        tabOrder = [...message.ids]; if (ready) onTabsChanged(); break;
       }
       case "close-profile": await closeProfile(); break;
       case "duplicate": {
@@ -270,10 +271,11 @@ async function createProfileBrowser(electron, {
         tabOrder = tabOrder.filter((id) => id !== tab.id);
         if (!shell.isDestroyed()) shell.contentView.removeChildView(view);
         if (activeId === tab.id) select(tabs.get(tabOrder.at(-1)));
-        tab.emit("closed"); publish(); onTabsChanged();
+        tab.emit("closed"); publish(); if (ready) onTabsChanged();
       });
       return tab;
     },
+    markReady: () => { ready = true; },
     getTabSnapshot: () => ({
       tabs: tabOrder.map((id) => tabs.get(id)).filter((tab) => tab && !tab.isDestroyed()).map((tab) => tab.webContents.getURL() || tab.url || "about:blank"),
       activeIndex: Math.max(0, tabOrder.indexOf(activeId)),

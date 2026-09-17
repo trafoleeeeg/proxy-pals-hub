@@ -3,7 +3,7 @@ const { createProfileBrowser } = require("./browser.cjs");
 const { createRuntimeProxy, blockSession } = require("./proxy.cjs");
 const { createCookieStore, initializeCookies, canonicalCookies } = require("./cookies.cjs");
 const { createTabStore, sanitizeTabs } = require("./tabs.cjs");
-const { createBookmarkStore } = require("./bookmarks.cjs");
+const { createBookmarkStore, defaultBookmarks } = require("./bookmarks.cjs");
 const { normalizeFingerprint, applyFingerprint } = require("./fingerprint.cjs");
 
 function createProfileRuntime(electron, options = {}) {
@@ -146,7 +146,9 @@ function createProfileRuntime(electron, options = {}) {
       getBookmarkBarVisible: () => entry.bookmarkBarVisible !== false,
       getExtensions: () => entry.extensionList || [],
       addBookmark: (bookmark) => saveBookmarks(entry, [...(entry.bookmarks || []), { ...bookmark }]),
-      updateBookmark: (bookmark) => saveBookmarks(entry, (entry.bookmarks || []).map((item) => item.id === bookmark.id ? { ...item, title: bookmark.title, favicon: bookmark.favicon || item.favicon } : item)),
+      updateBookmark: (bookmark) => saveBookmarks(entry, (entry.bookmarks || []).map((item) => item.id === bookmark.id
+        ? { ...item, title: bookmark.title, url: bookmark.url || item.url, favicon: bookmark.url && bookmark.url !== item.url ? "" : (bookmark.favicon || item.favicon) }
+        : item)),
       removeBookmark: (id) => saveBookmarks(entry, (entry.bookmarks || []).filter((item) => item.id !== id)),
       reorderBookmarks: (ids) => {
         const byId = new Map((entry.bookmarks || []).map((item) => [item.id, item]));

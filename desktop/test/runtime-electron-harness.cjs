@@ -259,7 +259,12 @@ if (process.versions.electron) {
     const fresh = profileTabs(ses).find((view) => view !== win && view !== popup);
     const freshContents = fresh.webContents;
     await waitUntil(() => !fresh.webContents.isLoading());
-    await waitUntil(() => shell.webContents.executeJavaScript("document.getElementById('home').textContent.includes('Asia/Tokyo')").catch(() => false));
+    try {
+      await waitUntil(() => shell.webContents.executeJavaScript("!document.getElementById('home').hidden && document.getElementById('home').textContent.includes('Asia/Tokyo')").catch(() => false));
+    } catch (failure) {
+      const state = await shell.webContents.executeJavaScript("({home:document.getElementById('home')?.outerHTML,address:document.getElementById('address')?.value,tabs:document.querySelectorAll('#tabs .tab').length})").catch(() => null);
+      throw new Error(`${failure.message}: ${JSON.stringify(state)}`);
+    }
     const home = await shell.webContents.executeJavaScript("({hidden:document.getElementById('home').hidden,text:document.getElementById('home').textContent})");
     assert.equal(home.hidden, false);
     assert.match(home.text, /Asia\/Tokyo/);

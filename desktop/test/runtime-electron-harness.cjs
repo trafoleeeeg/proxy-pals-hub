@@ -64,7 +64,7 @@ if (process.versions.electron) {
     return ses;
   }
   async function waitUntil(predicate) {
-    for (let index = 0; index < 100; index++) { if (predicate()) return; await new Promise((resolve) => setTimeout(resolve, 25)); }
+    for (let index = 0; index < 100; index++) { if (await predicate()) return; await new Promise((resolve) => setTimeout(resolve, 25)); }
     throw new Error("Native fixture did not reach expected state");
   }
 

@@ -43,9 +43,11 @@ export const fingerprintSchema = z.object({
 const folder = text(200).trim();
 const tags = z.array(text(80).trim().min(1)).max(50);
 const notes = text(20000);
+const customFields = z.record(uuidSchema, text(2000)).refine((value) => Object.keys(value).length <= 50, "Too many custom fields");
 export const saveProfileSchema = z.object({
   id: uuidSchema.optional(), teamId: uuidSchema, name: text(200).trim().min(1),
   folder, tags, notes, proxyId: uuidSchema.nullable(), fingerprint: fingerprintSchema,
+  statusId: uuidSchema.nullable().optional(), customFields: customFields.optional(),
 }).strict();
 export const bulkCreateSchema = z.object({
   teamId: uuidSchema, prefix: text(180).trim().min(1), count: z.number().int().min(1).max(200),

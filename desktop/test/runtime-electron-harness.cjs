@@ -281,7 +281,7 @@ if (process.versions.electron) {
     await navigateFromToolbar("file:///C:/Windows/win.ini");
     await waitUntil(() => !fresh.webContents.isLoading());
     assert.ok(fresh.webContents.getURL().endsWith("/second-page"));
-    await shell.webContents.executeJavaScript("document.querySelector('.tab:last-child .tab-close').click()");
+    await shell.webContents.executeJavaScript("document.querySelector('.tab:last-of-type .tab-close').click()");
     await waitUntil(() => runtime.getRunningProfile(ID).tabCount === 2);
     assert.equal(freshContents.isDestroyed(), true);
     assert.equal(runtime.getRunningProfile(ID).state, "running");

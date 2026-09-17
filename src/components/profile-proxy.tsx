@@ -105,7 +105,7 @@ export function ProfileProxyCell({ proxy, ops, compact = false }: { proxy: Proxy
   const checking = ops.checkMut.isPending && ops.checkMut.variables === proxy.id;
   const rotating = (ops.rotateMut.isPending && ops.rotateMut.variables === proxy.id) || proxy.rotationStatus === "changing";
   const error = ops.errors[proxy.id] ?? proxy.last_check_error;
-  const dot = checking || rotating ? "bg-warning" : proxy.last_check_ok === true ? "bg-primary" : proxy.last_check_ok === false ? "bg-destructive" : "bg-muted-foreground/50";
+  const dot = checking || rotating ? "bg-primary animate-pulse" : proxy.last_check_ok === true ? "bg-success" : proxy.last_check_ok === false || error ? "bg-destructive" : "bg-primary";
   const hint = [
     `${proxy.label} · ${proxy.protocol.toUpperCase()}${proxy.country ? " · " + proxy.country : ""}`,
     proxyAddress(proxy.host, proxy.port),

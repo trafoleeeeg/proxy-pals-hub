@@ -116,6 +116,9 @@ export function ProfileProxyCell({ proxy, ops }: { proxy: ProxyRow | undefined; 
         : proxy.last_check_ok === false ? <Badge variant="destructive">ошибка</Badge>
         : <span className="text-xs text-muted-foreground">не проверялся</span>}
       {proxy.last_check_ip && <span className="mono break-all text-xs">{proxy.last_check_ip}{proxy.last_check_latency_ms != null ? ` · ${proxy.last_check_latency_ms} мс` : ""}</span>}
+      {/* Мобильный IP меняется сам по себе: без времени проверки адрес в панели
+          выглядит как текущий, хотя он лишь последний измеренный. */}
+      {proxy.last_check_ip && proxy.last_checked_at && <span className="text-xs text-muted-foreground">проверено {relativeTime(proxy.last_checked_at)}</span>}
     </div>
     {proxy.rotationPreviousIp && <div className="mono break-all text-xs text-muted-foreground">
       Был: {proxy.rotationPreviousIp}{proxy.rotationNewIp ? " → стал: " + proxy.rotationNewIp : ""}

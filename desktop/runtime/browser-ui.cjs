@@ -125,8 +125,10 @@ function renderer() {
       favicon.className = "favicon";
       if (tab.favicon) { favicon.src = tab.favicon; favicon.alt = ""; }
       else favicon.innerHTML = icon("globe");
-      const label = document.createElement("span"); label.className = "tab-label"; label.textContent = tab.title || "Новая вкладка";
-      select.append(favicon, label); select.title = tab.title || tab.url;
+      const blank = !tab.url || tab.url === "about:blank";
+      const name = blank || !tab.title || tab.title === "about:blank" ? "Новая вкладка" : tab.title;
+      const label = document.createElement("span"); label.className = "tab-label"; label.textContent = name;
+      select.append(favicon, label); select.title = blank ? name : `${name}\n${tab.url}`;
       select.onclick = () => void run({ action: "select", id: tab.id });
       select.onauxclick = (event) => { if (event.button === 1) void run({ action: "close-tab", id: tab.id }); };
       const close = document.createElement("button"); close.innerHTML = icon("close");

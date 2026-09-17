@@ -1,7 +1,7 @@
 import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { Bot, Download, Globe, LayoutGrid, LogOut, Monitor, RefreshCw, Users } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Bot, Download, Globe, LayoutGrid, LogOut, Monitor, PanelLeftClose, PanelLeftOpen, RefreshCw, Users } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useWorkspace, useWorkspaceSelection, WorkspaceProvider } from "@/lib/useWorkspace";
@@ -82,6 +82,13 @@ function AppShell() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [signingOut, setSigningOut] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => { setCollapsed(localStorage.getItem("umbra:sidebar") === "collapsed"); }, []);
+  const toggleCollapsed = () => setCollapsed((value) => {
+    const next = !value;
+    try { localStorage.setItem("umbra:sidebar", next ? "collapsed" : "expanded"); } catch { /* приватный режим */ }
+    return next;
+  });
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   async function signOut() {
     if (signingOut) return;
@@ -96,23 +103,25 @@ function AppShell() {
     finally { setSigningOut(false); }
   }
   return <div className="flex min-h-screen bg-background">
-    <aside className="flex w-14 shrink-0 flex-col border-r border-sidebar-border bg-sidebar md:w-56">
-      <div className="flex h-14 items-center justify-center gap-2 border-b border-sidebar-border md:justify-start md:px-4">
-        <span className="flex size-6 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground">U</span>
-        <span className="hidden text-sm font-semibold md:inline">Umbra</span>
+    <aside className={"flex shrink-0 flex-col border-r border-sidebar-border bg-sidebar transition-[width] " + (collapsed ? "w-14" : "w-56")}>
+      <div className={"flex h-14 items-center gap-2 border-b border-sidebar-border " + (collapsed ? "justify-center" : "px-3")}>
+        <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground">U</span>
+        {!collapsed && <><span className="text-sm font-semibold">Umbra</span>
+          <Button variant="ghost" size="icon" className="ml-auto size-7" title="Свернуть меню" aria-label="Свернуть меню" onClick={() => toggleCollapsed()}><PanelLeftClose className="size-4" /></Button></>}
       </div>
-      <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-2 md:p-3">{NAV.map((item) => {
+      {collapsed && <Button variant="ghost" size="icon" className="mx-auto mt-2 size-8" title="Развернуть меню" aria-label="Развернуть меню" onClick={() => toggleCollapsed()}><PanelLeftOpen className="size-4" /></Button>}
+      <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-2">{NAV.map((item) => {
         const active = item.exact ? pathname === item.to || pathname === "/app/" : pathname.startsWith(item.to);
         const Icon = item.icon;
         return <Link key={item.to} to={item.to} title={item.label} aria-label={item.label} aria-current={active ? "page" : undefined}
-          className={"flex items-center justify-center gap-3 rounded-md px-2 py-2 text-sm md:justify-start " + (active ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground")}>
-          <Icon className={"size-4 shrink-0 " + (active ? "text-primary" : "")} /><span className="hidden md:inline">{item.label}</span>
+          className={"flex items-center gap-3 rounded-md px-2 py-2 text-sm " + (collapsed ? "justify-center" : "") + " " + (active ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground")}>
+          <Icon className={"size-4 shrink-0 " + (active ? "text-primary" : "")} />{!collapsed && <span>{item.label}</span>}
         </Link>;
       })}
-        {(pathname === "/app" || pathname === "/app/") && <FoldersNav />}
+        {(pathname === "/app" || pathname === "/app/") && <FoldersNav collapsed={collapsed} />}
       </nav>
-      <div className="border-t border-sidebar-border p-2 md:p-3">
-        <div className="hidden min-w-0 space-y-2 md:block">
+      <div className="border-t border-sidebar-border p-2">
+        <div className={"min-w-0 space-y-2 " + (collapsed ? "hidden" : "block")}>
           <p className="truncate text-xs">{ws?.email ?? ""}</p>
           <Select value={ws?.teamId ?? ""} disabled={selection.workspaces.isPending || signingOut} onValueChange={selection.select}>
             <SelectTrigger aria-label="Рабочая команда" className="w-full text-xs"><SelectValue placeholder="Команда" /></SelectTrigger>
@@ -121,7 +130,7 @@ function AppShell() {
           {selection.workspaces.isError && <Button size="sm" variant="ghost" onClick={() => selection.workspaces.refetch()}>Повторить загрузку команд</Button>}
           <p className="text-xs text-muted-foreground">{ws?.role === "owner" ? "Владелец" : ws ? "Сотрудник" : ""}</p>
         </div>
-        <Button variant="ghost" size="sm" title="Выйти" aria-label="Выйти" disabled={signingOut || !runtime.ready} className="mt-2 w-full px-0 md:justify-start md:px-2" onClick={signOut}><LogOut className="size-4" /><span className="hidden md:inline">{signingOut ? "Сохранение…" : "Выйти"}</span></Button>
+        <Button variant="ghost" size="sm" title="Выйти" aria-label="Выйти" disabled={signingOut || !runtime.ready} className={"mt-2 w-full " + (collapsed ? "px-0" : "justify-start px-2")} onClick={signOut}><LogOut className="size-4" />{!collapsed && <span>{signingOut ? "Сохранение…" : "Выйти"}</span>}</Button>
       </div>
     </aside>
     <div className="flex min-w-0 flex-1 flex-col">

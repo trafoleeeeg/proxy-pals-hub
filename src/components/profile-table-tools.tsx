@@ -13,10 +13,10 @@ import { Textarea } from "@/components/ui/textarea";
 
 export type ProfileStatus = { id: string; name: string; color: string; position: number };
 export type ProfileField = { id: string; name: string; field_type: string; position: number };
-export type FixedColumn = "folder" | "status" | "proxy" | "tags" | "notes" | "fingerprint" | "updated" | "created";
+export type FixedColumn = "folder" | "status" | "proxy" | "notes" | "fingerprint" | "updated" | "created";
 
 const fixedLabels: Record<FixedColumn, string> = {
-  folder: "Папка", status: "Статус", proxy: "Прокси", tags: "Метки", notes: "Заметки",
+  folder: "Папка", status: "Статус", proxy: "Прокси", notes: "Заметки",
   fingerprint: "Отпечаток", updated: "Изменён", created: "Создан",
 };
 

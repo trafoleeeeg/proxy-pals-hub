@@ -9,7 +9,7 @@ const profiles = [
   { id: "p2", name: "Резервный профиль", folder: "Работа", tags: [] },
   { id: "p3", name: "Профиль без папки", folder: "", tags: [] },
   { id: "p4", name: "ОченьДлинноеНазвание".repeat(9), folder: "Папка".repeat(20), tags: ["Метка".repeat(15)] },
-].map((profile) => ({ ...profile, teamId: "team-a", notes: "", proxy_id: null as string | null, fingerprint: generateFingerprint(), created_at: now, updated_at: now,
+].map((profile) => ({ ...profile, teamId: "team-a", notes: "", proxy_id: null as string | null, status_id: null as string | null, custom_fields: {} as Record<string, string>, fingerprint: generateFingerprint(), created_at: now, updated_at: now,
   lock: scenario === "locked" && profile.id === "p1" ? { userId: "other", expiresAt: "2099-01-01T00:00:00Z" } : null,
 }));
 profiles.push({ ...profiles[0]!, id: "p5", teamId: "team-b", name: "Профиль второй команды" });
@@ -52,6 +52,9 @@ const workspaces = ["a", "b"].map((id) => ({ teamId: `team-${id}`, teamName: id 
 export const listWorkspaces = api("listWorkspaces", () => workspaces);
 export const getWorkspace = api("getWorkspace", (data) => workspaces.find((team) => team.teamId === (data.teamId ?? "team-a"))!);
 export const listProfiles = api("listProfiles", (data) => fixture.profiles.filter((profile) => profile.teamId === data.teamId));
+export const listProfileMetadata = api("listProfileMetadata", () => ({ statuses: [], fields: [] }));
+export const createProfileStatus = api("createProfileStatus", () => ({ id: "status-new" }));
+export const createProfileField = api("createProfileField", () => ({ id: "field-new" }));
 export const listProxies = api("listProxies", () => [{
   id: "proxy-1", label: "Прокси Германия", protocol: "http", host: "proxy.example.com", port: 8080, country: "DE",
   last_check_ok: true, last_check_ip: "203.0.113.2", last_check_latency_ms: 140,

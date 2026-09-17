@@ -100,12 +100,12 @@ export function useProxyOps(teamId: string | undefined) {
 type Ops = ReturnType<typeof useProxyOps>;
 
 /** Блок прокси в строке профиля: адрес, проверка, смена IP и история «был → стал». */
-export function ProfileProxyCell({ proxy, ops }: { proxy: ProxyRow | undefined; ops: Ops }) {
+export function ProfileProxyCell({ proxy, ops, compact = false }: { proxy: ProxyRow | undefined; ops: Ops; compact?: boolean }) {
   if (!proxy) return <span className="text-xs text-muted-foreground">Без прокси</span>;
   const checking = ops.checkMut.isPending && ops.checkMut.variables === proxy.id;
   const rotating = (ops.rotateMut.isPending && ops.rotateMut.variables === proxy.id) || proxy.rotationStatus === "changing";
   const error = ops.errors[proxy.id] ?? proxy.last_check_error;
-  return <div className="min-w-56 space-y-1">
+  return <div className={`${compact ? "w-48" : "min-w-56"} space-y-1`}>
     <div className="flex items-center gap-1">
       <span className="font-medium">{proxy.label}</span>
       <Badge variant="outline" className="text-[10px] uppercase">{proxy.protocol}</Badge>

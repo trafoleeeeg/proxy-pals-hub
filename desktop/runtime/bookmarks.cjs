@@ -46,6 +46,22 @@ function sanitizeBookmarkState(value) {
   };
 }
 
+// Стартовый набор закладок для нового профиля. Пользователь может их
+// переименовать, изменить адрес или удалить — повторно они не добавляются.
+const DEFAULT_BOOKMARKS = [
+  { title: "fb acc", url: "https://accountscenter.facebook.com/" },
+  { title: "facebook", url: "https://www.facebook.com/" },
+  { title: "facebook ads", url: "https://adsmanager.facebook.com/adsmanager/manage/campaigns" },
+  { title: "google ads", url: "https://ads.google.com/aw/campaigns" },
+  { title: "tiktok ads", url: "https://ads.tiktok.com/i18n/perf/creative" },
+  { title: "tiktok", url: "https://www.tiktok.com/" },
+  { title: "gmail почта", url: "https://mail.google.com/mail/u/0/" },
+];
+
+function defaultBookmarks() {
+  return sanitizeBookmarks(DEFAULT_BOOKMARKS);
+}
+
 // Profile bookmarks stay on this device only: encrypted with the OS key store
 // and never uploaded together with the profile's browsing session.
 function createBookmarkStore({ safeStorage, userData }) {
@@ -57,19 +73,20 @@ function createBookmarkStore({ safeStorage, userData }) {
   function filename(id) { return path.join(root, `${profileId(id)}.bin`); }
   return {
     async readState(id) {
-      if (!available()) return { bookmarks: [], barVisible: true };
+      const empty = { bookmarks: [], barVisible: true, stored: false };
+      if (!available()) return empty;
       let encrypted;
       try {
         const file = filename(id);
         const stat = await fs.stat(file);
-        if (stat.size > MAX_BYTES + 65536) return { bookmarks: [], barVisible: true };
+        if (stat.size > MAX_BYTES + 65536) return empty;
         encrypted = await fs.readFile(file);
-      } catch { return { bookmarks: [], barVisible: true }; }
+      } catch { return empty; }
       try {
         const data = JSON.parse(safeStorage.decryptString(encrypted));
-        if (![1, 2].includes(data.version) || data.profileId !== profileId(id)) return { bookmarks: [], barVisible: true };
-        return sanitizeBookmarkState(data.version === 1 ? data.bookmarks : data);
-      } catch { return { bookmarks: [], barVisible: true }; }
+        if (![1, 2].includes(data.version) || data.profileId !== profileId(id)) return empty;
+        return { ...sanitizeBookmarkState(data.version === 1 ? data.bookmarks : data), stored: true };
+      } catch { return empty; }
     },
     async read(id) {
       return (await this.readState(id)).bookmarks;
@@ -102,4 +119,4 @@ function createBookmarkStore({ safeStorage, userData }) {
   };
 }
 
-module.exports = { createBookmarkStore, sanitizeBookmarks, sanitizeBookmarkState, sanitizeFavicon, MAX_BOOKMARKS, MAX_FAVICON_BYTES };
+module.exports = { createBookmarkStore, sanitizeBookmarks, sanitizeBookmarkState, sanitizeFavicon, defaultBookmarks, DEFAULT_BOOKMARKS, MAX_BOOKMARKS, MAX_FAVICON_BYTES };

@@ -66,7 +66,7 @@ async function createProfileBrowser(electron, {
     const bookmarks = getBookmarks();
     shell.webContents.send("umbra-runtime:state", { name, activeId, error, home: isHome(active()), info: getInfo(),
       bookmarks, bookmarkBarVisible: getBookmarkBarVisible(), extensions: getExtensions(), bookmarked: bookmarks.some((item) => item.url === currentUrl),
-      canRestoreTab: recentlyClosed.length > 0,
+      canRestoreTab: recentlyClosed.length > 0, find: active()?.find || null,
       tabs: tabOrder.map((id) => tabs.get(id)).filter((tab) => tab && !tab.isDestroyed()).map((tab) => ({
       id: tab.id, url: tab.webContents.getURL() || tab.url, title: tab.webContents.getTitle(), favicon: tab.favicon || "", error: tab.error,
       loading: tab.webContents.isLoading(), canGoBack: tab.webContents.navigationHistory.canGoBack(), canGoForward: tab.webContents.navigationHistory.canGoForward(),
@@ -158,7 +158,37 @@ async function createProfileBrowser(electron, {
         break;
       }
       case "remove-bookmark": await removeBookmark(message.id); break;
-      case "update-bookmark": await updateBookmark({ id: message.id, title: String(message.title || "").slice(0, 120) }); break;
+      case "add-bookmark": {
+        let target;
+        try { target = startUrl(String(message.url || "")); }
+        catch { error = "Неверный адрес закладки"; break; }
+        await addBookmark({ url: target, title: String(message.title || "").slice(0, 120) });
+        break;
+      }
+      case "update-bookmark": {
+        let target;
+        if (message.url != null && String(message.url).trim()) {
+          try { target = startUrl(String(message.url)); }
+          catch { error = "Неверный адрес закладки"; break; }
+        }
+        await updateBookmark({ id: message.id, title: String(message.title || "").slice(0, 120), ...(target ? { url: target } : {}) });
+        break;
+      }
+      case "find": {
+        const query = String(message.value || "").slice(0, 200);
+        if (!tab) break;
+        if (!query) { tab.webContents.stopFindInPage("clearSelection"); break; }
+        tab.webContents.findInPage(query, { findNext: !!message.next, forward: message.forward !== false });
+        break;
+      }
+      case "find-stop": if (tab) tab.webContents.stopFindInPage("clearSelection"); break;
+      case "zoom-in": case "zoom-out": case "zoom-reset": {
+        if (!tab) break;
+        const step = message.action === "zoom-in" ? 0.5 : -0.5;
+        const level = message.action === "zoom-reset" ? 0 : Math.max(-3, Math.min(5, tab.webContents.getZoomLevel() + step));
+        tab.webContents.setZoomLevel(level);
+        break;
+      }
       case "reorder-bookmarks": if (Array.isArray(message.ids)) await reorderBookmarks(message.ids); break;
       case "toggle-bookmark-bar": await setBookmarkBarVisible(!getBookmarkBarVisible()); break;
       case "manage-extensions": openExtensionManager(); break;
@@ -187,6 +217,9 @@ async function createProfileBrowser(electron, {
   function focusAddress() {
     if (!shell.isDestroyed()) { shell.webContents.focus(); shell.webContents.send("umbra-runtime:state", { focusAddress: true }); }
   }
+  function focusFind() {
+    if (!shell.isDestroyed()) { shell.webContents.focus(); shell.webContents.send("umbra-runtime:state", { focusFind: true }); }
+  }
   function shortcuts(event, input) {
     if (input.type !== "keyDown") return;
     const key = input.key.toLowerCase();
@@ -199,6 +232,10 @@ async function createProfileBrowser(electron, {
       if (key === "r") action = "reload";
       if (key === "d") action = "bookmark";
       if (key === "b" && input.shift) action = "toggle-bookmark-bar";
+      if (key === "f") { event.preventDefault(); focusFind(); return; }
+      if (key === "=" || key === "+") action = "zoom-in";
+      if (key === "-") action = "zoom-out";
+      if (key === "0") action = "zoom-reset";
       if (/^[1-9]$/.test(key)) {
         event.preventDefault(); const all = tabOrder.map((id) => tabs.get(id)).filter(Boolean);
         select(key === "9" ? all.at(-1) : all[Number(key) - 1]); return;
@@ -257,7 +294,26 @@ async function createProfileBrowser(electron, {
       });
       tabs.set(tab.id, tab); tabOrder.push(tab.id); shell.contentView.addChildView(view); select(tab);
       wc.on("before-input-event", shortcuts);
-      wc.on("did-navigate", (_event, url) => { tab.url = url; publish(); });
+      wc.on("found-in-page", (_event, result) => { tab.find = { active: result.activeMatchOrdinal, total: result.matches }; publish(); });
+      wc.on("context-menu", (_event, params) => {
+        const Menu = electron.Menu;
+        if (!Menu?.buildFromTemplate || shell.isDestroyed()) return;
+        const items = [];
+        if (params.linkURL) {
+          items.push({ label: "Открыть ссылку в новой вкладке", click: () => { void openTab(params.linkURL); } });
+          items.push({ label: "Копировать адрес ссылки", click: () => electron.clipboard?.writeText?.(params.linkURL) });
+          items.push({ type: "separator" });
+        }
+        if (params.isEditable) items.push({ label: "Вырезать", role: "cut" }, { label: "Копировать", role: "copy" }, { label: "Вставить", role: "paste" }, { label: "Выделить всё", role: "selectAll" }, { type: "separator" });
+        else if (params.selectionText) items.push({ label: "Копировать", role: "copy" }, { type: "separator" });
+        items.push(
+          { label: "Назад", enabled: wc.navigationHistory.canGoBack(), click: () => wc.navigationHistory.goBack() },
+          { label: "Вперёд", enabled: wc.navigationHistory.canGoForward(), click: () => wc.navigationHistory.goForward() },
+          { label: "Обновить", click: () => wc.reload() },
+        );
+        try { Menu.buildFromTemplate(items).popup({ window: shell }); } catch { /* меню необязательно */ }
+      });
+      wc.on("did-navigate", (_event, url) => { tab.url = url; tab.find = null; publish(); });
       wc.on("page-favicon-updated", async (_event, icons) => {
         const source = Array.isArray(icons) ? icons.find((icon) => /^https?:/i.test(icon)) : "";
         if (!source) return;

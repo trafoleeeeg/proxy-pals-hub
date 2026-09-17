@@ -3,7 +3,7 @@ const { createProfileBrowser } = require("./browser.cjs");
 const { createRuntimeProxy, blockSession } = require("./proxy.cjs");
 const { createCookieStore, initializeCookies, canonicalCookies } = require("./cookies.cjs");
 const { createTabStore, sanitizeTabs } = require("./tabs.cjs");
-const { createBookmarkStore } = require("./bookmarks.cjs");
+const { createBookmarkStore, defaultBookmarks } = require("./bookmarks.cjs");
 const { normalizeFingerprint, applyFingerprint } = require("./fingerprint.cjs");
 
 function createProfileRuntime(electron, options = {}) {
@@ -146,7 +146,9 @@ function createProfileRuntime(electron, options = {}) {
       getBookmarkBarVisible: () => entry.bookmarkBarVisible !== false,
       getExtensions: () => entry.extensionList || [],
       addBookmark: (bookmark) => saveBookmarks(entry, [...(entry.bookmarks || []), { ...bookmark }]),
-      updateBookmark: (bookmark) => saveBookmarks(entry, (entry.bookmarks || []).map((item) => item.id === bookmark.id ? { ...item, title: bookmark.title, favicon: bookmark.favicon || item.favicon } : item)),
+      updateBookmark: (bookmark) => saveBookmarks(entry, (entry.bookmarks || []).map((item) => item.id === bookmark.id
+        ? { ...item, title: bookmark.title, url: bookmark.url || item.url, favicon: bookmark.url && bookmark.url !== item.url ? "" : (bookmark.favicon || item.favicon) }
+        : item)),
       removeBookmark: (id) => saveBookmarks(entry, (entry.bookmarks || []).filter((item) => item.id !== id)),
       reorderBookmarks: (ids) => {
         const byId = new Map((entry.bookmarks || []).map((item) => [item.id, item]));
@@ -309,9 +311,14 @@ function createProfileRuntime(electron, options = {}) {
         entry.extensionErrors = extensionResult.errors;
         await reloadExtensionList(entry);
       }
-       const bookmarkState = await (bookmarkStore().readState?.(id) || bookmarkStore().read(id).then((bookmarks) => ({ bookmarks, barVisible: true }))).catch(() => ({ bookmarks: [], barVisible: true }));
+       const bookmarkState = await (bookmarkStore().readState?.(id) || bookmarkStore().read(id).then((bookmarks) => ({ bookmarks, barVisible: true, stored: true }))).catch(() => ({ bookmarks: [], barVisible: true, stored: true }));
        entry.bookmarks = bookmarkState.bookmarks;
        entry.bookmarkBarVisible = bookmarkState.barVisible;
+       // Новый профиль получает стартовый набор рабочих закладок один раз.
+       if (!bookmarkState.stored && !bookmarkState.bookmarks.length) {
+         entry.bookmarks = defaultBookmarks();
+         void saveBookmarks(entry, entry.bookmarks);
+       }
       const saved = await tabStore().read(id).catch(() => ({ tabs: [], activeIndex: 0 }));
       const plan = url !== "about:blank" ? [url] : (saved.tabs.length ? saved.tabs : ["about:blank"]);
       await makeWindow(entry, plan[0], true);

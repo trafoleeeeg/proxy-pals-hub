@@ -94,6 +94,27 @@ async function createProfileBrowser(electron, {
         break;
       }
       case "close-profile": await closeProfile(); break;
+      case "duplicate": {
+        const url = tab?.webContents.getURL() || tab?.url || "about:blank";
+        await openTab(url);
+        break;
+      }
+      case "bookmark": {
+        const url = tab?.webContents.getURL() || tab?.url || "";
+        if (!url || url === "about:blank") { error = "Эту страницу нельзя добавить в закладки"; break; }
+        const saved = getBookmarks().find((item) => item.url === url);
+        if (saved) await removeBookmark(saved.id);
+        else await addBookmark({ url: startUrl(url), title: tab?.webContents.getTitle() || "" });
+        break;
+      }
+      case "open-bookmark": {
+        const saved = getBookmarks().find((item) => item.id === message.id);
+        if (!saved) break;
+        if (message.newTab || !tab) await openTab(saved.url);
+        else { tab.error = ""; void tab.loadURL(saved.url).catch(() => {}); }
+        break;
+      }
+      case "remove-bookmark": await removeBookmark(message.id); break;
       case "navigate": if (tab) { tab.error = ""; void tab.loadURL(addressUrl(message.value)).catch(() => {}); } break;
       case "back": if (tab?.webContents.navigationHistory.canGoBack()) tab.webContents.navigationHistory.goBack(); break;
       case "forward": if (tab?.webContents.navigationHistory.canGoForward()) tab.webContents.navigationHistory.goForward(); break;

@@ -105,12 +105,26 @@ jobs:
           path: desktop/dist
 
       - name: Publish release
-        uses: softprops/action-gh-release@v2
-        with:
-          draft: ${{ !(github.event_name == 'workflow_dispatch' && inputs.automatic_release) }}
-          generate_release_notes: true
-          fail_on_unmatched_files: true
-          files: |
-            desktop/dist/*.exe
-            desktop/dist/latest.yml
-            desktop/dist/*.blockmap
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          files=(desktop/dist/latest.yml desktop/dist/*.blockmap desktop/dist/*.exe)
+
+          for file in "${files[@]}"; do
+            uploaded=false
+            for attempt in 1 2 3 4 5; do
+              if gh release upload "$GITHUB_REF_NAME" "$file" --clobber; then
+                uploaded=true
+                break
+              fi
+              echo "Upload attempt ${attempt} failed for ${file}; retrying..."
+              sleep $((attempt * 15))
+            done
+
+            if [[ "$uploaded" != true ]]; then
+              echo "Failed to upload ${file} after 5 attempts" >&2
+              exit 1
+            fi
+          done

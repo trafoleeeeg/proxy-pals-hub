@@ -1,0 +1,1 @@
+GRANT UPDATE (status_id, custom_fields) ON public.browser_profiles TO authenticated;

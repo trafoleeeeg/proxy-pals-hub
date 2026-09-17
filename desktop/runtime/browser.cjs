@@ -143,6 +143,11 @@ async function createProfileBrowser(electron, {
       if (key === "t") action = "new";
       if (key === "w") action = "close-tab";
       if (key === "r") action = "reload";
+      if (key === "d") action = "bookmark";
+      if (/^[1-9]$/.test(key)) {
+        event.preventDefault(); const all = [...tabs.values()];
+        select(key === "9" ? all.at(-1) : all[Number(key) - 1]); return;
+      }
       if (key === "tab") {
         event.preventDefault(); const all = [...tabs.values()];
         select(all[(all.indexOf(active()) + (input.shift ? -1 : 1) + all.length) % all.length]); return;

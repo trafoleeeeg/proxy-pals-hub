@@ -17,13 +17,14 @@ const fixedLabels: Record<FixedColumn, string> = {
   fingerprint: "Отпечаток", updated: "Изменён", created: "Создан",
 };
 
-export function ColumnSettings({ visible, onChange, fields }: {
+export function ColumnSettings({ visible, onChange, fields, visibleFields, onFieldChange }: {
   visible: FixedColumn[]; onChange: (value: FixedColumn[]) => void; fields: ProfileField[];
+  visibleFields: string[]; onFieldChange: (value: string[]) => void;
 }) {
   return <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="icon" title="Настроить колонки" aria-label="Настроить колонки"><Columns3 /></Button></DropdownMenuTrigger>
     <DropdownMenuContent align="end" className="w-56"><DropdownMenuLabel>Колонки таблицы</DropdownMenuLabel><DropdownMenuSeparator />
       {(Object.keys(fixedLabels) as FixedColumn[]).map((key) => <DropdownMenuCheckboxItem key={key} checked={visible.includes(key)} onSelect={(event) => event.preventDefault()} onCheckedChange={(checked) => onChange(checked ? [...visible, key] : visible.filter((item) => item !== key))}>{fixedLabels[key]}</DropdownMenuCheckboxItem>)}
-      {!!fields.length && <><DropdownMenuSeparator /><DropdownMenuLabel>Дополнительные</DropdownMenuLabel>{fields.map((field) => <DropdownMenuCheckboxItem key={field.id} checked disabled>{field.name}</DropdownMenuCheckboxItem>)}</>}
+      {!!fields.length && <><DropdownMenuSeparator /><DropdownMenuLabel>Дополнительные</DropdownMenuLabel>{fields.map((field) => <DropdownMenuCheckboxItem key={field.id} checked={visibleFields.includes(field.id)} onSelect={(event) => event.preventDefault()} onCheckedChange={(checked) => onFieldChange(checked ? [...visibleFields, field.id] : visibleFields.filter((id) => id !== field.id))}>{field.name}</DropdownMenuCheckboxItem>)}</>}
     </DropdownMenuContent>
   </DropdownMenu>;
 }

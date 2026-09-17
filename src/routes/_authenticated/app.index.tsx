@@ -26,7 +26,17 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-export const Route = createFileRoute("/_authenticated/app/")({ component: ProfilesPage });
+export const Route = createFileRoute("/_authenticated/app/")({
+  head: () => ({ meta: [
+    { title: "Профили — Umbra" },
+    { name: "description", content: "Управление профилями, прокси, статусами и рабочими полями команды Umbra." },
+    { property: "og:title", content: "Профили — Umbra" },
+    { property: "og:description", content: "Профили, прокси, статусы и рабочие поля команды Umbra." },
+    { property: "og:type", content: "website" },
+    { name: "twitter:card", content: "summary" },
+  ] }),
+  component: ProfilesPage,
+});
 type Edit = { id?: string; name: string; folder: string; tags: string; notes: string; proxyId: string; fingerprint: Fingerprint; statusId: string | null; customFields: Record<string, string> };
 const ALL = "__all__";
 const DEFAULT_COLUMNS: FixedColumn[] = ["folder", "status", "proxy", "tags", "notes", "fingerprint", "updated"];
@@ -65,6 +75,7 @@ function ProfilesWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [metadataOpen, setMetadataOpen] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState<FixedColumn[]>(DEFAULT_COLUMNS);
+  const [visibleFields, setVisibleFields] = useState<string[]>([]);
   const profiles = useQuery({ queryKey: ["profiles", ws?.teamId], queryFn: () => listFn({ data: { teamId: ws!.teamId } }), enabled: !!ws, refetchInterval: 20_000 });
   const proxies = useQuery({ queryKey: ["proxies", ws?.teamId], queryFn: () => proxiesFn({ data: { teamId: ws!.teamId } }), enabled: !!ws });
   const metadata = useQuery({ queryKey: ["profile-metadata", ws?.teamId], queryFn: () => metadataFn({ data: { teamId: ws!.teamId } }), enabled: !!ws });
@@ -81,6 +92,10 @@ function ProfilesWorkspace() {
     const ids = new Set(profiles.data.map((p) => p.id));
     setSelected((current) => current.filter((id) => ids.has(id)));
   }, [profiles.data]);
+  useEffect(() => {
+    if (!metadata.data) return;
+    setVisibleFields((current) => current.length ? current.filter((id) => metadata.data.fields.some((field) => field.id === id)) : metadata.data.fields.map((field) => field.id));
+  }, [metadata.data]);
 
   function refresh() { void qc.invalidateQueries({ queryKey: ["profiles"] }); void qc.invalidateQueries({ queryKey: ["team"] }); }
   async function perform(key: string, operation: () => Promise<unknown>, onSuccess?: () => void) {
@@ -111,7 +126,8 @@ function ProfilesWorkspace() {
     } }));
   }
   const shown = (key: FixedColumn) => visibleColumns.includes(key);
-  const columnCount = 3 + visibleColumns.length + (metadata.data?.fields.length ?? 0) + (owner ? 1 : 0);
+  const shownFields = (metadata.data?.fields ?? []).filter((field) => visibleFields.includes(field.id));
+  const columnCount = 3 + visibleColumns.length + shownFields.length + (owner ? 1 : 0);
 
   if (workspace.isPending) return <p role="status" className="text-sm text-muted-foreground">Загрузка рабочего пространства…</p>;
   if (workspace.isError) return <p role="alert" className="text-sm text-destructive">Не удалось загрузить команду. <Button variant="outline" onClick={() => workspace.refetch()}>Повторить</Button></p>;
@@ -121,7 +137,7 @@ function ProfilesWorkspace() {
       <div><h1 className="text-xl font-semibold">Профили</h1><p className="text-xs text-muted-foreground">{profiles.data?.length ?? 0} профилей · {running.size} открыто</p></div>
       <div className="ml-auto flex flex-wrap gap-2">
         {owner && <Button size="icon" variant="outline" title="Настроить поля" aria-label="Настроить поля" onClick={() => setMetadataOpen(true)}><Settings2 /></Button>}
-        <ColumnSettings visible={visibleColumns} onChange={setVisibleColumns} fields={metadata.data?.fields ?? []} />
+        <ColumnSettings visible={visibleColumns} onChange={setVisibleColumns} fields={metadata.data?.fields ?? []} visibleFields={visibleFields} onFieldChange={setVisibleFields} />
         <Button size="icon" variant="outline" title="Обновить список" aria-label="Обновить список" disabled={profiles.isFetching} onClick={() => profiles.refetch()}><RefreshCw className={profiles.isFetching ? "size-4 animate-spin" : "size-4"} /></Button>
         {owner && <><Button variant="outline" disabled={!!busy} onClick={() => { setError(null); setBulkOpen(true); }}><Plus className="size-4" />Создать пачкой</Button><Button disabled={!!busy} onClick={newProfile}><Plus className="size-4" />Новый профиль</Button></>}
       </div>
@@ -146,7 +162,7 @@ function ProfilesWorkspace() {
       </aside>
       <div className="min-w-0 overflow-x-auto"><Table className="min-w-max text-xs"><TableHeader className="sticky top-0 z-10 bg-background"><TableRow>
         {owner && <TableHead className="w-10"><Checkbox aria-label="Выбрать видимые профили" disabled={!rows.length} checked={visibleSelected === 0 ? false : visibleSelected === rows.length ? true : "indeterminate"} onCheckedChange={(checked) => setSelected((current) => toggleVisibleSelection(current, visibleIds, checked === true))} /></TableHead>}
-        <TableHead className="min-w-44">Название</TableHead>{shown("folder") && <TableHead>Папка</TableHead>}{shown("status") && <TableHead>Статус</TableHead>}{shown("proxy") && <TableHead className="min-w-60">Прокси</TableHead>}{shown("tags") && <TableHead>Метки</TableHead>}{shown("notes") && <TableHead className="min-w-48">Заметки</TableHead>}{(metadata.data?.fields ?? []).map((field) => <TableHead key={field.id}>{field.name}</TableHead>)}{shown("fingerprint") && <TableHead>Отпечаток</TableHead>}{shown("updated") && <TableHead>Изменён</TableHead>}{shown("created") && <TableHead>Создан</TableHead>}<TableHead>Запуск</TableHead><TableHead className="sticky right-0 bg-background text-right">Действия</TableHead>
+        <TableHead className="min-w-44">Название</TableHead>{shown("folder") && <TableHead>Папка</TableHead>}{shown("status") && <TableHead>Статус</TableHead>}{shown("proxy") && <TableHead className="min-w-60">Прокси</TableHead>}{shown("tags") && <TableHead>Метки</TableHead>}{shown("notes") && <TableHead className="min-w-48">Заметки</TableHead>}{shownFields.map((field) => <TableHead key={field.id}>{field.name}</TableHead>)}{shown("fingerprint") && <TableHead>Отпечаток</TableHead>}{shown("updated") && <TableHead>Изменён</TableHead>}{shown("created") && <TableHead>Создан</TableHead>}<TableHead>Запуск</TableHead><TableHead className="sticky right-0 bg-background text-right">Действия</TableHead>
       </TableRow></TableHeader><TableBody>
         {profiles.isPending && <TableRow><TableCell colSpan={columnCount} className="py-8 text-center" role="status">Загрузка профилей…</TableCell></TableRow>}
         {rows.map((profile) => {
@@ -161,7 +177,7 @@ function ProfilesWorkspace() {
             {shown("proxy") && <TableCell className="max-w-72 text-xs">{profile.proxy_id && !proxy ? <span className="text-warning">Прокси недоступен</span> : <ProfileProxyCell proxy={proxy} ops={proxyOps} />}</TableCell>}
             {shown("tags") && <TableCell className="max-w-48"><div className="flex flex-wrap gap-1">{profile.tags.map((tag) => <Badge key={tag} variant="outline" className="max-w-40 break-all text-[10px]">{tag}</Badge>)}{!profile.tags.length && <span className="text-muted-foreground">—</span>}</div></TableCell>}
             {shown("notes") && <TableCell><InlineText value={profile.notes} placeholder="Добавить заметку" multiline disabled={!owner || !!busy || locked(profile.id)} onSave={(notes) => patchProfile(profile, { notes })} /></TableCell>}
-            {(metadata.data?.fields ?? []).map((field) => <TableCell key={field.id}><InlineText value={profile.custom_fields[field.id] ?? ""} placeholder={field.name} disabled={!owner || !!busy || locked(profile.id)} onSave={(value) => patchProfile(profile, { customFields: { ...profile.custom_fields, [field.id]: value } })} /></TableCell>)}
+            {shownFields.map((field) => <TableCell key={field.id}><InlineText value={profile.custom_fields[field.id] ?? ""} placeholder={field.name} disabled={!owner || !!busy || locked(profile.id)} onSave={(value) => patchProfile(profile, { customFields: { ...profile.custom_fields, [field.id]: value } })} /></TableCell>)}
             {shown("fingerprint") && <TableCell className="max-w-48 text-muted-foreground">{describeFingerprint(profile.fingerprint)}</TableCell>}
             {shown("updated") && <TableCell className="whitespace-nowrap text-muted-foreground">{dateTime(profile.updated_at)}</TableCell>}
             {shown("created") && <TableCell className="whitespace-nowrap text-muted-foreground">{dateTime(profile.created_at)}</TableCell>}

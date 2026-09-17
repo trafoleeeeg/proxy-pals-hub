@@ -102,7 +102,6 @@ function renderer() {
     current = state.tabs.find((tab) => tab.id === state.activeId);
     byId("home").hidden = !state.home;
     renderHome(state.info);
-    byId("profile").textContent = state.name;
     document.title = state.name + " — Umbra";
     if (document.activeElement !== address) address.value = current?.url === "about:blank" ? "" : current?.url || "";
     showError(state.error || current?.error || "");

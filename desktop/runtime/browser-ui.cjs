@@ -83,12 +83,60 @@ function renderer() {
   });
   byId("extensions").addEventListener("click", () => togglePopover(extensionsPopover, byId("extensions")));
   byId("menu-button").addEventListener("click", () => togglePopover(menu, byId("menu-button")));
+  function openFind() {
+    closePopovers();
+    findbar.hidden = false;
+    findInput.focus(); findInput.select();
+  }
+  function closeFind() {
+    findbar.hidden = true;
+    byId("find-count").textContent = "";
+    findInput.value = "";
+    void run({ action: "find-stop" });
+  }
+  function renderManager() {
+    const list = byId("manager-list");
+    list.replaceChildren(...(latestState.bookmarks || []).map((bookmark) => {
+      const row = document.createElement("div"); row.className = "manager-row";
+      const title = document.createElement("input"); title.value = bookmark.title || ""; title.maxLength = 120;
+      title.setAttribute("aria-label", "Название закладки");
+      const url = document.createElement("input"); url.value = bookmark.url || ""; url.maxLength = 2048;
+      url.setAttribute("aria-label", "Адрес закладки");
+      const actions = document.createElement("div"); actions.className = "row-actions";
+      const remove = document.createElement("button"); remove.type = "button"; remove.className = "text-button danger"; remove.textContent = "Удалить";
+      remove.onclick = () => void run({ action: "remove-bookmark", id: bookmark.id });
+      const save = document.createElement("button"); save.type = "button"; save.className = "text-button primary"; save.textContent = "Сохранить";
+      save.onclick = () => void run({ action: "update-bookmark", id: bookmark.id, title: title.value, url: url.value });
+      actions.append(remove, save); row.append(title, url, actions); return row;
+    }));
+  }
   menu.addEventListener("click", (event) => {
-    const action = event.target.closest("button")?.dataset.action;
+    const button = event.target.closest("button");
+    if (!button) return;
+    const local = button.dataset.local;
+    if (local) {
+      menu.hidden = true;
+      if (local === "find") openFind();
+      else { renderManager(); togglePopover(manager, byId("menu-button")); }
+      return;
+    }
+    const action = button.dataset.action;
     if (!action) return;
     menu.hidden = true;
     void run({ action });
   });
+  byId("manager-add").addEventListener("click", () => {
+    void run({ action: "add-bookmark", title: byId("manager-new-title").value, url: byId("manager-new-url").value })
+      .then(() => { byId("manager-new-title").value = ""; byId("manager-new-url").value = ""; });
+  });
+  findInput.addEventListener("input", () => void run({ action: "find", value: findInput.value }));
+  findInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") { event.preventDefault(); void run({ action: "find", value: findInput.value, next: true, forward: !event.shiftKey }); }
+    if (event.key === "Escape") closeFind();
+  });
+  byId("find-next").addEventListener("click", () => void run({ action: "find", value: findInput.value, next: true, forward: true }));
+  byId("find-prev").addEventListener("click", () => void run({ action: "find", value: findInput.value, next: true, forward: false }));
+  byId("find-close").addEventListener("click", closeFind);
   byId("manage-extensions").addEventListener("click", () => { extensionsPopover.hidden = true; void run({ action: "manage-extensions" }); });
   address.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && current) { address.value = current.url === "about:blank" ? "" : current.url; address.blur(); }

@@ -62,7 +62,7 @@ function renderer() {
   byId("home-search").addEventListener("submit", (event) => {
     event.preventDefault(); void run({ action: "navigate", value: byId("home-address").value });
   });
-  for (const action of ["back", "forward", "reload", "new", "close-profile"]) {
+  for (const action of ["back", "forward", "reload", "new"]) {
     byId(action).addEventListener("click", () => void run({ action }));
   }
   byId("home-button").addEventListener("click", () => void run({ action: "home" }));

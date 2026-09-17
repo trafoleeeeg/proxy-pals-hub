@@ -135,6 +135,15 @@ async function createProfileBrowser(electron, {
         else await addBookmark({ url: startUrl(url), title: tab?.webContents.getTitle() || "" });
         break;
       }
+      case "save-bookmark": {
+        const url = tab?.webContents.getURL() || tab?.url || "";
+        if (!url || url === "about:blank") { error = "Эту страницу нельзя добавить в закладки"; break; }
+        const saved = getBookmarks().find((item) => item.url === url);
+        const title = String(message.title || tab?.webContents.getTitle() || "").trim().slice(0, 120);
+        if (saved) await updateBookmark({ id: saved.id, title });
+        else await addBookmark({ url: startUrl(url), title });
+        break;
+      }
       case "open-bookmark": {
         const saved = getBookmarks().find((item) => item.id === message.id);
         if (!saved) break;

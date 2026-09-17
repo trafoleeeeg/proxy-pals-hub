@@ -174,7 +174,7 @@ function createProfileRuntime(electron, options = {}) {
     const all = await extensionStore.list().catch(() => []);
     entry.extensionList = all
       .filter((item) => !entry.extensionsLoaded || entry.extensionsLoaded.has(item.id))
-      .map((item) => ({ id: item.id, name: item.name, version: item.version }));
+      .map((item) => ({ id: item.id, name: item.name, version: item.version, enabled: item.enabled !== false, icon: item.icon || "" }));
   }
   function checkConnection(entry) {
     if (entry.checkJob) return entry.checkJob;

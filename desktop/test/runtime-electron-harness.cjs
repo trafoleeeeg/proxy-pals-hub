@@ -278,6 +278,14 @@ if (process.versions.electron) {
     const beforeReload = httpHits.length;
     await shell.webContents.executeJavaScript("document.getElementById('reload').click()");
     await waitUntil(() => httpHits.length > beforeReload && !fresh.webContents.isLoading());
+    await shell.webContents.executeJavaScript("document.getElementById('star').click(); document.getElementById('bookmark-title').value='Локальная закладка'; document.getElementById('bookmark-save').click()");
+    await waitUntil(() => shell.webContents.executeJavaScript("document.querySelectorAll('#bookmarks-bar .bookmark').length").catch(() => 0));
+    const bookmarkState = await shell.webContents.executeJavaScript("({count:document.querySelectorAll('#bookmarks-bar .bookmark').length,hidden:document.getElementById('bookmarks-bar').hidden,title:document.querySelector('#bookmarks-bar .bookmark span')?.textContent})");
+    assert.deepEqual(bookmarkState, { count: 1, hidden: false, title: "Локальная закладка" });
+    await shell.webContents.executeJavaScript("document.getElementById('menu-button').click(); document.querySelector('[data-action=toggle-bookmark-bar]').click()");
+    await waitUntil(() => shell.webContents.executeJavaScript("document.getElementById('bookmarks-bar').hidden").catch(() => false));
+    await shell.webContents.executeJavaScript("document.getElementById('extensions').click()");
+    assert.match(await shell.webContents.executeJavaScript("document.getElementById('extensions-list').textContent"), /Fixture/);
     await navigateFromToolbar("file:///C:/Windows/win.ini");
     await waitUntil(() => !fresh.webContents.isLoading());
     assert.ok(fresh.webContents.getURL().endsWith("/second-page"));
@@ -285,6 +293,8 @@ if (process.versions.electron) {
     await waitUntil(() => runtime.getRunningProfile(ID).tabCount === 2);
     assert.equal(freshContents.isDestroyed(), true);
     assert.equal(runtime.getRunningProfile(ID).state, "running");
+    await shell.webContents.executeJavaScript("document.getElementById('menu-button').click(); document.getElementById('restore-menu').click()");
+    await waitUntil(() => runtime.getRunningProfile(ID).tabCount === 3);
 
     const bad = payload(WRONG); bad.proxy.password = "wrong";
     await assert.rejects(runtime.launchProfileWindow(bad));

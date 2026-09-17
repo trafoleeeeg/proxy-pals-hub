@@ -197,6 +197,7 @@ if (process.versions.electron) {
     const win = profileTabs(ses)[0];
     assert.equal(shell.isVisible(), false);
     shell.show();
+    await shell.webContents.executeJavaScript("window.profileBrowser.command({action:'state'})");
     assert.equal(await win.webContents.executeJavaScript("document.documentElement.dataset.umbraExtension"), "loaded");
     assert.equal(runtime.getRunningProfile(ID).diagnostics.extensions.loaded, 1);
     await extensionStore.remove(extension.id);

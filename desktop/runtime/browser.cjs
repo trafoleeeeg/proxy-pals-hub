@@ -41,6 +41,9 @@ async function createProfileBrowser(electron, {
     minWidth: 600, minHeight: 400, title: name, backgroundColor: "#111217", show: false, autoHideMenuBar: true,
     webPreferences: { session: shellSession, preload: path.join(__dirname, "browser-preload.cjs"), contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, devTools: false },
   });
+  // Разворачиваем скрытое окно заранее, чтобы профиль появился сразу на весь
+  // рабочий экран без заметного скачка из начального размера.
+  shell.maximize();
   const tabs = new Map();
   const shellContents = shell.webContents;
   let activeId;

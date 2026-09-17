@@ -41,6 +41,7 @@ function harness() {
     }
     isDestroyed() { return this.destroyed; }
     show() { this.shown = true; }
+    maximize() { this.maximized = true; }
     focus() { this.focused = true; }
     destroy() { this.destroyed = true; this.emit("closed"); }
     close() { this.emit("close", { preventDefault() {} }); }
@@ -72,6 +73,48 @@ function harness() {
 }
 
 const payload = () => ({ profileId: ID, deviceId: "test-device", name: "Test", lockToken: "test-lock-token", fingerprint: FP, cookies: "[]", cookiesUpdatedAt: null, proxy: null, startUrl: "https://example.test" });
+
+test("profile browser opens maximized before it becomes visible", async () => {
+  const calls = [];
+  class Shell extends EventEmitter {
+    constructor() {
+      super();
+      this.webContents = new EventEmitter();
+      this.contentView = { addChildView() {}, removeChildView() {} };
+      Object.assign(this.webContents, {
+        setWindowOpenHandler() {},
+        loadURL: async () => {},
+        send() {},
+        focus() {},
+      });
+    }
+    maximize() { calls.push("maximize"); }
+    show() { calls.push("show"); }
+    isDestroyed() { return false; }
+    getContentBounds() { return { width: 1920, height: 1080 }; }
+  }
+  const ipcMain = { handle() {}, removeHandler() {} };
+  const { createProfileBrowser } = require("../runtime/browser.cjs");
+  const browser = await createProfileBrowser({
+    BrowserWindow: Shell,
+    WebContentsView: class {},
+    ipcMain,
+    session: { fromPartition: () => ({
+      webRequest: { onBeforeRequest() {} },
+      setPermissionRequestHandler() {},
+      setPermissionCheckHandler() {},
+    }) },
+  }, {
+    name: "Test",
+    fp: FP,
+    partition: `persist:profile-${ID}`,
+    openTab: async () => {},
+    closeProfile: async () => {},
+    show: false,
+  });
+  assert.deepEqual(calls, ["maximize"]);
+  browser.destroy();
+});
 
 test("concurrent launches deduplicate before async work and popup inherits hardened profile settings", async () => {
   const h = harness();

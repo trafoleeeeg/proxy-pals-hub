@@ -76,9 +76,9 @@ function ProfilesWorkspace() {
   const [metadataOpen, setMetadataOpen] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState<FixedColumn[]>(DEFAULT_COLUMNS);
   const [visibleFields, setVisibleFields] = useState<string[]>([]);
-  const profiles = useQuery({ queryKey: ["profiles", ws?.teamId], queryFn: () => listFn({ data: { teamId: ws!.teamId } }), enabled: !!ws, refetchInterval: 20_000 });
-  const proxies = useQuery({ queryKey: ["proxies", ws?.teamId], queryFn: () => proxiesFn({ data: { teamId: ws!.teamId } }), enabled: !!ws });
-  const metadata = useQuery({ queryKey: ["profile-metadata", ws?.teamId], queryFn: () => metadataFn({ data: { teamId: ws!.teamId } }), enabled: !!ws });
+  const profiles = useQuery({ queryKey: ["profiles", ws?.teamId], queryFn: () => { if (!ws) throw new Error("Команда не загружена"); return listFn({ data: { teamId: ws.teamId } }); }, enabled: !!ws, refetchInterval: 20_000 });
+  const proxies = useQuery({ queryKey: ["proxies", ws?.teamId], queryFn: () => { if (!ws) throw new Error("Команда не загружена"); return proxiesFn({ data: { teamId: ws.teamId } }); }, enabled: !!ws });
+  const metadata = useQuery({ queryKey: ["profile-metadata", ws?.teamId], queryFn: () => { if (!ws) throw new Error("Команда не загружена"); return metadataFn({ data: { teamId: ws.teamId } }); }, enabled: !!ws });
   const running = useMemo(() => new Set(runtime.running.map((p) => p.profileId)), [runtime.running]);
   const pending = useMemo(() => new Set([...runtime.pending, ...runtime.busy]), [runtime.pending, runtime.busy]);
   const locked = (id: string) => running.has(id) || pending.has(id) || !!profiles.data?.find((p) => p.id === id)?.lock;
@@ -116,11 +116,11 @@ function ProfilesWorkspace() {
     void perform("create", () => createMany({ data: { teamId: ws.teamId, prefix: bulkForm.prefix, count, folder: bulkForm.folder, fingerprints: Array.from({ length: count }, () => generateFingerprint()) } }), () => setBulkOpen(false));
   }
   function newProfile() { setError(null); setEditing({ name: "Профиль " + ((profiles.data?.length ?? 0) + 1), folder: folder === ALL ? "" : folder, tags: "", notes: "", proxyId: "none", fingerprint: generateFingerprint(), statusId: null, customFields: {} }); }
-  function patchProfile(profile: NonNullable<typeof profiles.data>[number], changes: Partial<Pick<Edit, "name" | "folder" | "notes" | "statusId" | "customFields">>) {
+  function patchProfile(profile: NonNullable<typeof profiles.data>[number], changes: Partial<Pick<Edit, "name" | "folder" | "notes" | "statusId" | "customFields">> & { tags?: string[] }) {
     if (!ws || !owner || locked(profile.id)) return;
     void perform("inline-" + profile.id, () => saveFn({ data: {
       id: profile.id, teamId: ws.teamId, name: changes.name ?? profile.name, folder: changes.folder ?? profile.folder,
-      tags: profile.tags, notes: changes.notes ?? profile.notes, proxyId: profile.proxy_id, fingerprint: profile.fingerprint,
+      tags: changes.tags ?? profile.tags, notes: changes.notes ?? profile.notes, proxyId: profile.proxy_id, fingerprint: profile.fingerprint,
       statusId: changes.statusId === undefined ? profile.status_id : changes.statusId,
       customFields: changes.customFields ?? profile.custom_fields,
     } }));
@@ -175,7 +175,7 @@ function ProfilesWorkspace() {
             {shown("folder") && <TableCell><InlineText value={profile.folder} placeholder="Без папки" disabled={!owner || !!busy || locked(profile.id)} onSave={(value) => patchProfile(profile, { folder: value })} /></TableCell>}
             {shown("status") && <TableCell><Select disabled={!owner || !!busy || locked(profile.id)} value={profile.status_id ?? "none"} onValueChange={(value) => patchProfile(profile, { statusId: value === "none" ? null : value })}><SelectTrigger className="h-7 min-w-32 border-transparent px-2 text-xs shadow-none"><SelectValue placeholder="Без статуса" /></SelectTrigger><SelectContent><SelectItem value="none">Без статуса</SelectItem>{(metadata.data?.statuses ?? []).map((status) => <SelectItem key={status.id} value={status.id}><span className={`rounded border px-1.5 py-0.5 ${statusTone[status.color] ?? statusTone["muted"]}`}>{status.name}</span></SelectItem>)}</SelectContent></Select></TableCell>}
             {shown("proxy") && <TableCell className="max-w-72 text-xs">{profile.proxy_id && !proxy ? <span className="text-warning">Прокси недоступен</span> : <ProfileProxyCell proxy={proxy} ops={proxyOps} />}</TableCell>}
-            {shown("tags") && <TableCell className="max-w-48"><div className="flex flex-wrap gap-1">{profile.tags.map((tag) => <Badge key={tag} variant="outline" className="max-w-40 break-all text-[10px]">{tag}</Badge>)}{!profile.tags.length && <span className="text-muted-foreground">—</span>}</div></TableCell>}
+            {shown("tags") && <TableCell className="max-w-52"><InlineText value={profile.tags.join(", ")} placeholder="Добавить метки" disabled={!owner || !!busy || locked(profile.id)} onSave={(value) => patchProfile(profile, { tags: splitTags(value) })} /></TableCell>}
             {shown("notes") && <TableCell><InlineText value={profile.notes} placeholder="Добавить заметку" multiline disabled={!owner || !!busy || locked(profile.id)} onSave={(notes) => patchProfile(profile, { notes })} /></TableCell>}
             {shownFields.map((field) => <TableCell key={field.id}><InlineText value={profile.custom_fields[field.id] ?? ""} placeholder={field.name} disabled={!owner || !!busy || locked(profile.id)} onSave={(value) => patchProfile(profile, { customFields: { ...profile.custom_fields, [field.id]: value } })} /></TableCell>)}
             {shown("fingerprint") && <TableCell className="max-w-48 text-muted-foreground">{describeFingerprint(profile.fingerprint)}</TableCell>}

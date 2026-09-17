@@ -137,7 +137,7 @@ export const cloneProfile = createServerFn({ method: "POST" })
     await requireProfile(context, data.id, true);
     const { data: src, error } = await context.supabase
       .from("browser_profiles")
-      .select("team_id, name, folder, tags, notes, proxy_id, fingerprint")
+      .select("team_id, name, folder, tags, notes, proxy_id, fingerprint, status_id, custom_fields")
       .eq("id", data.id)
       .single();
     if (error || !src) throw new Error("Профиль не найден");

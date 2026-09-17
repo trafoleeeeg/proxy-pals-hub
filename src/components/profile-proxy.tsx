@@ -105,11 +105,21 @@ export function ProfileProxyCell({ proxy, ops }: { proxy: ProxyRow | undefined; 
   const checking = ops.checkMut.isPending && ops.checkMut.variables === proxy.id;
   const rotating = (ops.rotateMut.isPending && ops.rotateMut.variables === proxy.id) || proxy.rotationStatus === "changing";
   const error = ops.errors[proxy.id] ?? proxy.last_check_error;
-  return <div className="space-y-1">
-    <div className="flex flex-wrap items-center gap-1">
+  return <div className="min-w-56 space-y-1">
+    <div className="flex items-center gap-1">
       <span className="font-medium">{proxy.label}</span>
       <Badge variant="outline" className="text-[10px] uppercase">{proxy.protocol}</Badge>
       {proxy.country && <Badge variant="outline" className="text-[10px]">{proxy.country}</Badge>}
+      <div className="ml-auto flex shrink-0 gap-0.5">
+        <Button variant="ghost" size="icon" className="size-7" title="Проверить соединение" aria-label={"Проверить прокси " + proxy.label}
+          disabled={ops.busy} onClick={() => ops.checkMut.mutate(proxy.id)}>
+          {checking ? <Loader2 className="size-3.5 animate-spin" /> : <Activity className="size-3.5" />}
+        </Button>
+        {proxy.rotationUrlConfigured && <Button variant="ghost" size="icon" className="size-7" title="Сменить IP мобильного прокси" aria-label={"Сменить IP прокси " + proxy.label}
+          disabled={ops.busy || proxy.rotationStatus === "changing"} onClick={() => ops.rotateMut.mutate(proxy.id)}>
+          {rotating ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCw className="size-3.5" />}
+        </Button>}
+      </div>
     </div>
     <div className="mono break-all text-xs text-muted-foreground">{proxyAddress(proxy.host, proxy.port)}</div>
     <div className="flex flex-wrap items-center gap-1">
@@ -130,15 +140,5 @@ export function ProfileProxyCell({ proxy, ops }: { proxy: ProxyRow | undefined; 
     </div>}
     {rotating && <p role="status" className="text-xs text-warning">Меняем IP, ждём подтверждения…</p>}
     {error && <p role="status" className="break-words text-xs text-destructive">{error}</p>}
-    <div className="flex gap-1">
-      <Button variant="ghost" size="icon" title="Проверить соединение" aria-label={"Проверить прокси " + proxy.label}
-        disabled={ops.busy} onClick={() => ops.checkMut.mutate(proxy.id)}>
-        {checking ? <Loader2 className="size-4 animate-spin" /> : <Activity className="size-4" />}
-      </Button>
-      {proxy.rotationUrlConfigured && <Button variant="ghost" size="icon" title="Сменить IP мобильного прокси" aria-label={"Сменить IP прокси " + proxy.label}
-        disabled={ops.busy || proxy.rotationStatus === "changing"} onClick={() => ops.rotateMut.mutate(proxy.id)}>
-        {rotating ? <Loader2 className="size-4 animate-spin" /> : <RotateCw className="size-4" />}
-      </Button>}
-    </div>
   </div>;
 }

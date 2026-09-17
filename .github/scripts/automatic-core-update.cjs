@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
 const assert = require('node:assert/strict');
 const { compare, nextPatch, validateUpdate, workflowSucceeded } = require('./core-update-policy.cjs');
+const { verify: verifyRelease } = require('./verify-core-release.cjs');
 const workflows = ['ci.yml', 'security.yml', 'desktop-windows.yml'];
 const files = ['desktop/package.json', 'desktop/package-lock.json'];
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -30,14 +31,27 @@ async function main() {
   assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), baseSha, 'Main moved; retry from its latest commit');
   const before = JSON.parse(fs.readFileSync(files[0], 'utf8'));
   const oldLock = JSON.parse(fs.readFileSync(files[1], 'utf8'));
+  const release = await api('releases/latest');
+  if (release.tag_name !== 'v' + before.version) {
+    // Recover a tested core PR whose tag build/publication failed transiently.
+    // A normal human release cannot pass the independent bot-PR provenance gate.
+    const tag = 'v' + before.version;
+    let ref;
+    try { ref = await api('git/ref/tags/' + tag); }
+    catch { throw new Error('An application release is pending without an approved core tag; finish that release first'); }
+    await verifyRelease({ api, sha: ref.object.sha, tag, repo });
+    await dispatchAndWait(['desktop-windows.yml'], tag, ref.object.sha, { automatic_release: true });
+    const recovered = await api('releases/tags/' + tag);
+    assert(!recovered.draft && !recovered.prerelease, 'The pending release was not published');
+    summary('Recovered and published [' + tag + '](' + recovered.html_url + ').');
+    return;
+  }
   const metadataResponse = await fetch('https://registry.npmjs.org/electron/latest', { signal: AbortSignal.timeout(30_000) });
   assert(metadataResponse.ok, 'Cannot read the stable Electron release');
   const engine = (await metadataResponse.json()).version;
   if (compare(engine, before.devDependencies.electron) <= 0) {
     summary('Electron ' + before.devDependencies.electron + ' is current. No release needed.'); return;
   }
-  const release = await api('releases/latest');
-  assert.equal(release.tag_name, 'v' + before.version, 'An application release is already pending; finish it first');
   const sinceRelease = await api('compare/' + encodeURIComponent(release.tag_name) + '...' + baseSha);
   assert(sinceRelease.files && sinceRelease.files.length < 300, 'Cannot verify the complete release diff');
   assert(!sinceRelease.files.some((file) => file.filename.startsWith('desktop/') || file.filename === 'src/styles.css'), 'Unreleased desktop changes require a normal release first');

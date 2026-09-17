@@ -105,7 +105,35 @@ export function ProfileProxyCell({ proxy, ops, compact = false }: { proxy: Proxy
   const checking = ops.checkMut.isPending && ops.checkMut.variables === proxy.id;
   const rotating = (ops.rotateMut.isPending && ops.rotateMut.variables === proxy.id) || proxy.rotationStatus === "changing";
   const error = ops.errors[proxy.id] ?? proxy.last_check_error;
-  return <div className={`${compact ? "w-48" : "min-w-56"} space-y-1`}>
+  const dot = checking || rotating ? "bg-warning" : proxy.last_check_ok === true ? "bg-primary" : proxy.last_check_ok === false ? "bg-destructive" : "bg-muted-foreground/50";
+  const hint = [
+    `${proxy.label} · ${proxy.protocol.toUpperCase()}${proxy.country ? " · " + proxy.country : ""}`,
+    proxyAddress(proxy.host, proxy.port),
+    proxy.last_check_ip ? `IP ${proxy.last_check_ip}${proxy.last_check_latency_ms != null ? ` · ${proxy.last_check_latency_ms} мс` : ""}` : "IP не проверялся",
+    proxy.last_checked_at ? `проверено ${relativeTime(proxy.last_checked_at)}` : "",
+    proxy.rotationPreviousIp ? `был ${proxy.rotationPreviousIp}${proxy.rotationNewIp ? " → стал " + proxy.rotationNewIp : ""}` : "",
+    proxy.rotationChangedAt ? `смена IP ${relativeTime(proxy.rotationChangedAt)}` : "",
+    rotating ? "меняем IP, ждём подтверждения" : "",
+    error ?? "",
+  ].filter(Boolean).join("\n");
+
+  if (compact) return <div className="flex min-w-0 items-center gap-1.5" title={hint}>
+    <span className={`size-2 shrink-0 rounded-full ${dot}`} aria-hidden />
+    <span className="min-w-0 flex-1 truncate">
+      <span className="font-medium">{proxy.label}</span>
+      <span className="mono ml-1 text-muted-foreground">{proxy.last_check_ip ?? proxyAddress(proxy.host, proxy.port)}</span>
+    </span>
+    <Button variant="ghost" size="icon" className="size-6 shrink-0" title="Проверить соединение" aria-label={"Проверить прокси " + proxy.label}
+      disabled={ops.busy} onClick={() => ops.checkMut.mutate(proxy.id)}>
+      {checking ? <Loader2 className="size-3.5 animate-spin" /> : <Activity className="size-3.5" />}
+    </Button>
+    {proxy.rotationUrlConfigured && <Button variant="ghost" size="icon" className="size-6 shrink-0" title="Сменить IP мобильного прокси" aria-label={"Сменить IP прокси " + proxy.label}
+      disabled={ops.busy || proxy.rotationStatus === "changing"} onClick={() => ops.rotateMut.mutate(proxy.id)}>
+      {rotating ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCw className="size-3.5" />}
+    </Button>}
+  </div>;
+
+  return <div className="min-w-56 space-y-1">
     <div className="flex items-center gap-1">
       <span className="font-medium">{proxy.label}</span>
       <Badge variant="outline" className="text-[10px] uppercase">{proxy.protocol}</Badge>

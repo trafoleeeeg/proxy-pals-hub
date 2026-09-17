@@ -129,7 +129,7 @@ function ProfilesWorkspace() {
   }
   const shown = (key: FixedColumn) => visibleColumns.includes(key);
   const shownFields = (metadata.data?.fields ?? []).filter((field) => visibleFields.includes(field.id));
-  const columnCount = 3 + visibleColumns.length + shownFields.length + (owner && editMode ? 1 : 0);
+  const columnCount = 2 + visibleColumns.length + shownFields.length + (owner && editMode ? 2 : 0);
   const occupied = (profiles.data ?? []).filter((profile) => !!profile.lock && !running.has(profile.id)).length;
   const available = Math.max(0, (profiles.data?.length ?? 0) - running.size - occupied);
   const withProxy = (profiles.data ?? []).filter((profile) => !!profile.proxy_id).length;

@@ -176,7 +176,7 @@ test("lifecycle stays global across workspace changes and recovers offline closu
   await expect(page.getByRole("button", { name: "Закрыть Рабочий профиль", exact: true })).toBeEnabled();
   await page.getByRole("combobox", { name: "Рабочая команда", exact: true }).click();
   await page.getByRole("option", { name: "Вторая команда", exact: true }).click();
-  await expect(page.getByRole("checkbox", { name: "Выбрать Профиль второй команды", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Запустить Профиль второй команды", exact: true })).toBeVisible();
   await page.getByRole("link", { name: "Приложение", exact: true }).click();
   await expect(page.getByText("Открыто профилей: 1", { exact: true })).toBeVisible();
   expect(await page.evaluate(() => window.fixture.closedSubscriptions())).toBe(1);

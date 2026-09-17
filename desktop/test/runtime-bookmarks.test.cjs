@@ -86,3 +86,20 @@ test("bookmark favicon persists only for valid size-limited data images", async 
   await store.write(ID, { bookmarks: sanitized, barVisible: true });
   assert.equal((await store.read(ID))[0].favicon, valid);
 });
+
+test("стартовые закладки валидны и одноразовы", async () => {
+  const { defaultBookmarks } = require("../runtime/bookmarks.cjs");
+  const seeded = defaultBookmarks();
+  assert.deepEqual(seeded.map((item) => item.title), [
+    "fb acc", "facebook", "facebook ads", "google ads", "tiktok ads", "tiktok", "gmail почта",
+  ]);
+  for (const item of seeded) assert.match(item.url, /^https:\/\//);
+
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "umbra-bookmarks-seed-"));
+  const store = createBookmarkStore({ safeStorage, userData });
+  assert.equal((await store.readState(ID)).stored, false);
+  await store.write(ID, { bookmarks: [], barVisible: true });
+  const after = await store.readState(ID);
+  assert.equal(after.stored, true);
+  assert.deepEqual(after.bookmarks, []);
+});

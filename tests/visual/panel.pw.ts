@@ -72,8 +72,7 @@ test("folders can be cleared and deletion requires confirmation with recoverable
   await page.getByRole("button", { name: "Применить" }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   expect(await calls(page, "bulkUpdateProfiles")).toEqual([{ teamId: "team-a", ids: ["p1"], changes: { folder: "" } }]);
-  await page.getByRole("combobox", { name: "Фильтр папки" }).click();
-  await page.getByRole("option", { name: "Без папки", exact: true }).click();
+  await page.getByRole("button", { name: "Без папки", exact: true }).click();
   await expect(page.locator("tbody tr")).toHaveCount(2);
   await page.getByRole("checkbox", { name: "Выбрать видимые профили" }).check();
   await page.getByRole("button", { name: "Удалить выбранные профили", exact: true }).click();
@@ -93,6 +92,7 @@ test("folders can be cleared and deletion requires confirmation with recoverable
 
 test("cookie import and JSON/Netscape downloads use the actual dialog", async ({ page }, info) => {
   await openProfiles(page);
+  await page.getByRole("button", { name: "Редактировать", exact: true }).click();
   await page.getByRole("button", { name: /^Cookies Очень/ }).click();
   await fit(page, '[role="dialog"]');
   await capture(page, info, "cookies-long-name");
@@ -215,6 +215,7 @@ test("update status persists through navigation and installation waits for profi
 
 test("locks block destructive edits and cookie replacement while export stays available", async ({ page }, info) => {
   await openProfiles(page, "locked");
+  await page.getByRole("button", { name: "Редактировать", exact: true }).click();
   await expect(page.getByRole("button", { name: "Изменить Рабочий профиль", exact: true })).toBeDisabled();
   await page.getByRole("checkbox", { name: "Выбрать Рабочий профиль", exact: true }).check();
   await page.getByRole("button", { name: "Удалить выбранные профили", exact: true }).click();

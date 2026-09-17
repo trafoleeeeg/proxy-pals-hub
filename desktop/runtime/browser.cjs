@@ -44,8 +44,9 @@ async function createProfileBrowser(electron, {
     webPreferences: { session: shellSession, preload: path.join(__dirname, "browser-preload.cjs"), contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, devTools: false },
   });
   // Разворачиваем скрытое окно заранее, чтобы профиль появился сразу на весь
-  // рабочий экран без заметного скачка из начального размера.
-  shell.maximize();
+  // рабочий экран без заметного скачка из начального размера. В фоновом режиме
+  // maximize пропускается: некоторые Linux window manager отображают окно.
+  if (show) shell.maximize();
   const tabs = new Map();
   let tabOrder = [];
   const recentlyClosed = [];

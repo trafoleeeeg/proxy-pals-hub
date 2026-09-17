@@ -292,6 +292,12 @@ export type Database = {
           password_enc: string | null
           port: number
           protocol: Database["public"]["Enums"]["proxy_protocol"]
+          rotation_changed_at: string | null
+          rotation_last_error: string | null
+          rotation_previous_ip: string | null
+          rotation_requested_at: string | null
+          rotation_status: string
+          rotation_url_enc: string | null
           team_id: string
           updated_at: string
           username: string | null
@@ -312,6 +318,12 @@ export type Database = {
           password_enc?: string | null
           port: number
           protocol?: Database["public"]["Enums"]["proxy_protocol"]
+          rotation_changed_at?: string | null
+          rotation_last_error?: string | null
+          rotation_previous_ip?: string | null
+          rotation_requested_at?: string | null
+          rotation_status?: string
+          rotation_url_enc?: string | null
           team_id: string
           updated_at?: string
           username?: string | null
@@ -332,6 +344,12 @@ export type Database = {
           password_enc?: string | null
           port?: number
           protocol?: Database["public"]["Enums"]["proxy_protocol"]
+          rotation_changed_at?: string | null
+          rotation_last_error?: string | null
+          rotation_previous_ip?: string | null
+          rotation_requested_at?: string | null
+          rotation_status?: string
+          rotation_url_enc?: string | null
           team_id?: string
           updated_at?: string
           username?: string | null

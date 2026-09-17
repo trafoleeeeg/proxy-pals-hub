@@ -106,7 +106,9 @@ function AppShell() {
           className={"flex items-center justify-center gap-3 rounded-md px-2 py-2 text-sm md:justify-start " + (active ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground")}>
           <Icon className={"size-4 shrink-0 " + (active ? "text-primary" : "")} /><span className="hidden md:inline">{item.label}</span>
         </Link>;
-      })}</nav>
+      })}
+        {(pathname === "/app" || pathname === "/app/") && <FoldersNav />}
+      </nav>
       <div className="border-t border-sidebar-border p-2 md:p-3">
         <div className="hidden min-w-0 space-y-2 md:block">
           <p className="truncate text-xs">{ws?.email ?? ""}</p>

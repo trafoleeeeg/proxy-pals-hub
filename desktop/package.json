@@ -29,6 +29,8 @@
       "package.json",
       "main.cjs",
       "extensions.cjs",
+      "crx.cjs",
+      "extension-source.cjs",
       {
         "from": "../src",
         "to": "theme",

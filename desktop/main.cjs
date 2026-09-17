@@ -68,12 +68,28 @@ function createWindow() {
     if (!isWebUrl(url) || new URL(url).origin !== APP_ORIGIN) event.preventDefault();
   });
   window.webContents.on("will-attach-webview", (event) => event.preventDefault());
-  const loadPanel = async () => {
+  const splashStatus = (text) => {
+    if (window.isDestroyed()) return;
+    const safe = JSON.stringify(String(text));
+    window.webContents
+      .executeJavaScript(`(()=>{const el=document.getElementById("umbra-status");if(el)el.textContent=${safe};})()`)
+      .catch(() => {});
+  };
+  const loadPanel = async (attempt = 0) => {
     // Заставка показывается сразу, пока панель грузится по сети.
-    try { await window.loadFile(path.join(__dirname, "splash.html")); } catch { /* заставка не критична */ }
+    if (attempt === 0) {
+      try { await window.loadFile(path.join(__dirname, "splash.html")); } catch { /* заставка не критична */ }
+    } else {
+      splashStatus("Соединение нестабильно, пробуем ещё раз…");
+    }
     try { await window.loadURL(APP_URL); }
     catch {
       if (window.isDestroyed() || quitting) return;
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        if (window.isDestroyed() || quitting) return;
+        return void loadPanel(attempt + 1);
+      }
       const result = await dialog.showMessageBox(window, {
         type: "error", title: "Umbra", message: "Не удалось загрузить панель",
         detail: "Проверьте подключение к интернету. Локальные данные профилей сохранены.",
@@ -83,6 +99,7 @@ function createWindow() {
       else window.close();
     }
   };
+
   window.on("close", (event) => {
     if (!quitting && listRunningProfiles().length) { event.preventDefault(); app.quit(); }
   });

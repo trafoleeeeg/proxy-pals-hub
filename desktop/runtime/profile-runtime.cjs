@@ -2,6 +2,7 @@ const { profileId, startUrl, revision } = require("./validation.cjs");
 const { createProfileBrowser } = require("./browser.cjs");
 const { createRuntimeProxy, blockSession } = require("./proxy.cjs");
 const { createCookieStore, initializeCookies, canonicalCookies } = require("./cookies.cjs");
+const { createTabStore, sanitizeTabs } = require("./tabs.cjs");
 const { normalizeFingerprint, applyFingerprint } = require("./fingerprint.cjs");
 
 function createProfileRuntime(electron, options = {}) {
@@ -12,7 +13,9 @@ function createProfileRuntime(electron, options = {}) {
   const profiles = new Map();
   let shuttingDown = false;
   let store;
+  let tabs;
   const cookieStore = () => store ||= options.cookieStore || createCookieStore({ safeStorage, userData: app.getPath("userData") });
+  const tabStore = () => tabs ||= options.tabStore || createTabStore({ safeStorage, userData: app.getPath("userData") });
   const extensionStore = options.extensionStore;
 
   function status(entry) {
@@ -95,6 +98,7 @@ function createProfileRuntime(electron, options = {}) {
 
   function unwatchCookies(entry) {
     clearTimeout(entry.cookieTimer);
+    clearTimeout(entry.tabTimer);
     clearInterval(entry.checkpointTimer);
     if (entry.cookieChanged) entry.ses.cookies.removeListener("changed", entry.cookieChanged);
   }
@@ -166,10 +170,13 @@ function createProfileRuntime(electron, options = {}) {
     });
     win.on("closed", () => {
       entry.windows.delete(win);
+      if (!entry.closingRequested) recordTabs(entry);
       if (!entry.windows.size && entry.state === "running" && !entry.closingRequested) {
         closeProfileWindow(entry.profileId).catch(() => { entry.lastError = "Profile close failed; local data retained"; });
       }
     });
+    win.webContents.on("did-navigate", () => recordTabs(entry));
+    win.webContents.on("did-navigate-in-page", () => recordTabs(entry));
     win.webContents.on("will-navigate", (event, target) => {
       try { startUrl(typeof target === "string" ? target : target.url, { allowBlank: true }); }
       catch { event.preventDefault(); }
@@ -264,7 +271,13 @@ function createProfileRuntime(electron, options = {}) {
         const extensionResult = await extensionStore.loadIntoSession(entry.ses, entry.extensionsLoaded);
         entry.extensionErrors = extensionResult.errors;
       }
-      await makeWindow(entry, url, true);
+      const saved = await tabStore().read(id).catch(() => ({ tabs: [], activeIndex: 0 }));
+      const plan = url !== "about:blank" ? [url] : (saved.tabs.length ? saved.tabs : ["about:blank"]);
+      await makeWindow(entry, plan[0], true);
+      for (const extra of plan.slice(1)) await makeWindow(entry, extra).catch(() => {});
+      const restoredTabs = [...entry.windows];
+      const focusTab = restoredTabs[url !== "about:blank" ? 0 : Math.min(saved.activeIndex, restoredTabs.length - 1)];
+      if (focusTab && !focusTab.isDestroyed()) focusTab.show?.();
         entry.state = "running";
         watchCookies(entry);
         entry.browser?.publish?.();
@@ -314,6 +327,7 @@ function createProfileRuntime(electron, options = {}) {
       for (const win of entry.windows) {
         if (!win.isDestroyed() && win.webContents.debugger.isAttached()) await win.webContents.debugger.sendCommand("Emulation.setScriptExecutionDisabled", { value: true });
       }
+      await persistTabs(entry).catch(() => {});
       const result = entry.cookiesUpdatedAt ? await snapshot(entry) : { profileId: entry.profileId, lockToken: entry.lockToken, deviceId: entry.deviceId, cookies: null, cookiesUpdatedAt: null };
       if (typeof entry.onClosed === "function") await entry.onClosed(result);
       const extensionApi = entry.ses?.extensions || entry.ses;

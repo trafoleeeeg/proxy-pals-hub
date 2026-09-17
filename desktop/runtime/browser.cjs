@@ -66,7 +66,7 @@ async function createProfileBrowser(electron, {
     const bookmarks = getBookmarks();
     shell.webContents.send("umbra-runtime:state", { name, activeId, error, home: isHome(active()), info: getInfo(),
       bookmarks, bookmarkBarVisible: getBookmarkBarVisible(), extensions: getExtensions(), bookmarked: bookmarks.some((item) => item.url === currentUrl),
-      canRestoreTab: recentlyClosed.length > 0,
+      canRestoreTab: recentlyClosed.length > 0, find: active()?.find || null,
       tabs: tabOrder.map((id) => tabs.get(id)).filter((tab) => tab && !tab.isDestroyed()).map((tab) => ({
       id: tab.id, url: tab.webContents.getURL() || tab.url, title: tab.webContents.getTitle(), favicon: tab.favicon || "", error: tab.error,
       loading: tab.webContents.isLoading(), canGoBack: tab.webContents.navigationHistory.canGoBack(), canGoForward: tab.webContents.navigationHistory.canGoForward(),
@@ -294,7 +294,26 @@ async function createProfileBrowser(electron, {
       });
       tabs.set(tab.id, tab); tabOrder.push(tab.id); shell.contentView.addChildView(view); select(tab);
       wc.on("before-input-event", shortcuts);
-      wc.on("did-navigate", (_event, url) => { tab.url = url; publish(); });
+      wc.on("found-in-page", (_event, result) => { tab.find = { active: result.activeMatchOrdinal, total: result.matches }; publish(); });
+      wc.on("context-menu", (_event, params) => {
+        const Menu = electron.Menu;
+        if (!Menu?.buildFromTemplate || shell.isDestroyed()) return;
+        const items = [];
+        if (params.linkURL) {
+          items.push({ label: "Открыть ссылку в новой вкладке", click: () => { void openTab(params.linkURL); } });
+          items.push({ label: "Копировать адрес ссылки", click: () => electron.clipboard?.writeText?.(params.linkURL) });
+          items.push({ type: "separator" });
+        }
+        if (params.isEditable) items.push({ label: "Вырезать", role: "cut" }, { label: "Копировать", role: "copy" }, { label: "Вставить", role: "paste" }, { label: "Выделить всё", role: "selectAll" }, { type: "separator" });
+        else if (params.selectionText) items.push({ label: "Копировать", role: "copy" }, { type: "separator" });
+        items.push(
+          { label: "Назад", enabled: wc.navigationHistory.canGoBack(), click: () => wc.navigationHistory.goBack() },
+          { label: "Вперёд", enabled: wc.navigationHistory.canGoForward(), click: () => wc.navigationHistory.goForward() },
+          { label: "Обновить", click: () => wc.reload() },
+        );
+        try { Menu.buildFromTemplate(items).popup({ window: shell }); } catch { /* меню необязательно */ }
+      });
+      wc.on("did-navigate", (_event, url) => { tab.url = url; tab.find = null; publish(); });
       wc.on("page-favicon-updated", async (_event, icons) => {
         const source = Array.isArray(icons) ? icons.find((icon) => /^https?:/i.test(icon)) : "";
         if (!source) return;

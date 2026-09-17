@@ -62,7 +62,9 @@ function createExtensionStore(getUserData, deps = {}) {
       try {
         const manifest = JSON.parse(await fs.readFile(path.join(entry.path, "manifest.json"), "utf8"));
         if (manifest && typeof manifest.name === "string" && typeof manifest.version === "string") {
-          valid.push({ id: entry.id, name: manifest.name, version: manifest.version, source: entry.source?.kind, url: entry.source?.pageUrl });
+          const item = { id: entry.id, name: manifest.name, version: manifest.version };
+          if (entry.source) { item.source = entry.source.kind; item.url = entry.source.pageUrl; }
+          valid.push(item);
         }
       } catch { /* a removed folder is omitted from the UI */ }
     }

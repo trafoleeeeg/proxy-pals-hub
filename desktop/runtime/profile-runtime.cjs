@@ -15,8 +15,10 @@ function createProfileRuntime(electron, options = {}) {
   let shuttingDown = false;
   let store;
   let tabStoreRef;
+  let bookmarkStoreRef;
   const cookieStore = () => store ||= options.cookieStore || createCookieStore({ safeStorage, userData: app.getPath("userData") });
   const tabStore = () => tabStoreRef ||= options.tabStore || createTabStore({ safeStorage, userData: app.getPath("userData") });
+  const bookmarkStore = () => bookmarkStoreRef ||= options.bookmarkStore || createBookmarkStore({ safeStorage, userData: app.getPath("userData") });
   const extensionStore = options.extensionStore;
 
   function status(entry) {

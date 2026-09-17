@@ -67,11 +67,12 @@ function createProfileRuntime(electron, options = {}) {
   }
 
   function persistTabs(entry) {
-    const tabs = openTabUrls(entry);
+    const state = entry.browser?.getTabSnapshot?.();
+    const tabs = state?.tabs || openTabUrls(entry);
     if (!tabs.length) return Promise.resolve();
     entry.tabQueue = (entry.tabQueue || Promise.resolve())
       .catch(() => {})
-      .then(() => tabStore().write(entry.profileId, tabs, 0))
+      .then(() => tabStore().write(entry.profileId, tabs, state?.activeIndex || 0))
       .catch(() => { entry.lastError = "Tab snapshot failed"; });
     return entry.tabQueue;
   }
@@ -140,16 +141,29 @@ function createProfileRuntime(electron, options = {}) {
         return pending;
       },
       closeProfile: () => closeProfileWindow(entry.profileId),
+      onTabsChanged: () => recordTabs(entry),
       getBookmarks: () => entry.bookmarks || [],
+      getBookmarkBarVisible: () => entry.bookmarkBarVisible !== false,
       getExtensions: () => entry.extensionList || [],
       addBookmark: (bookmark) => saveBookmarks(entry, [...(entry.bookmarks || []), { ...bookmark }]),
+      updateBookmark: (bookmark) => saveBookmarks(entry, (entry.bookmarks || []).map((item) => item.id === bookmark.id ? { ...item, title: bookmark.title } : item)),
       removeBookmark: (id) => saveBookmarks(entry, (entry.bookmarks || []).filter((item) => item.id !== id)),
+      reorderBookmarks: (ids) => {
+        const byId = new Map((entry.bookmarks || []).map((item) => [item.id, item]));
+        return saveBookmarks(entry, ids.map((id) => byId.get(id)).filter(Boolean));
+      },
+      setBookmarkBarVisible: (visible) => {
+        entry.bookmarkBarVisible = !!visible;
+        return saveBookmarks(entry, entry.bookmarks || []);
+      },
+      openExtensionManager: () => { electron.app?.emit?.("umbra:manage-extensions"); },
     };
   }
 
   function saveBookmarks(entry, list) {
     entry.bookmarkQueue = (entry.bookmarkQueue || Promise.resolve()).catch(() => {}).then(async () => {
-      entry.bookmarks = await bookmarkStore().write(entry.profileId, list);
+      const state = await bookmarkStore().write(entry.profileId, { bookmarks: list, barVisible: entry.bookmarkBarVisible !== false });
+      entry.bookmarks = state.bookmarks;
       return entry.bookmarks;
     }).catch(() => { entry.lastError = "Bookmark save failed"; return entry.bookmarks || []; });
     return entry.bookmarkQueue;
@@ -295,7 +309,9 @@ function createProfileRuntime(electron, options = {}) {
         entry.extensionErrors = extensionResult.errors;
         await reloadExtensionList(entry);
       }
-      entry.bookmarks = await bookmarkStore().read(id).catch(() => []);
+       const bookmarkState = await (bookmarkStore().readState?.(id) || bookmarkStore().read(id).then((bookmarks) => ({ bookmarks, barVisible: true }))).catch(() => ({ bookmarks: [], barVisible: true }));
+       entry.bookmarks = bookmarkState.bookmarks;
+       entry.bookmarkBarVisible = bookmarkState.barVisible;
       const saved = await tabStore().read(id).catch(() => ({ tabs: [], activeIndex: 0 }));
       const plan = url !== "about:blank" ? [url] : (saved.tabs.length ? saved.tabs : ["about:blank"]);
       await makeWindow(entry, plan[0], true);

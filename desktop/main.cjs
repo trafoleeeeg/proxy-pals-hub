@@ -225,6 +225,13 @@ else {
       },
     });
     createWindow();
+    app.on("umbra:manage-extensions", () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+      void mainWindow.loadURL(`${APP_ORIGIN}/app/desktop`).catch(() => {});
+    });
     if (app.isPackaged) {
       void updates.check();
       updateTimer = setInterval(() => void updates.check(), 15 * 60 * 1000);

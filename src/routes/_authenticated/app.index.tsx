@@ -46,7 +46,7 @@ export const Route = createFileRoute("/_authenticated/app/")({
 });
 type Edit = { id?: string; name: string; folder: string; tags: string; notes: string; proxyId: string; fingerprint: Fingerprint; statusId: string | null; customFields: Record<string, string> };
 const ALL = ALL_FOLDERS;
-const DEFAULT_COLUMNS: FixedColumn[] = ["folder", "status", "proxy", "tags", "notes", "fingerprint", "updated"];
+const DEFAULT_COLUMNS: FixedColumn[] = ["folder", "status", "proxy", "tags", "notes", "fingerprint", "updated", "created"];
 const dateTime = (value: string) => new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
 
 export function ProfilesPage() {
@@ -159,7 +159,7 @@ function ProfilesWorkspace() {
         {owner && <><Button variant="outline" disabled={!!busy} onClick={() => { setError(null); setBulkOpen(true); }}><Plus className="size-4" />Создать пачкой</Button><Button disabled={!!busy} onClick={newProfile}><Plus className="size-4" />Новый профиль</Button></>}
       </div>
     </div>
-    <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-6">
+    <div className="flex w-full flex-wrap gap-2">
       {[
         { label: "Всего", value: profiles.data?.length ?? 0, detail: "профилей", icon: CircleUserRound, tone: "text-foreground" },
         ...(metadata.data?.statuses ?? []).map((status) => ({
@@ -171,9 +171,10 @@ function ProfilesWorkspace() {
         })),
         { label: "Занято", value: occupied, detail: "другим пользователем", icon: LockKeyhole, tone: "text-warning" },
         { label: "С прокси", value: withProxy, detail: `${(profiles.data?.length ?? 0) - withProxy} без прокси`, icon: Globe2, tone: "text-primary" },
-      ].map((stat) => <div key={stat.label} className="flex min-h-20 items-center gap-3 rounded-md border border-border bg-card px-3 py-2">
+      ].map((stat) => <div key={stat.label} title={stat.detail} className="flex min-w-32 flex-1 items-center gap-2 rounded-md border border-border bg-card px-3 py-2">
         <stat.icon className={`size-4 shrink-0 ${stat.tone}`} />
-        <div className="min-w-0"><p className="truncate text-xs text-muted-foreground">{stat.label}</p><p className={`text-xl font-semibold leading-6 ${stat.tone}`}>{stat.value}</p><p className="truncate text-[11px] text-muted-foreground">{stat.detail}</p></div>
+        <p className="min-w-0 truncate text-xs text-muted-foreground">{stat.label}</p>
+        <p className={`ml-auto text-lg font-semibold leading-5 tabular-nums ${stat.tone}`}>{stat.value}</p>
       </div>)}
     </div>
     <div className="relative"><Search className="pointer-events-none absolute left-3 top-2.5 size-4 text-muted-foreground" /><Input aria-label="Поиск профилей" placeholder="Поиск по профилям" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" /></div>

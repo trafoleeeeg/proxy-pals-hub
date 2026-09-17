@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Globe2, CircleUserRound, Copy, Cookie, FolderInput, LockKeyhole, Pencil, Play, Plus, RefreshCw, Search, Settings2, Square, Trash2, UserPlus, X } from "lucide-react";
+import { CheckCircle2, Globe2, MoreVertical, CircleUserRound, Copy, Cookie, FolderInput, LockKeyhole, Pencil, Play, Plus, RefreshCw, Search, Settings2, Square, Trash2, UserPlus, X } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "@/lib/useWorkspace";
 import { ALL_FOLDERS, useProfileFolder } from "@/lib/useProfileFolder";
@@ -14,7 +14,8 @@ import { ProfileFingerprint } from "@/components/profile-fingerprint";
 import { ProfileCookies } from "@/components/profile-cookies";
 import { ProfileBulkDialog, type BulkAction } from "@/components/profile-bulk";
 import { ProfileProxyCell, useProxyOps } from "@/components/profile-proxy";
-import { ColumnSettings, InlineText, MetadataManager, NotesCell, ResizableHead, useColumnWidths, type FixedColumn } from "@/components/profile-table-tools";
+import { ColumnSettings, InlineText, MetadataManager, NotesCell, ResizableHead, StatusCell, statusTone, useColumnWidths, type FixedColumn } from "@/components/profile-table-tools";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { createProfileField, createProfileStatus, listProfileMetadata } from "@/lib/profile-metadata.functions";
 import { fingerprintError, profileFingerprintPayload, splitTags, toggleVisibleSelection } from "@/components/profile-model";
 import { Button } from "@/components/ui/button";
@@ -42,7 +43,6 @@ type Edit = { id?: string; name: string; folder: string; tags: string; notes: st
 const ALL = ALL_FOLDERS;
 const DEFAULT_COLUMNS: FixedColumn[] = ["folder", "status", "proxy", "tags", "notes", "fingerprint", "updated"];
 const dateTime = (value: string) => new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
-const statusTone: Record<string, string> = { primary: "border-primary/40 bg-primary/10 text-primary", success: "border-success/40 bg-success/10 text-success", warning: "border-warning/40 bg-warning/10 text-warning", destructive: "border-destructive/40 bg-destructive/10 text-destructive", muted: "border-border bg-muted text-muted-foreground" };
 
 export function ProfilesPage() {
   const { data: ws } = useWorkspace();
@@ -127,10 +127,14 @@ function ProfilesWorkspace() {
       customFields: changes.customFields ?? profile.custom_fields,
     } }));
   }
+  async function createStatus(name: string, color: string) {
+    if (!ws || !owner) return;
+    await perform("metadata", () => addStatusFn({ data: { teamId: ws.teamId, name, color: color as "primary" | "success" | "warning" | "destructive" | "muted" } }), () => void qc.invalidateQueries({ queryKey: ["profile-metadata"] }));
+  }
   const shown = (key: FixedColumn) => visibleColumns.includes(key);
   const cellStyle = (key: string) => (widths[key] ? { width: widths[key], minWidth: widths[key], maxWidth: widths[key] } : undefined);
   const shownFields = (metadata.data?.fields ?? []).filter((field) => visibleFields.includes(field.id));
-  const columnCount = 2 + visibleColumns.length + shownFields.length + (owner && editMode ? 2 : 0);
+  const columnCount = 2 + visibleColumns.length + shownFields.length + (owner ? 2 : 0);
   const occupied = (profiles.data ?? []).filter((profile) => !!profile.lock && !running.has(profile.id)).length;
   const available = Math.max(0, (profiles.data?.length ?? 0) - running.size - occupied);
   const withProxy = (profiles.data ?? []).filter((profile) => !!profile.proxy_id).length;
@@ -163,7 +167,7 @@ function ProfilesWorkspace() {
       </div>)}
     </div>
     <div className="relative"><Search className="pointer-events-none absolute left-3 top-2.5 size-4 text-muted-foreground" /><Input aria-label="Поиск профилей" placeholder="Поиск по профилям" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" /></div>
-    {selected.length > 0 && owner && editMode && <div className="flex flex-wrap items-center gap-2 border-y border-border bg-secondary/40 px-2 py-2">
+    {selected.length > 0 && owner && <div className="flex flex-wrap items-center gap-2 border-y border-border bg-secondary/40 px-2 py-2">
       <span className="text-sm">Выбрано: {selected.length}{selected.length > visibleSelected ? " · скрыто фильтром: " + (selected.length - visibleSelected) : ""}</span>
       <Button variant="ghost" size="icon" title="Снять выбор" aria-label="Снять выбор" onClick={() => setSelected([])}><X className="size-4" /></Button>
       <Button variant="outline" size="sm" disabled={!!busy} onClick={() => setAction({ mode: "edit", ids: [...selected] })}><Pencil className="size-4" />Изменить</Button>
@@ -175,9 +179,9 @@ function ProfilesWorkspace() {
     {profiles.isError && <p role="alert" className="text-sm text-destructive">Не удалось обновить профили. <Button size="sm" variant="outline" onClick={() => profiles.refetch()}>Повторить</Button></p>}
     {proxies.isError && <p role="alert" className="text-sm text-warning">Прокси недоступны. <Button size="sm" variant="outline" onClick={() => proxies.refetch()}>Повторить</Button></p>}
     <div className="min-h-[480px] overflow-hidden border-y border-border">
-      <div className="min-w-0 overflow-x-auto"><Table className="min-w-max table-fixed text-xs"><TableHeader className="sticky top-0 z-10 bg-background"><TableRow>
-        {owner && editMode && <TableHead className="w-10"><Checkbox aria-label="Выбрать видимые профили" disabled={!rows.length} checked={visibleSelected === 0 ? false : visibleSelected === rows.length ? true : "indeterminate"} onCheckedChange={(checked) => setSelected((current) => toggleVisibleSelection(current, visibleIds, checked === true))} /></TableHead>}
-        <TableHead className="w-12">Запуск</TableHead><ResizableHead columnKey="name" widths={widths} setWidth={setWidth} className="min-w-28">Название</ResizableHead>{shown("folder") && <ResizableHead columnKey="folder" widths={widths} setWidth={setWidth} className="min-w-24">Папка</ResizableHead>}{shown("status") && <ResizableHead columnKey="status" widths={widths} setWidth={setWidth} className="min-w-24">Статус</ResizableHead>}{shown("proxy") && <ResizableHead columnKey="proxy" widths={widths} setWidth={setWidth} className="min-w-44">Прокси</ResizableHead>}{shown("tags") && <ResizableHead columnKey="tags" widths={widths} setWidth={setWidth} className="min-w-24">Метки</ResizableHead>}{shown("notes") && <ResizableHead columnKey="notes" widths={widths} setWidth={setWidth} className="min-w-32">Заметки</ResizableHead>}{shownFields.map((field) => <ResizableHead columnKey={"field-" + field.id} widths={widths} setWidth={setWidth} className="min-w-24" key={field.id}>{field.name}</ResizableHead>)}{shown("fingerprint") && <ResizableHead columnKey="fingerprint" widths={widths} setWidth={setWidth} className="min-w-32">Отпечаток</ResizableHead>}{shown("updated") && <ResizableHead columnKey="updated" widths={widths} setWidth={setWidth} className="min-w-28">Изменён</ResizableHead>}{shown("created") && <ResizableHead columnKey="created" widths={widths} setWidth={setWidth} className="min-w-28">Создан</ResizableHead>}{owner && editMode && <TableHead className="sticky right-0 bg-background text-right">Редактирование</TableHead>}
+      <div className="scroll-thin min-w-0 overflow-x-auto"><Table className="min-w-max table-fixed text-xs"><TableHeader className="sticky top-0 z-10 bg-background"><TableRow>
+        {owner && <TableHead className="w-10"><Checkbox aria-label="Выбрать видимые профили" disabled={!rows.length} checked={visibleSelected === 0 ? false : visibleSelected === rows.length ? true : "indeterminate"} onCheckedChange={(checked) => setSelected((current) => toggleVisibleSelection(current, visibleIds, checked === true))} /></TableHead>}
+        <TableHead className="w-12">Запуск</TableHead>{owner && <TableHead className="w-10"><span className="sr-only">Действия</span></TableHead>}<ResizableHead columnKey="name" widths={widths} setWidth={setWidth} className="min-w-28">Название</ResizableHead>{shown("folder") && <ResizableHead columnKey="folder" widths={widths} setWidth={setWidth} className="min-w-24">Папка</ResizableHead>}{shown("status") && <ResizableHead columnKey="status" widths={widths} setWidth={setWidth} className="min-w-24">Статус</ResizableHead>}{shown("proxy") && <ResizableHead columnKey="proxy" widths={widths} setWidth={setWidth} className="min-w-44">Прокси</ResizableHead>}{shown("tags") && <ResizableHead columnKey="tags" widths={widths} setWidth={setWidth} className="min-w-24">Метки</ResizableHead>}{shown("notes") && <ResizableHead columnKey="notes" widths={widths} setWidth={setWidth} className="min-w-32">Заметки</ResizableHead>}{shownFields.map((field) => <ResizableHead columnKey={"field-" + field.id} widths={widths} setWidth={setWidth} className="min-w-24" key={field.id}>{field.name}</ResizableHead>)}{shown("fingerprint") && <ResizableHead columnKey="fingerprint" widths={widths} setWidth={setWidth} className="min-w-32">Отпечаток</ResizableHead>}{shown("updated") && <ResizableHead columnKey="updated" widths={widths} setWidth={setWidth} className="min-w-28">Изменён</ResizableHead>}{shown("created") && <ResizableHead columnKey="created" widths={widths} setWidth={setWidth} className="min-w-28">Создан</ResizableHead>}
       </TableRow></TableHeader><TableBody>
         {profiles.isPending && <TableRow><TableCell colSpan={columnCount} className="py-8 text-center" role="status">Загрузка профилей…</TableCell></TableRow>}
         {rows.map((profile) => {
@@ -185,11 +189,17 @@ function ProfilesWorkspace() {
           const processing = runtime.busy.includes(profile.id);
           const proxy = proxies.data?.find((p) => p.id === profile.proxy_id);
           return <TableRow key={profile.id} data-state={selected.includes(profile.id) ? "selected" : undefined}>
-            {owner && editMode && <TableCell><Checkbox aria-label={"Выбрать " + profile.name} checked={selected.includes(profile.id)} onCheckedChange={(v) => setSelected((current) => toggleVisibleSelection(current, [profile.id], v === true))} /></TableCell>}
+            {owner && <TableCell><Checkbox aria-label={"Выбрать " + profile.name} checked={selected.includes(profile.id)} onCheckedChange={(v) => setSelected((current) => toggleVisibleSelection(current, [profile.id], v === true))} /></TableCell>}
             <TableCell><Button variant={active ? "outline" : "default"} size="icon" title={active ? "Закрыть профиль" : runtime.available ? "Запустить профиль" : "Запуск в приложении Windows"} aria-label={(active ? "Закрыть " : "Запустить ") + profile.name} disabled={!runtime.available || !runtime.ready || runtime.restoring || processing || (!active && locked(profile.id))} onClick={() => { void (active ? runtime.stop(profile.id) : runtime.start(profile.id)).catch((e: Error) => toast.error(e.message)); }}>{processing ? <RefreshCw className="size-4 animate-spin" /> : active ? <Square className="size-4" /> : <Play className="size-4" />}</Button></TableCell>
+            {owner && <TableCell><DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="size-7" title="Действия с профилем" aria-label={"Действия " + profile.name}><MoreVertical className="size-4" /></Button></DropdownMenuTrigger><DropdownMenuContent align="start" className="w-44">
+              <DropdownMenuItem disabled={!!busy || locked(profile.id)} onSelect={() => { setError(null); setEditing({ id: profile.id, name: profile.name, folder: profile.folder, tags: profile.tags.join(", "), notes: profile.notes, proxyId: profile.proxy_id ?? "none", fingerprint: profile.fingerprint, statusId: profile.status_id, customFields: profile.custom_fields }); }}><Pencil className="size-4" />Изменить</DropdownMenuItem>
+              <DropdownMenuItem disabled={!!busy} onSelect={() => void perform(profile.id, () => cloneFn({ data: { id: profile.id } }))}><Copy className="size-4" />Создать копию</DropdownMenuItem>
+              <DropdownMenuItem disabled={!!busy} onSelect={() => setCookiesId(profile.id)}><Cookie className="size-4" />Cookies</DropdownMenuItem>
+              <DropdownMenuItem disabled={!!busy || locked(profile.id)} onSelect={() => setAction({ mode: "delete", ids: [profile.id] })}><Trash2 className="size-4 text-destructive" />Удалить</DropdownMenuItem>
+            </DropdownMenuContent></DropdownMenu></TableCell>}
             <TableCell style={cellStyle("name")} className="max-w-36">{editMode ? <InlineText value={profile.name} placeholder="Название" disabled={!owner || !!busy || locked(profile.id)} onSave={(name) => patchProfile(profile, { name })} /> : <span className="block truncate font-medium" title={profile.name}>{profile.name}</span>}</TableCell>
             {shown("folder") && <TableCell style={cellStyle("folder")} className="max-w-28">{editMode ? <InlineText value={profile.folder} placeholder="Без папки" disabled={!owner || !!busy || locked(profile.id)} onSave={(value) => patchProfile(profile, { folder: value })} /> : <span className="block truncate text-muted-foreground" title={profile.folder || "Без папки"}>{profile.folder || "—"}</span>}</TableCell>}
-            {shown("status") && <TableCell style={cellStyle("status")} className="max-w-32">{editMode ? <Select disabled={!owner || !!busy || locked(profile.id)} value={profile.status_id ?? "none"} onValueChange={(value) => patchProfile(profile, { statusId: value === "none" ? null : value })}><SelectTrigger className="h-7 w-28 border-transparent px-2 text-xs shadow-none"><SelectValue placeholder="Без статуса" /></SelectTrigger><SelectContent><SelectItem value="none">Без статуса</SelectItem>{(metadata.data?.statuses ?? []).map((status) => <SelectItem key={status.id} value={status.id}><span className={`rounded border px-1.5 py-0.5 ${statusTone[status.color] ?? statusTone["muted"]}`}>{status.name}</span></SelectItem>)}</SelectContent></Select> : (() => { const status = metadata.data?.statuses.find((item) => item.id === profile.status_id); return status ? <span className={`inline-flex max-w-28 truncate rounded border px-1.5 py-0.5 ${statusTone[status.color] ?? statusTone["muted"]}`}>{status.name}</span> : <span className="text-muted-foreground">—</span>; })()}</TableCell>}
+                        {shown("status") && <TableCell style={cellStyle("status")} className="max-w-32"><StatusCell statusId={profile.status_id} statuses={metadata.data?.statuses ?? []} disabled={!owner || !!busy || locked(profile.id)} canCreate={!!owner} onSelect={(statusId) => patchProfile(profile, { statusId })} onCreate={createStatus} /></TableCell>}
             {shown("proxy") && <TableCell style={cellStyle("proxy")} className="max-w-56 text-xs">{profile.proxy_id && !proxy ? <span className="text-warning">Прокси недоступен</span> : <ProfileProxyCell proxy={proxy} ops={proxyOps} compact />}</TableCell>}
             {shown("tags") && <TableCell style={cellStyle("tags")} className="max-w-36">{editMode ? <InlineText value={profile.tags.join(", ")} placeholder="Добавить метки" disabled={!owner || !!busy || locked(profile.id)} onSave={(value) => patchProfile(profile, { tags: splitTags(value) })} /> : <span className="block truncate text-muted-foreground" title={profile.tags.join(", ")}>{profile.tags.join(", ") || "—"}</span>}</TableCell>}
             {shown("notes") && <TableCell style={cellStyle("notes")} className="max-w-40"><NotesCell value={profile.notes} disabled={!owner || !!busy || locked(profile.id)} onSave={(notes) => patchProfile(profile, { notes })} /></TableCell>}
@@ -197,12 +207,6 @@ function ProfilesWorkspace() {
             {shown("fingerprint") && <TableCell style={cellStyle("fingerprint")} className="max-w-40"><span className="block truncate text-muted-foreground" title={describeFingerprint(profile.fingerprint)}>{describeFingerprint(profile.fingerprint)}</span></TableCell>}
             {shown("updated") && <TableCell className="whitespace-nowrap text-muted-foreground">{dateTime(profile.updated_at)}</TableCell>}
             {shown("created") && <TableCell className="whitespace-nowrap text-muted-foreground">{dateTime(profile.created_at)}</TableCell>}
-            {owner && editMode && <TableCell className="sticky right-0 bg-background"><div className="flex items-center justify-end gap-1">
-                <Button variant="ghost" size="icon" title="Изменить профиль" aria-label={"Изменить " + profile.name} disabled={!!busy || locked(profile.id)} onClick={() => { setError(null); setEditing({ id: profile.id, name: profile.name, folder: profile.folder, tags: profile.tags.join(", "), notes: profile.notes, proxyId: profile.proxy_id ?? "none", fingerprint: profile.fingerprint, statusId: profile.status_id, customFields: profile.custom_fields }); }}><Pencil className="size-4" /></Button>
-                <Button variant="ghost" size="icon" title="Создать копию" aria-label={"Копия " + profile.name} disabled={!!busy} onClick={() => perform(profile.id, () => cloneFn({ data: { id: profile.id } }))}><Copy className="size-4" /></Button>
-                <Button variant="ghost" size="icon" title="Cookies" aria-label={"Cookies " + profile.name} disabled={!!busy} onClick={() => setCookiesId(profile.id)}><Cookie className="size-4" /></Button>
-                <Button variant="ghost" size="icon" title="Удалить профиль" aria-label={"Удалить " + profile.name} disabled={!!busy || locked(profile.id)} onClick={() => setAction({ mode: "delete", ids: [profile.id] })}><Trash2 className="size-4 text-destructive" /></Button>
-            </div></TableCell>}
           </TableRow>;
         })}
         {!profiles.isPending && !profiles.isError && !rows.length && <TableRow><TableCell colSpan={columnCount} className="py-10 text-center text-sm text-muted-foreground">{search || folder !== ALL ? "По выбранным фильтрам профилей нет" : "Профилей пока нет"}</TableCell></TableRow>}

@@ -226,6 +226,44 @@ export type Database = {
           },
         ]
       }
+      profile_bookmarks: {
+        Row: {
+          created_at: string
+          id: string
+          position: number
+          profile_id: string
+          title: string
+          updated_at: string
+          url: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          position?: number
+          profile_id: string
+          title?: string
+          updated_at?: string
+          url: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          position?: number
+          profile_id?: string
+          title?: string
+          updated_at?: string
+          url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "profile_bookmarks_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "browser_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profile_field_definitions: {
         Row: {
           created_at: string

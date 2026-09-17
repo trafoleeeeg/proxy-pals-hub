@@ -154,11 +154,16 @@ function ProfilesWorkspace() {
         {owner && <><Button variant="outline" disabled={!!busy} onClick={() => { setError(null); setBulkOpen(true); }}><Plus className="size-4" />Создать пачкой</Button><Button disabled={!!busy} onClick={newProfile}><Plus className="size-4" />Новый профиль</Button></>}
       </div>
     </div>
-    <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
+    <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-6">
       {[
         { label: "Всего", value: profiles.data?.length ?? 0, detail: "профилей", icon: CircleUserRound, tone: "text-foreground" },
-        { label: "Открыто", value: running.size, detail: "на этом компьютере", icon: Play, tone: "text-primary" },
-        { label: "Свободно", value: available, detail: "можно запускать", icon: CheckCircle2, tone: "text-success" },
+        ...(metadata.data?.statuses ?? []).map((status) => ({
+          label: status.name,
+          value: (profiles.data ?? []).filter((profile) => profile.status_id === status.id).length,
+          detail: "профилей со статусом",
+          icon: Tag,
+          tone: statusColor[status.color] ?? "text-foreground",
+        })),
         { label: "Занято", value: occupied, detail: "другим пользователем", icon: LockKeyhole, tone: "text-warning" },
         { label: "С прокси", value: withProxy, detail: `${(profiles.data?.length ?? 0) - withProxy} без прокси`, icon: Globe2, tone: "text-primary" },
       ].map((stat) => <div key={stat.label} className="flex min-h-20 items-center gap-3 rounded-md border border-border bg-card px-3 py-2">

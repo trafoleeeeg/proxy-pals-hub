@@ -111,6 +111,32 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   errorComponent: ErrorComponent,
 });
 
+/** Заставка видна с первого кадра и исчезает, когда интерфейс готов. */
+function BootScreen() {
+  const [done, setDone] = useState(false);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setDone(true));
+    return () => cancelAnimationFrame(frame);
+  }, []);
+  if (done) return null;
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-3 bg-background"
+    >
+      <span className="flex size-11 items-center justify-center rounded-xl bg-primary text-lg font-bold text-primary-foreground">
+        U
+      </span>
+      <p className="text-sm font-semibold text-foreground">Umbra запускается</p>
+      <span className="h-[3px] w-44 overflow-hidden rounded-full bg-secondary">
+        <span className="block h-full w-2/5 animate-[boot_1.1s_ease-in-out_infinite] rounded-full bg-primary" />
+      </span>
+      <p className="text-xs text-muted-foreground">Загружаем панель и ваши профили…</p>
+    </div>
+  );
+}
+
 function RootShell({ children }: { children: ReactNode }) {
   return (
     <html lang="ru">
@@ -118,6 +144,7 @@ function RootShell({ children }: { children: ReactNode }) {
         <HeadContent />
       </head>
       <body>
+        <BootScreen />
         {children}
         <Scripts />
       </body>

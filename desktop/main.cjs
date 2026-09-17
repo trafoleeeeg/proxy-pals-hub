@@ -69,6 +69,8 @@ function createWindow() {
   });
   window.webContents.on("will-attach-webview", (event) => event.preventDefault());
   const loadPanel = async () => {
+    // Заставка показывается сразу, пока панель грузится по сети.
+    try { await window.loadFile(path.join(__dirname, "splash.html")); } catch { /* заставка не критична */ }
     try { await window.loadURL(APP_URL); }
     catch {
       if (window.isDestroyed() || quitting) return;

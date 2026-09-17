@@ -4,7 +4,7 @@ const { EventEmitter } = require("node:events");
 const { startUrl } = require("./validation.cjs");
 const { browserUrl } = require("./browser-ui.cjs");
 
-const CHROME_HEIGHT = 144;
+const CHROME_HEIGHT = 90;
 const handlers = new WeakMap();
 
 function addressUrl(value) {
@@ -21,6 +21,8 @@ function addressUrl(value) {
 async function createProfileBrowser(electron, {
   name, fp, partition, openTab, closeProfile, getInfo = () => ({}), checkConnection = async () => {}, show = true,
   getBookmarks = () => [], addBookmark = async () => {}, removeBookmark = async () => {}, getExtensions = () => [],
+  updateBookmark = async () => {}, reorderBookmarks = async () => {}, getBookmarkBarVisible = () => true,
+  setBookmarkBarVisible = async () => {}, openExtensionManager = () => {}, onTabsChanged = () => {},
 }) {
   const { BrowserWindow, WebContentsView, session, ipcMain } = electron;
   let registry = handlers.get(ipcMain);
@@ -45,8 +47,12 @@ async function createProfileBrowser(electron, {
   // рабочий экран без заметного скачка из начального размера.
   shell.maximize();
   const tabs = new Map();
+  let tabOrder = [];
+  const recentlyClosed = [];
   const shellContents = shell.webContents;
   let activeId;
+  let chromeHeight = CHROME_HEIGHT;
+  let ready = false;
   let error = "";
   let destroyed = false;
   let commandQueue = Promise.resolve();
@@ -58,9 +64,10 @@ async function createProfileBrowser(electron, {
     const currentUrl = active()?.webContents.getURL() || active()?.url || "";
     const bookmarks = getBookmarks();
     shell.webContents.send("umbra-runtime:state", { name, activeId, error, home: isHome(active()), info: getInfo(),
-      bookmarks, extensions: getExtensions(), bookmarked: bookmarks.some((item) => item.url === currentUrl),
-      tabs: [...tabs.values()].filter((tab) => !tab.isDestroyed()).map((tab) => ({
-      id: tab.id, url: tab.webContents.getURL() || tab.url, title: tab.webContents.getTitle(), error: tab.error,
+      bookmarks, bookmarkBarVisible: getBookmarkBarVisible(), extensions: getExtensions(), bookmarked: bookmarks.some((item) => item.url === currentUrl),
+      canRestoreTab: recentlyClosed.length > 0,
+      tabs: tabOrder.map((id) => tabs.get(id)).filter((tab) => tab && !tab.isDestroyed()).map((tab) => ({
+      id: tab.id, url: tab.webContents.getURL() || tab.url, title: tab.webContents.getTitle(), favicon: tab.favicon || "", error: tab.error,
       loading: tab.webContents.isLoading(), canGoBack: tab.webContents.navigationHistory.canGoBack(), canGoForward: tab.webContents.navigationHistory.canGoForward(),
     })) });
   }
@@ -68,7 +75,7 @@ async function createProfileBrowser(electron, {
     if (shell.isDestroyed()) return;
     const { width, height } = shell.getContentBounds();
     for (const tab of tabs.values()) {
-      tab.view.setBounds({ x: 0, y: CHROME_HEIGHT, width: Math.max(1, width), height: Math.max(1, height - CHROME_HEIGHT) });
+      tab.view.setBounds({ x: 0, y: chromeHeight, width: Math.max(1, width), height: Math.max(1, height - chromeHeight) });
       tab.view.setVisible(tab.id === activeId && !isHome(tab));
     }
   }
@@ -77,6 +84,16 @@ async function createProfileBrowser(electron, {
     activeId = tab.id; layout();
     if (isHome(tab)) shell.webContents.focus(); else tab.webContents.focus();
     publish();
+    if (ready) onTabsChanged();
+  }
+  function closeTab(target) {
+    if (!target || target.isDestroyed()) return;
+    const url = target.webContents.getURL() || target.url;
+    if (url && url !== "about:blank") {
+      recentlyClosed.push({ url, title: target.webContents.getTitle() || "" });
+      if (recentlyClosed.length > 10) recentlyClosed.shift();
+    }
+    target.emit("close", { preventDefault() {} });
   }
   async function command(message) {
     if (destroyed || !message || typeof message !== "object") return;
@@ -92,9 +109,18 @@ async function createProfileBrowser(electron, {
         const target = tabs.get(message.id || activeId);
         if (target) {
           if (tabs.size === 1) await openTab("about:blank");
-          target.emit("close", { preventDefault() {} });
+          closeTab(target);
         }
         break;
+      }
+      case "reopen-closed": {
+        const closed = recentlyClosed.pop();
+        if (closed) await openTab(closed.url);
+        break;
+      }
+      case "reorder-tabs": {
+        if (!Array.isArray(message.ids) || message.ids.length !== tabOrder.length || new Set(message.ids).size !== tabOrder.length || message.ids.some((id) => !tabs.has(id))) throw new Error("Invalid tab order");
+        tabOrder = [...message.ids]; if (ready) onTabsChanged(); break;
       }
       case "close-profile": await closeProfile(); break;
       case "duplicate": {
@@ -110,6 +136,15 @@ async function createProfileBrowser(electron, {
         else await addBookmark({ url: startUrl(url), title: tab?.webContents.getTitle() || "" });
         break;
       }
+      case "save-bookmark": {
+        const url = tab?.webContents.getURL() || tab?.url || "";
+        if (!url || url === "about:blank") { error = "Эту страницу нельзя добавить в закладки"; break; }
+        const saved = getBookmarks().find((item) => item.url === url);
+        const title = String(message.title || tab?.webContents.getTitle() || "").trim().slice(0, 120);
+        if (saved) await updateBookmark({ id: saved.id, title });
+        else await addBookmark({ url: startUrl(url), title });
+        break;
+      }
       case "open-bookmark": {
         const saved = getBookmarks().find((item) => item.id === message.id);
         if (!saved) break;
@@ -118,6 +153,15 @@ async function createProfileBrowser(electron, {
         break;
       }
       case "remove-bookmark": await removeBookmark(message.id); break;
+      case "update-bookmark": await updateBookmark({ id: message.id, title: String(message.title || "").slice(0, 120) }); break;
+      case "reorder-bookmarks": if (Array.isArray(message.ids)) await reorderBookmarks(message.ids); break;
+      case "toggle-bookmark-bar": await setBookmarkBarVisible(!getBookmarkBarVisible()); break;
+      case "manage-extensions": openExtensionManager(); break;
+      case "chrome-height": {
+        const next = Number(message.value);
+        if (Number.isFinite(next) && next >= 80 && next <= 180) { chromeHeight = Math.round(next); layout(); }
+        break;
+      }
       case "navigate": if (tab) { tab.error = ""; void tab.loadURL(addressUrl(message.value)).catch(() => {}); } break;
       case "back": if (tab?.webContents.navigationHistory.canGoBack()) tab.webContents.navigationHistory.goBack(); break;
       case "forward": if (tab?.webContents.navigationHistory.canGoForward()) tab.webContents.navigationHistory.goForward(); break;
@@ -143,16 +187,18 @@ async function createProfileBrowser(electron, {
     let action;
     if (input.control || input.meta) {
       if (key === "l") { event.preventDefault(); focusAddress(); return; }
-      if (key === "t") action = "new";
       if (key === "w") action = "close-tab";
+      if (key === "t" && input.shift) action = "reopen-closed";
+      else if (key === "t") action = "new";
       if (key === "r") action = "reload";
       if (key === "d") action = "bookmark";
+      if (key === "b" && input.shift) action = "toggle-bookmark-bar";
       if (/^[1-9]$/.test(key)) {
-        event.preventDefault(); const all = [...tabs.values()];
+        event.preventDefault(); const all = tabOrder.map((id) => tabs.get(id)).filter(Boolean);
         select(key === "9" ? all.at(-1) : all[Number(key) - 1]); return;
       }
       if (key === "tab") {
-        event.preventDefault(); const all = [...tabs.values()];
+        event.preventDefault(); const all = tabOrder.map((id) => tabs.get(id)).filter(Boolean);
         select(all[(all.indexOf(active()) + (input.shift ? -1 : 1) + all.length) % all.length]); return;
       }
     }
@@ -203,20 +249,37 @@ async function createProfileBrowser(electron, {
           finally { publish(); }
         },
       });
-      tabs.set(tab.id, tab); shell.contentView.addChildView(view); select(tab);
+      tabs.set(tab.id, tab); tabOrder.push(tab.id); shell.contentView.addChildView(view); select(tab);
       wc.on("before-input-event", shortcuts);
       wc.on("did-navigate", (_event, url) => { tab.url = url; publish(); });
+      wc.on("page-favicon-updated", async (_event, icons) => {
+        const source = Array.isArray(icons) ? icons.find((icon) => /^https?:/i.test(icon)) : "";
+        if (!source) return;
+        try {
+          const response = await wc.session.fetch(source);
+          const type = response.headers.get("content-type") || "image/png";
+          const bytes = Buffer.from(await response.arrayBuffer());
+          if (!type.startsWith("image/") || bytes.length > 256 * 1024 || wc.isDestroyed()) return;
+          tab.favicon = `data:${type};base64,${bytes.toString("base64")}`; publish();
+        } catch { /* favicon is optional and never falls back outside the profile session */ }
+      });
       for (const event of ["did-start-loading", "did-stop-loading", "did-navigate", "did-navigate-in-page", "page-title-updated"]) wc.on(event, publish);
       wc.on("did-fail-load", (_event, code, _description, _url, mainFrame) => { if (mainFrame && code !== -3) { tab.error = "Page could not be loaded. Check the address or proxy connection."; publish(); } });
       wc.on("render-process-gone", () => { tab.error = "This tab stopped. Reload to try again."; publish(); });
       wc.on("destroyed", () => {
         tabs.delete(tab.id);
+        tabOrder = tabOrder.filter((id) => id !== tab.id);
         if (!shell.isDestroyed()) shell.contentView.removeChildView(view);
-        if (activeId === tab.id) select([...tabs.values()].at(-1));
-        tab.emit("closed"); publish();
+        if (activeId === tab.id) select(tabs.get(tabOrder.at(-1)));
+        tab.emit("closed"); publish(); if (ready) onTabsChanged();
       });
       return tab;
     },
+    markReady: () => { ready = true; },
+    getTabSnapshot: () => ({
+      tabs: tabOrder.map((id) => tabs.get(id)).filter((tab) => tab && !tab.isDestroyed()).map((tab) => tab.webContents.getURL() || tab.url || "about:blank"),
+      activeIndex: Math.max(0, tabOrder.indexOf(activeId)),
+    }),
     destroy: () => { if (!shell.isDestroyed()) shell.destroy(); },
   };
 }

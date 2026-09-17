@@ -63,6 +63,18 @@ function createExtensionStore(getUserData, deps = {}) {
         const manifest = JSON.parse(await fs.readFile(path.join(entry.path, "manifest.json"), "utf8"));
         if (manifest && typeof manifest.name === "string" && typeof manifest.version === "string") {
           const item = { id: entry.id, name: manifest.name, version: manifest.version };
+          const icons = manifest.icons && typeof manifest.icons === "object" ? Object.values(manifest.icons) : [];
+          const icon = icons.map(String).at(-1);
+          if (icon && !path.isAbsolute(icon) && !icon.split(/[\\/]/).includes("..")) {
+            try {
+              const iconFile = await fs.readFile(path.join(entry.path, icon));
+              if (iconFile.length <= 256 * 1024) {
+                const extension = path.extname(icon).toLowerCase();
+                const type = extension === ".svg" ? "image/svg+xml" : extension === ".jpg" || extension === ".jpeg" ? "image/jpeg" : "image/png";
+                item.icon = `data:${type};base64,${iconFile.toString("base64")}`;
+              }
+            } catch { /* icon is optional */ }
+          }
           if (entry.source) { item.source = entry.source.kind; item.url = entry.source.pageUrl; }
           valid.push(item);
         }

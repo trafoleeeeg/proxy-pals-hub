@@ -7,10 +7,12 @@ export const PROXY_LIMITS = {
   label: 200,
   host: 253,
   credentialBytes: 1024,
+  rotationUrl: 2048,
 } as const;
 
 export type ProxyProtocol = "http" | "https" | "socks5";
 export type PasswordAction = "preserve" | "replace" | "clear";
+export type RotationAction = "preserve" | "replace" | "clear";
 export type ProxyInput = {
   id?: string | undefined;
   teamId: string;
@@ -21,6 +23,8 @@ export type ProxyInput = {
   username?: string | undefined;
   password?: string | undefined;
   passwordAction?: PasswordAction | undefined;
+  rotationUrl?: string | undefined;
+  rotationAction?: RotationAction | undefined;
   country?: string | undefined;
 };
 
@@ -43,6 +47,8 @@ export type ProxyCheckResult = {
   error?: string | undefined;
 };
 
+export type ProxyRotationStatus = "not_configured" | "ready" | "changing" | "success" | "error";
+
 const uuid = z.string().uuid();
 const ip = z.string().ip();
 const ipv6 = z.string().ip({ version: "v6" });
@@ -62,6 +68,30 @@ function string(value: unknown, max: number, message: string, optional = false):
     throw new Error(message);
   }
   return value;
+}
+
+/** Rotation links are provider endpoints, never local URLs or javascript/data URLs. */
+export function validateRotationUrl(value: unknown, optional = true): string {
+  if (value === undefined && optional) return "";
+  const raw = string(value, PROXY_LIMITS.rotationUrl, "Ссылка смены IP слишком длинная", optional).trim();
+  if (!raw) {
+    if (!optional) throw new Error("Укажите ссылку смены IP");
+    return "";
+  }
+  try {
+    const url = new URL(raw);
+    const host = url.hostname.toLowerCase().replace(/\.$/, "");
+    if (url.protocol !== "https:" || !host || url.username || url.password ||
+      host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal") ||
+      host.startsWith("[") || /^127\./.test(host) || /^0\./.test(host) ||
+      /^100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host) ||
+      /^(?:198\.(?:18|19)\.|2[2-5]\d\.)/.test(host) ||
+      /^169\.254\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) ||
+      /^172\.(?:1[6-9]|2\d|3[01])\./.test(host)) throw new Error();
+    return url.toString();
+  } catch {
+    throw new Error("Ссылка смены IP должна быть безопасным HTTPS-адресом без логина и пароля");
+  }
 }
 
 export function validateProxyTeam(value: unknown): { teamId: string } {
@@ -155,7 +185,14 @@ export function validateProxyInput(value: unknown): ProxyInput & { passwordActio
   if ((action === "replace" && !fields.password) || (action !== "replace" && fields.password)) {
     throw new Error("Выберите замену пароля и укажите новый пароль либо сохраните или удалите текущий");
   }
-  return { ...fields, ...team, ...(id ? { id } : {}), passwordAction: action };
+  const rotationAction = data["rotationAction"] ?? (id ? "preserve" : "clear");
+  if (rotationAction !== "preserve" && rotationAction !== "replace" && rotationAction !== "clear") {
+    throw new Error("Некорректное действие со ссылкой смены IP");
+  }
+  const rotationUrl = validateRotationUrl(data["rotationUrl"]);
+  if (rotationAction === "replace" && !rotationUrl) throw new Error("Укажите ссылку смены IP");
+  if (rotationAction !== "replace" && rotationUrl) throw new Error("Выберите замену ссылки смены IP или сохраните текущую");
+  return { ...fields, ...team, ...(id ? { id } : {}), passwordAction: action, rotationAction, ...(rotationUrl ? { rotationUrl } : {}) };
 }
 
 export function parseProxyLine(line: string, defaultProtocol: ProxyProtocol = "http"): ProxyFields {

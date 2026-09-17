@@ -3,7 +3,7 @@ const path = require("node:path");
 const { autoUpdater } = require("electron-updater");
 const {
   launchProfileWindow, closeProfileWindow, snapshotProfileCookies,
-  listRunningProfiles, closeAllProfiles,
+  listRunningProfiles, closeAllProfiles, refreshExtensions, extensionStore,
 } = require("./launcher.cjs");
 const { checkProxy } = require("./proxy-check.cjs");
 const { isTrustedSender, isWebUrl } = require("./ipc-policy.cjs");
@@ -134,6 +134,24 @@ handle("umbra:update-state", () => updates?.getState() || { state: "none" });
 handle("umbra:check-update", () => updates.check());
 handle("umbra:download-update", () => updates.download());
 handle("umbra:install-update", () => updates.install());
+handle("umbra:extensions-list", async () => ({ ok: true, extensions: await extensionStore.list() }));
+// Clipboard reads only happen on the trusted panel's explicit paste action.
+handle("umbra:proxy-clipboard", () => require("electron").clipboard.readText().slice(0, 1_048_576));
+handle("umbra:extensions-add", async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: "Выберите распакованное расширение",
+    properties: ["openDirectory"],
+  });
+  if (result.canceled || !result.filePaths[0]) return { ok: false, error: "Добавление расширения отменено" };
+  const extension = await extensionStore.addFromDirectory(result.filePaths[0]);
+  const failures = await refreshExtensions();
+  return { ok: true, extension, failures };
+});
+handle("umbra:extensions-remove", async (id) => {
+  await extensionStore.remove(id);
+  await refreshExtensions();
+  return { ok: true };
+});
 
 if (!app.requestSingleInstanceLock()) app.quit();
 else {

@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState } from "react";
-import { Copy, Cookie, FolderInput, Pencil, Play, Plus, RefreshCw, Square, Trash2, UserPlus, X } from "lucide-react";
+import { Activity, CircleCheck, Copy, Cookie, FolderInput, Globe2, LockKeyhole, Pencil, Play, Plus, RefreshCw, Square, Trash2, UserPlus, X } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "@/lib/useWorkspace";
 import { listProfiles, saveProfile, cloneProfile, bulkCreateProfiles } from "@/lib/profiles.functions";
@@ -22,6 +22,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export const Route = createFileRoute("/_authenticated/app/")({ component: ProfilesPage });
 type Edit = { id?: string; name: string; folder: string; tags: string; notes: string; proxyId: string; fingerprint: Fingerprint };
@@ -55,14 +56,27 @@ function ProfilesWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const profiles = useQuery({ queryKey: ["profiles", ws?.teamId], queryFn: () => listFn({ data: { teamId: ws!.teamId } }), enabled: !!ws, refetchInterval: 20_000 });
   const proxies = useQuery({ queryKey: ["proxies", ws?.teamId], queryFn: () => proxiesFn({ data: { teamId: ws!.teamId } }), enabled: !!ws });
-  const running = new Set(runtime.running.map((p) => p.profileId));
-  const pending = new Set([...runtime.pending, ...runtime.busy]);
+  const running = useMemo(() => new Set(runtime.running.map((p) => p.profileId)), [runtime.running]);
+  const pending = useMemo(() => new Set([...runtime.pending, ...runtime.busy]), [runtime.pending, runtime.busy]);
   const locked = (id: string) => running.has(id) || pending.has(id) || !!profiles.data?.find((p) => p.id === id)?.lock;
   const folders = useMemo(() => [...new Set((profiles.data ?? []).map((p) => p.folder).filter(Boolean))].sort(), [profiles.data]);
   const rows = (profiles.data ?? []).filter((p) => (folder === ALL || p.folder === folder) && (p.name + " " + p.folder + " " + p.tags.join(" ")).toLowerCase().includes(search.toLowerCase()));
   const visibleIds = rows.map((p) => p.id);
   const visibleSelected = visibleIds.filter((id) => selected.includes(id)).length;
   const cookiesProfile = profiles.data?.find((p) => p.id === cookiesId);
+  const overview = useMemo(() => {
+    const all = profiles.data ?? [];
+    const runningCount = all.filter((profile) => running.has(profile.id)).length;
+    const lockedCount = all.filter((profile) => profile.lock && !running.has(profile.id)).length;
+    const proxyCount = all.filter((profile) => !!profile.proxy_id).length;
+    return [
+      { label: "Всего профилей", value: all.length, hint: "в рабочем пространстве", icon: Activity, tone: "text-foreground" },
+      { label: "Открыто сейчас", value: runningCount, hint: "на этом компьютере", icon: CircleCheck, tone: "text-primary" },
+      { label: "Свободно", value: all.filter((profile) => !profile.lock && !running.has(profile.id) && !pending.has(profile.id)).length, hint: "можно запускать", icon: CircleCheck, tone: "text-success" },
+      { label: "Занято", value: lockedCount, hint: "другим пользователем", icon: LockKeyhole, tone: "text-warning" },
+      { label: "С прокси", value: proxyCount, hint: `${Math.max(0, all.length - proxyCount)} без прокси`, icon: Globe2, tone: "text-primary" },
+    ];
+  }, [profiles.data, running, pending]);
   useEffect(() => {
     if (!profiles.data) return;
     const ids = new Set(profiles.data.map((p) => p.id));
@@ -101,6 +115,12 @@ function ProfilesWorkspace() {
       </div>
     </div>
     <p className="text-xs text-muted-foreground">В облаке синхронизируются только cookies. Local Storage остаётся на этом компьютере.</p>
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="Показатели профилей">
+      {overview.map((item) => { const Icon = item.icon; return <Card key={item.label} className="border-border/80 bg-card/70 shadow-none">
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">{item.label}</CardTitle><Icon className={`size-4 ${item.tone}`} /></CardHeader>
+        <CardContent><p className={`text-2xl font-semibold tabular-nums ${item.tone}`}>{item.value}</p><p className="mt-1 text-xs text-muted-foreground">{item.hint}</p></CardContent>
+      </Card>; })}
+    </div>
     <div className="flex flex-wrap gap-2">
       <Input aria-label="Поиск профилей" placeholder="Поиск по названию, папке и меткам" value={search} onChange={(e) => setSearch(e.target.value)} className="min-w-48 flex-1" />
       <Select value={folder === ALL ? "all" : `folder:${folder}`} onValueChange={(value) => setFolder(value === "all" ? ALL : value.slice(7))}><SelectTrigger aria-label="Фильтр папки" className="w-48"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">Все папки</SelectItem><SelectItem value="folder:">Без папки</SelectItem>{folders.map((f) => <SelectItem key={f} value={`folder:${f}`}>{f}</SelectItem>)}</SelectContent></Select>

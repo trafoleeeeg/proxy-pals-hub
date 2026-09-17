@@ -24,6 +24,7 @@ export type RunningProfile = {
   cookiesUpdatedAt?: string | null;
   deviceId?: string | null;
 };
+export type InstalledExtension = { id: string; name: string; version: string };
 
 export type ProfileRuntimeSnapshot = { profileId: string; cookies: string | null; lockToken?: string | null; cookiesUpdatedAt?: string | null; deviceId?: string | null };
 export type ProfileClosed = ProfileRuntimeSnapshot & { snapshotId: string };
@@ -41,6 +42,10 @@ export type UmbraBridge = {
   profileCookies: (profileId: string) => Promise<{ ok: boolean; cookies: string | null } & Partial<ProfileRuntimeSnapshot>>;
   onProfileClosed: (cb: (p: ProfileClosed) => void) => () => void;
   openExternal: (url: string) => Promise<{ ok: boolean }>;
+  listExtensions?: () => Promise<{ ok: boolean; extensions?: InstalledExtension[]; error?: string }>;
+  addExtension?: () => Promise<{ ok: boolean; extension?: InstalledExtension; failures?: number; error?: string }>;
+  removeExtension?: (id: string) => Promise<{ ok: boolean; error?: string }>;
+  readProxyClipboard?: () => Promise<string>;
   checkProxy?: (payload: {
     id: string;
     protocol: string;

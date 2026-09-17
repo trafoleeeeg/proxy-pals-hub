@@ -2,15 +2,16 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useRef, useState } from "react";
-import { Activity, CheckCheck, Loader2, Pencil, Plus, Trash2, Upload } from "lucide-react";
+import { Activity, CheckCheck, ClipboardPaste, Clock3, Link2, Loader2, Pencil, Plus, RotateCw, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "@/lib/useWorkspace";
-import { listProxies, saveProxy, deleteProxy, importProxies, checkProxy, proxyForCheck, recordProxyCheck } from "@/lib/proxies.functions";
+import { listProxies, saveProxy, deleteProxy, importProxies, checkProxy, proxyForCheck, recordProxyCheck, rotateProxyIp } from "@/lib/proxies.functions";
 import {
   PROXY_LIMITS, ProxyCheckQueue, parseProxyPort, performDesktopProxyCheck,
-  proxyAddress, validateProxyInput,
+  proxyAddress, validateProxyInput, normalizeProxyCheck,
 } from "@/lib/proxy-input";
-import type { PasswordAction, ProxyImportIssue, ProxyProtocol } from "@/lib/proxy-input";
+import { confirmRotation } from "@/lib/proxy-rotation";
+import type { PasswordAction, ProxyImportIssue, ProxyProtocol, RotationAction } from "@/lib/proxy-input";
 import { desktop } from "@/lib/desktop";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,11 +27,17 @@ export const Route = createFileRoute("/_authenticated/app/proxies")({ component:
 const emptyForm = {
   id: undefined as string | undefined, label: "", protocol: "http" as ProxyProtocol,
   host: "", port: "", username: "", password: "", country: "",
-  passwordAction: "replace" as PasswordAction,
+  passwordAction: "replace" as PasswordAction, rotationUrl: "", rotationAction: "clear" as RotationAction,
 };
 type ProxyRow = Awaited<ReturnType<typeof listProxies>>[number];
 
-function ProxiesPage() {
+function proxyTime(value: string | null) {
+  if (!value) return "";
+  try { return new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" }).format(new Date(value)); }
+  catch { return ""; }
+}
+
+export function ProxiesPage() {
   const { data: ws } = useWorkspace();
   const qc = useQueryClient();
   const list = useServerFn(listProxies);
@@ -40,6 +47,7 @@ function ProxiesPage() {
   const check = useServerFn(checkProxy);
   const forCheck = useServerFn(proxyForCheck);
   const record = useServerFn(recordProxyCheck);
+  const rotate = useServerFn(rotateProxyIp);
   const [open, setOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
@@ -55,12 +63,24 @@ function ProxiesPage() {
     queryKey: ["proxies", ws?.teamId],
     queryFn: () => list({ data: { teamId: ws!.teamId } }),
     enabled: !!ws?.teamId,
+    refetchInterval: (query) => query.state.data?.some((proxy) => proxy.rotationStatus === "changing") ? 5000 : false,
   });
   const invalidate = () => qc.invalidateQueries({ queryKey: ["proxies"] });
   const teamId = () => {
     if (!ws?.teamId) throw new Error("Команда ещё загружается");
     return ws.teamId;
   };
+  async function pasteImport() {
+    try {
+      const bridge = desktop();
+      const value = bridge?.readProxyClipboard ? await bridge.readProxyClipboard() : await navigator.clipboard.readText();
+      if (!value) { toast.info("Буфер обмена пуст"); return; }
+      if (new TextEncoder().encode(value).length > PROXY_LIMITS.importBytes) throw new Error();
+      setImportText(value);
+      setImportIssues([]);
+      importMut.reset();
+    } catch { toast.error("Не удалось прочитать буфер обмена. Разрешите доступ и повторите"); }
+  }
   const saveMut = useMutation({
     mutationFn: () => {
       const data = validateProxyInput({
@@ -139,13 +159,43 @@ function ProxiesPage() {
     onSettled: async () => { setChecking(new Set()); await invalidate(); },
     onError: () => toast.error("Не удалось выполнить проверку. Проверьте доступ и подключение"),
   });
+  const rotateMut = useMutation({
+    mutationFn: async (id: string) => {
+      const bridge = desktop();
+      if (!bridge?.checkProxy) throw new Error("Смена IP с проверкой доступна в приложении Windows");
+      const selectedTeam = teamId();
+      const target = await forCheck({ data: { id, teamId: selectedTeam } });
+      const probe = async () => {
+        const response = await bridge.checkProxy!(target);
+        if (!response.ok || !response.result) throw new Error("Не удалось проверить прокси в приложении");
+        return normalizeProxyCheck(response.result);
+      };
+      const before = await probe();
+      await record({ data: { id, teamId: selectedTeam, ...before } });
+      if (!before.ok || !before.ip) throw new Error("Текущий IP недоступен. Сначала восстановите подключение к прокси");
+      const request = await rotate({ data: { id, teamId: selectedTeam } });
+      toast.info("Запрос отправлен. Ожидаю новый IP…");
+      void invalidate();
+      return confirmRotation({
+        previousIp: request.previousIp!,
+        probe,
+        record: async (result, final) => {
+          await record({ data: { id, teamId: selectedTeam, ...result, rotationRequestedAt: request.requestedAt, rotationFinal: final } });
+          void invalidate();
+        },
+      });
+    },
+    onSuccess: (result) => toast.success("Новый IP подтверждён: " + result.ip),
+    onError: (error: Error) => toast.error(error.message),
+    onSettled: () => invalidate(),
+  });
 
   const edit = (proxy?: ProxyRow) => {
     saveMut.reset();
     setForm(proxy ? {
       id: proxy.id, label: proxy.label, protocol: proxy.protocol, host: proxy.host,
       port: String(proxy.port), username: proxy.username ?? "", password: "",
-      country: proxy.country ?? "", passwordAction: "preserve",
+      country: proxy.country ?? "", passwordAction: "preserve", rotationUrl: "", rotationAction: "preserve",
     } : emptyForm);
     setOpen(true);
   };
@@ -161,7 +211,7 @@ function ProxiesPage() {
         <h1 className="text-2xl font-semibold">Прокси</h1>
         {owner && <div className="ml-auto flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => checkMut.mutate((proxies.data ?? []).map((p) => p.id))}
-            disabled={checkMut.isPending || !proxies.data?.length}>
+            disabled={checkMut.isPending || rotateMut.isPending || !proxies.data?.length}>
             {checkMut.isPending ? <Loader2 className="size-4 animate-spin" /> : <CheckCheck className="size-4" />}
             Проверить все
           </Button>
@@ -179,6 +229,7 @@ function ProxiesPage() {
       }}>
         <DialogContent className="max-h-[90dvh] overflow-y-auto">
           <DialogHeader><DialogTitle>Импорт прокси</DialogTitle></DialogHeader>
+          <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm text-muted-foreground">Вставьте список строкой или целым столбцом.</p><Button type="button" variant="outline" size="sm" onClick={() => { void pasteImport(); }}><ClipboardPaste className="size-4" />Вставить из буфера</Button></div>
           <Label htmlFor="proxy-import-protocol">Тип по умолчанию</Label>
           <Select value={importProtocol} disabled={importMut.isPending}
             onValueChange={(value) => { setImportProtocol(value as ProxyProtocol); setImportIssues([]); }}>
@@ -260,6 +311,20 @@ function ProxiesPage() {
                   required={!!form.id && form.passwordAction === "replace"}
                   onChange={(event) => setForm({ ...form, password: event.target.value })} />
               </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="proxy-rotation-url" className="flex items-center gap-2"><Link2 className="size-4" />Ссылка смены IP для мобильного прокси</Label>
+                {form.id && <Select value={form.rotationAction} onValueChange={(value) => setForm({ ...form, rotationAction: value as RotationAction, rotationUrl: "" })}>
+                  <SelectTrigger aria-label="Действие со ссылкой смены IP"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="preserve">Сохранить текущую</SelectItem><SelectItem value="replace">Заменить ссылку</SelectItem><SelectItem value="clear">Удалить ссылку</SelectItem></SelectContent>
+                </Select>}
+                {!form.id && <Select value={form.rotationAction} onValueChange={(value) => setForm({ ...form, rotationAction: value as RotationAction, rotationUrl: "" })}>
+                  <SelectTrigger aria-label="Настройка ссылки смены IP"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="clear">Не настраивать</SelectItem><SelectItem value="replace">Добавить ссылку</SelectItem></SelectContent>
+                </Select>}
+                <Input id="proxy-rotation-url" type="url" value={form.rotationUrl} disabled={form.rotationAction !== "replace"} maxLength={2048} autoComplete="off" placeholder="https://provider.example/rotate?token=…"
+                  onChange={(event) => setForm({ ...form, rotationUrl: event.target.value, rotationAction: event.target.value ? "replace" : form.rotationAction })} />
+                <p className="text-xs text-muted-foreground">Ссылка хранится зашифрованной. После запроса Umbra проверит прокси и покажет старый и новый IP.</p>
+              </div>
             </fieldset>
             {saveMut.isError && <p role="alert" className="mt-4 text-sm text-destructive">{saveMut.error.message}</p>}
             <DialogFooter className="mt-4"><Button type="submit" disabled={saveMut.isPending || !ws?.teamId}>
@@ -273,7 +338,7 @@ function ProxiesPage() {
         <Table>
           <TableHeader><TableRow>
             <TableHead>Название</TableHead><TableHead>Тип</TableHead><TableHead>Адрес</TableHead>
-            <TableHead>Страна</TableHead><TableHead>Проверка</TableHead><TableHead><span className="sr-only">Действия</span></TableHead>
+            <TableHead>Страна</TableHead><TableHead>Проверка и IP</TableHead><TableHead>Смена IP</TableHead><TableHead><span className="sr-only">Действия</span></TableHead>
           </TableRow></TableHeader>
           <TableBody>
             {(proxies.data ?? []).map((proxy) => <TableRow key={proxy.id}>
@@ -293,25 +358,41 @@ function ProxiesPage() {
                   {checkErrors[proxy.id] || proxy.last_check_error}
                 </p>}
               </TableCell>
+              <TableCell className="min-w-44 max-w-64">
+                {proxy.rotationUrlConfigured ? <>
+                  <Badge variant="outline" className={proxy.rotationStatus === "changing" ? "text-warning" : proxy.rotationStatus === "error" ? "text-destructive" : "text-primary"}>
+                    {proxy.rotationStatus === "changing" ? "меняем IP" : proxy.rotationStatus === "error" ? "ошибка смены" : proxy.rotationStatus === "success" ? "смена подтверждена" : "готово к смене"}
+                  </Badge>
+                  {proxy.rotationPreviousIp && <div className="mono mt-1 break-all text-xs text-muted-foreground">Был: {proxy.rotationPreviousIp}</div>}
+                  {proxy.rotationStatus === "success" && proxy.rotationNewIp && <div className="mono break-all text-xs">Стал: {proxy.rotationNewIp}</div>}
+                  {proxy.rotationChangedAt && <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground"><Clock3 className="size-3" />Последняя смена: {proxyTime(proxy.rotationChangedAt)}</div>}
+                  {proxy.rotationStatus === "changing" && proxy.rotationRequestedAt && <p className="mt-1 text-xs text-muted-foreground">Запрос: {proxyTime(proxy.rotationRequestedAt)}</p>}
+                  {proxy.rotationLastError && <p role="status" className="mt-1 text-xs text-destructive">{proxy.rotationLastError}</p>}
+                </> : <span className="text-xs text-muted-foreground">не настроена</span>}
+              </TableCell>
               <TableCell className="text-right">
                 {owner && <div className="flex justify-end gap-1">
+                  {proxy.rotationUrlConfigured && <Button variant="ghost" size="icon" title="Сменить IP мобильного прокси" aria-label="Сменить IP мобильного прокси"
+                    disabled={!desktop()?.checkProxy || rotateMut.isPending || checkMut.isPending || removeMut.isPending || proxy.rotationStatus === "changing"} onClick={() => rotateMut.mutate(proxy.id)}>
+                    {rotateMut.isPending && rotateMut.variables === proxy.id ? <Loader2 className="size-4 animate-spin" /> : <RotateCw className="size-4" />}
+                  </Button>}
                   <Button variant="ghost" size="icon" title="Проверить прокси" aria-label="Проверить прокси"
-                    disabled={checkMut.isPending || removeMut.isPending} onClick={() => checkMut.mutate([proxy.id])}>
+                    disabled={checkMut.isPending || rotateMut.isPending || removeMut.isPending} onClick={() => checkMut.mutate([proxy.id])}>
                     <Activity className="size-4" />
                   </Button>
                   <Button variant="ghost" size="icon" title="Редактировать прокси" aria-label="Редактировать прокси"
-                    disabled={checkMut.isPending || removeMut.isPending} onClick={() => edit(proxy)}>
+                    disabled={checkMut.isPending || rotateMut.isPending || removeMut.isPending} onClick={() => edit(proxy)}>
                     <Pencil className="size-4" />
                   </Button>
                   <Button variant="ghost" size="icon" title="Удалить прокси" aria-label="Удалить прокси"
-                    disabled={checkMut.isPending || removeMut.isPending} onClick={() => removeMut.mutate(proxy.id)}>
+                    disabled={checkMut.isPending || rotateMut.isPending || removeMut.isPending} onClick={() => removeMut.mutate(proxy.id)}>
                     {removeMut.isPending && removeMut.variables === proxy.id ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
                   </Button>
                 </div>}
               </TableCell>
             </TableRow>)}
             {(proxies.isPending || proxies.isError || !proxies.data?.length) && <TableRow>
-              <TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
+              <TableCell colSpan={7} className="py-10 text-center text-sm text-muted-foreground">
                 {proxies.isPending ? "Загрузка прокси..." : proxies.isError ? "Не удалось загрузить прокси" : "Пока нет ни одного прокси"}
                 {proxies.isError && <Button variant="ghost" onClick={() => { void proxies.refetch(); }}>Повторить</Button>}
               </TableCell>

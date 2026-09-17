@@ -21,6 +21,10 @@ if (window.location.origin === trustedOrigin) contextBridge.exposeInMainWorld("u
   },
   openExternal: (url) => ipcRenderer.invoke("umbra:open-external", url),
   checkProxy: (payload) => ipcRenderer.invoke("umbra:check-proxy", payload),
+  listExtensions: () => ipcRenderer.invoke("umbra:extensions-list"),
+  readProxyClipboard: () => ipcRenderer.invoke("umbra:proxy-clipboard"),
+  addExtension: () => ipcRenderer.invoke("umbra:extensions-add"),
+  removeExtension: (id) => ipcRenderer.invoke("umbra:extensions-remove", id),
 
   // Обновление в один клик.
   appVersion: () => ipcRenderer.invoke("umbra:app-version"),

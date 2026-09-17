@@ -28,6 +28,8 @@
     "files": [
       "package.json",
       "main.cjs",
+      "extensions.cjs",
+      { "from": "../src", "to": "theme", "filter": ["styles.css"] },
       "preload.cjs",
       "launcher.cjs",
       "fingerprint-preload.cjs",

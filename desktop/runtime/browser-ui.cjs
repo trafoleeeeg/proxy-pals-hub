@@ -150,7 +150,7 @@ function renderer() {
     }));
     if (focused) [...document.querySelectorAll("[data-focus-key]")].find((button) => button.dataset.focusKey === focused)?.focus();
     newTab.disabled = state.tabs.length >= 32;
-    bookmarksBar.hidden = !state.bookmarkBarVisible;
+    bookmarksBar.hidden = !state.bookmarkBarVisible || !(state.bookmarks || []).length;
     bookmarksBar.replaceChildren(...(state.bookmarks || []).map((bookmark) => {
       const button = document.createElement("button"); button.className = "bookmark"; button.draggable = true; button.dataset.id = bookmark.id;
       const favicon = document.createElement(bookmark.favicon ? "img" : "div"); favicon.className = "bookmark-favicon";

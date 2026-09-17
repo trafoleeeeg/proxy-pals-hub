@@ -42,7 +42,7 @@ function profileClosed(payload) {
 function createWindow() {
   const window = new BrowserWindow({
     width: 1440, height: 900, minWidth: 900, minHeight: 620,
-    backgroundColor: "#111217", autoHideMenuBar: true, title: "Umbra",
+    backgroundColor: "#111217", autoHideMenuBar: true, title: "Umbra", show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true, sandbox: true, nodeIntegration: false,
@@ -79,6 +79,10 @@ function createWindow() {
     // Заставка показывается сразу, пока панель грузится по сети.
     if (attempt === 0) {
       try { await window.loadFile(path.join(__dirname, "splash.html")); } catch { /* заставка не критична */ }
+      if (!window.isDestroyed()) {
+        window.maximize();
+        window.show();
+      }
     } else {
       splashStatus("Соединение нестабильно, пробуем ещё раз…");
     }

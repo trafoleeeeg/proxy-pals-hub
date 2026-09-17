@@ -7,11 +7,16 @@ function renderer() {
   const address = document.getElementById("address");
   const tabs = document.getElementById("tabs");
   const error = document.getElementById("error");
+  const bar = document.getElementById("bar");
+  const newTab = document.getElementById("new");
+  const star = document.getElementById("star");
+  const extensionsButton = document.getElementById("extensions");
   const homeButton = document.createElement("button");
   homeButton.id = "go-home"; homeButton.type = "button"; homeButton.className = "icon";
   homeButton.textContent = "⌂"; homeButton.title = "Показатели профиля"; homeButton.setAttribute("aria-label", "Показатели профиля");
   address.before(homeButton);
   let current;
+  let showExtensions = false;
   const run = (command) => api.command(command).then((result) => {
     if (result?.error) error.textContent = result.error;
   }).catch(() => { error.textContent = "Browser command failed"; });
@@ -21,9 +26,11 @@ function renderer() {
   document.getElementById("home-search").addEventListener("submit", (event) => {
     event.preventDefault(); run({ action: "navigate", value: document.getElementById("home-address").value });
   });
-  for (const action of ["back", "forward", "reload", "new", "home", "check-connection", "close-profile"]) {
-    document.getElementById(action === "home" ? "go-home" : action).addEventListener("click", () => run({ action }));
+  for (const action of ["back", "forward", "reload", "new", "home", "duplicate", "bookmark", "check-connection", "close-profile"]) {
+    const id = action === "home" ? "go-home" : action === "bookmark" ? "star" : action;
+    document.getElementById(id).addEventListener("click", () => run({ action }));
   }
+  extensionsButton.addEventListener("click", () => { showExtensions = !showExtensions; run({ action: "state" }); });
   address.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && current) { address.value = current.url; address.blur(); }
   });
@@ -42,6 +49,14 @@ function renderer() {
     reload.textContent = current?.loading ? "\u00d7" : "\u21bb";
     reload.title = current?.loading ? "Остановить" : "Обновить";
     reload.setAttribute("aria-label", reload.title);
+    star.textContent = state.bookmarked ? "\u2605" : "\u2606";
+    star.classList.toggle("on", !!state.bookmarked);
+    star.title = state.bookmarked ? "Убрать из закладок (Ctrl+D)" : "В закладки (Ctrl+D)";
+    star.setAttribute("aria-label", star.title);
+    const extensions = state.extensions || [];
+    extensionsButton.title = "Расширения: " + extensions.length;
+    extensionsButton.setAttribute("aria-label", extensionsButton.title);
+    extensionsButton.classList.toggle("on", showExtensions);
     const focusedTab = document.activeElement?.dataset?.focusKey;
     tabs.replaceChildren(...state.tabs.map((tab) => {
       const item = document.createElement("div"); item.className = "tab";
@@ -51,14 +66,36 @@ function renderer() {
       select.dataset.focusKey = "tab-" + tab.id;
       select.textContent = tab.title || "Новая вкладка"; select.title = tab.title || tab.url;
       select.onclick = () => run({ action: "select", id: tab.id });
+      select.onauxclick = (event) => { if (event.button === 1) run({ action: "close-tab", id: tab.id }); };
       const close = document.createElement("button"); close.textContent = "\u00d7";
       close.className = "tab-close"; close.title = "Закрыть вкладку"; close.setAttribute("aria-label", "Закрыть вкладку");
       close.dataset.focusKey = "close-" + tab.id;
       close.onclick = () => run({ action: "close-tab", id: tab.id });
       item.append(select, close); return item;
-    }));
+    }), newTab);
     if (focusedTab) [...tabs.querySelectorAll("button")].find((button) => button.dataset.focusKey === focusedTab)?.focus();
-    document.getElementById("new").disabled = state.tabs.length >= 32;
+    newTab.disabled = state.tabs.length >= 32;
+    const bookmarks = state.bookmarks || [];
+    if (showExtensions) {
+      bar.replaceChildren(...(extensions.length ? extensions.map((extension) => {
+        const chip = document.createElement("span"); chip.className = "chip static";
+        chip.textContent = "\ud83e\udde9 " + extension.name + " " + extension.version;
+        chip.title = extension.name + " " + extension.version;
+        return chip;
+      }) : [Object.assign(document.createElement("span"), { className: "hint", textContent: "Расширения не подключены. Добавьте их в разделе «Приложение»." })]));
+    } else {
+      bar.replaceChildren(...(bookmarks.length ? bookmarks.map((bookmark) => {
+        const chip = document.createElement("span"); chip.className = "chip";
+        const open = document.createElement("button"); open.className = "chip-open";
+        open.textContent = bookmark.title || bookmark.url; open.title = bookmark.url;
+        open.onclick = () => run({ action: "open-bookmark", id: bookmark.id });
+        open.onauxclick = (event) => { if (event.button === 1) run({ action: "open-bookmark", id: bookmark.id, newTab: true }); };
+        const drop = document.createElement("button"); drop.className = "chip-close"; drop.textContent = "\u00d7";
+        drop.title = "Удалить закладку"; drop.setAttribute("aria-label", "Удалить закладку");
+        drop.onclick = () => run({ action: "remove-bookmark", id: bookmark.id });
+        chip.append(open, drop); return chip;
+      }) : [Object.assign(document.createElement("span"), { className: "hint", textContent: "Закладок пока нет. Нажмите звёздочку в адресной строке." })]));
+    }
   });
   run({ action: "state" });
 }

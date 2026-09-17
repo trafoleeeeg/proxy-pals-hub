@@ -82,7 +82,11 @@ async function createProfileBrowser(electron, {
   function select(tab) {
     if (shell.isDestroyed() || !tab || tab.isDestroyed()) return;
     activeId = tab.id; layout();
-    if (isHome(tab)) shell.webContents.focus(); else tab.webContents.focus();
+    // Do not let focusing a tab reveal the shell while profiles are still
+    // initializing (or while a native test deliberately keeps it hidden).
+    if (show && shell.isVisible()) {
+      if (isHome(tab)) shell.webContents.focus(); else tab.webContents.focus();
+    }
     publish();
     if (ready) onTabsChanged();
   }

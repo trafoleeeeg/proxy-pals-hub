@@ -269,29 +269,28 @@ export const rotateProxyIp = createServerFn({ method: "POST" })
     else claim = claim.is("rotation_requested_at", null);
     const { data: claimed, error: markChangingError } = await claim.select("id").maybeSingle();
     if (markChangingError || !claimed) throw new Error("Состояние прокси изменилось. Обновите список и повторите");
-    // Providers with `wait=1` hold the request open while the modem reconnects,
-    // and several answer through a redirect. A short timeout or a refused
-    // redirect made a working link look unreachable.
+    // Providers with `wait=1` keep the connection open until the modem has
+    // reconnected. The rotation is already triggered once the request reaches
+    // them, so a slow reply must not block the panel: after a short window the
+    // call returns and the desktop poll confirms the new address.
     let reason = "";
-    let ok = false;
-    for (let attempt = 0; attempt < 2 && !ok; attempt++) {
-      try {
-        const response = await fetch(url, {
-          method: "GET",
-          redirect: "follow",
-          headers: { accept: "*/*", "user-agent": "Umbra/1.0" },
-          signal: AbortSignal.timeout(90_000),
-        });
-        await response.body?.cancel();
-        if (response.ok) ok = true;
-        else reason = `провайдер ответил ${response.status}`;
-      } catch (err) {
-        reason = err instanceof Error && err.name === "TimeoutError"
-          ? "провайдер не ответил за 90 секунд"
-          : "не удалось соединиться с провайдером";
-      }
+    let accepted = false;
+    try {
+      const response = await fetch(url, {
+        method: "GET",
+        redirect: "follow",
+        headers: { accept: "*/*", "user-agent": "Umbra/1.0" },
+        signal: AbortSignal.timeout(12_000),
+      });
+      await response.body?.cancel();
+      if (response.ok) accepted = true;
+      else reason = `провайдер ответил ${response.status}`;
+    } catch (err) {
+      // A timeout means the provider accepted the request and is still rotating.
+      if (err instanceof Error && err.name === "TimeoutError") accepted = true;
+      else reason = "не удалось соединиться с провайдером";
     }
-    if (!ok) {
+    if (!accepted) {
       const { error: markFailureError } = await db.from("proxies").update({ rotation_status: "error", rotation_last_error: "provider" })
         .eq("id", data.id).eq("team_id", data.teamId).eq("rotation_requested_at", requestedAt);
       if (markFailureError) throw new Error("Не удалось сохранить состояние смены IP");

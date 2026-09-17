@@ -13,7 +13,7 @@ export function rotationOutcome(previousIp: string | null, result: ProxyCheckRes
 }
 
 export async function confirmRotation({
-  previousIp, probe, record, wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), attempts = 12,
+  previousIp, probe, record, wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), attempts = 16,
 }: {
   previousIp: string;
   probe: () => Promise<ProxyCheckResult>;
@@ -22,7 +22,7 @@ export async function confirmRotation({
   attempts?: number;
 }) {
   for (let attempt = 0; attempt < attempts; attempt++) {
-    await wait(attempt === 0 ? 2000 : 4000);
+    await wait(attempt === 0 ? 1500 : 3000);
     const result = await probe();
     const final = attempt === attempts - 1;
     await record(result, final);

@@ -73,19 +73,20 @@ function createBookmarkStore({ safeStorage, userData }) {
   function filename(id) { return path.join(root, `${profileId(id)}.bin`); }
   return {
     async readState(id) {
-      if (!available()) return { bookmarks: [], barVisible: true };
+      const empty = { bookmarks: [], barVisible: true, stored: false };
+      if (!available()) return empty;
       let encrypted;
       try {
         const file = filename(id);
         const stat = await fs.stat(file);
-        if (stat.size > MAX_BYTES + 65536) return { bookmarks: [], barVisible: true };
+        if (stat.size > MAX_BYTES + 65536) return empty;
         encrypted = await fs.readFile(file);
-      } catch { return { bookmarks: [], barVisible: true }; }
+      } catch { return empty; }
       try {
         const data = JSON.parse(safeStorage.decryptString(encrypted));
-        if (![1, 2].includes(data.version) || data.profileId !== profileId(id)) return { bookmarks: [], barVisible: true };
-        return sanitizeBookmarkState(data.version === 1 ? data.bookmarks : data);
-      } catch { return { bookmarks: [], barVisible: true }; }
+        if (![1, 2].includes(data.version) || data.profileId !== profileId(id)) return empty;
+        return { ...sanitizeBookmarkState(data.version === 1 ? data.bookmarks : data), stored: true };
+      } catch { return empty; }
     },
     async read(id) {
       return (await this.readState(id)).bookmarks;

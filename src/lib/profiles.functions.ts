@@ -16,6 +16,8 @@ export type ProfileRow = {
   fingerprint: Fingerprint;
   created_at: string;
   updated_at: string;
+  status_id: string | null;
+  custom_fields: Record<string, string>;
   lock: { userId: string; expiresAt: string } | null;
 };
 
@@ -26,7 +28,7 @@ export const listProfiles = createServerFn({ method: "POST" })
     await requireTeamAccess(context, data.teamId);
     const { data: rows, error } = await context.supabase
       .from("browser_profiles")
-      .select("id, name, folder, tags, notes, proxy_id, fingerprint, created_at, updated_at")
+      .select("id, name, folder, tags, notes, proxy_id, fingerprint, created_at, updated_at, status_id, custom_fields")
       .eq("team_id", data.teamId)
       .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
@@ -50,6 +52,7 @@ export const listProfiles = createServerFn({ method: "POST" })
     return (rows ?? []).map((r) => ({
       ...r,
       fingerprint: (r.fingerprint ?? {}) as Fingerprint,
+      custom_fields: (r.custom_fields ?? {}) as Record<string, string>,
       lock: lockMap.get(r.id)
         ? {
             userId: lockMap.get(r.id)!.user_id,
@@ -72,6 +75,8 @@ export const saveProfile = createServerFn({ method: "POST" })
       notes: data.notes,
       proxy_id: data.proxyId,
       fingerprint: data.fingerprint as unknown as Json,
+      status_id: data.statusId ?? null,
+      custom_fields: data.customFields ?? {},
     };
 
     if (data.id) {
@@ -132,7 +137,7 @@ export const cloneProfile = createServerFn({ method: "POST" })
     await requireProfile(context, data.id, true);
     const { data: src, error } = await context.supabase
       .from("browser_profiles")
-      .select("team_id, name, folder, tags, notes, proxy_id, fingerprint")
+      .select("team_id, name, folder, tags, notes, proxy_id, fingerprint, status_id, custom_fields")
       .eq("id", data.id)
       .single();
     if (error || !src) throw new Error("Профиль не найден");

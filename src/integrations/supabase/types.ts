@@ -124,12 +124,14 @@ export type Database = {
           cookies_updated_at: string
           created_at: string
           created_by: string | null
+          custom_fields: Json
           fingerprint: Json
           folder: string
           id: string
           name: string
           notes: string
           proxy_id: string | null
+          status_id: string | null
           tags: string[]
           team_id: string
           updated_at: string
@@ -139,12 +141,14 @@ export type Database = {
           cookies_updated_at?: string
           created_at?: string
           created_by?: string | null
+          custom_fields?: Json
           fingerprint?: Json
           folder?: string
           id?: string
           name: string
           notes?: string
           proxy_id?: string | null
+          status_id?: string | null
           tags?: string[]
           team_id: string
           updated_at?: string
@@ -154,12 +158,14 @@ export type Database = {
           cookies_updated_at?: string
           created_at?: string
           created_by?: string | null
+          custom_fields?: Json
           fingerprint?: Json
           folder?: string
           id?: string
           name?: string
           notes?: string
           proxy_id?: string | null
+          status_id?: string | null
           tags?: string[]
           team_id?: string
           updated_at?: string
@@ -170,6 +176,13 @@ export type Database = {
             columns: ["proxy_id"]
             isOneToOne: false
             referencedRelation: "proxies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "browser_profiles_status_id_fkey"
+            columns: ["status_id"]
+            isOneToOne: false
+            referencedRelation: "profile_statuses"
             referencedColumns: ["id"]
           },
           {
@@ -213,6 +226,44 @@ export type Database = {
           },
         ]
       }
+      profile_field_definitions: {
+        Row: {
+          created_at: string
+          field_type: string
+          id: string
+          name: string
+          position: number
+          team_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          field_type?: string
+          id?: string
+          name: string
+          position?: number
+          team_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          field_type?: string
+          id?: string
+          name?: string
+          position?: number
+          team_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "profile_field_definitions_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profile_locks: {
         Row: {
           acquired_at: string
@@ -250,6 +301,44 @@ export type Database = {
             columns: ["profile_id"]
             isOneToOne: true
             referencedRelation: "browser_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profile_statuses: {
+        Row: {
+          color: string
+          created_at: string
+          id: string
+          name: string
+          position: number
+          team_id: string
+          updated_at: string
+        }
+        Insert: {
+          color?: string
+          created_at?: string
+          id?: string
+          name: string
+          position?: number
+          team_id: string
+          updated_at?: string
+        }
+        Update: {
+          color?: string
+          created_at?: string
+          id?: string
+          name?: string
+          position?: number
+          team_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "profile_statuses_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
             referencedColumns: ["id"]
           },
         ]

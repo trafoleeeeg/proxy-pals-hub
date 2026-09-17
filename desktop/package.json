@@ -28,6 +28,7 @@
     "files": [
       "package.json",
       "main.cjs",
+      "splash.html",
       "extensions.cjs",
       "crx.cjs",
       "extension-source.cjs",

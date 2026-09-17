@@ -130,7 +130,7 @@ function AppShell() {
           {selection.workspaces.isError && <Button size="sm" variant="ghost" onClick={() => selection.workspaces.refetch()}>Повторить загрузку команд</Button>}
           <p className="text-xs text-muted-foreground">{ws?.role === "owner" ? "Владелец" : ws ? "Сотрудник" : ""}</p>
         </div>
-        <Button variant="ghost" size="sm" title="Выйти" aria-label="Выйти" disabled={signingOut || !runtime.ready} className="mt-2 w-full px-0 md:justify-start md:px-2" onClick={signOut}><LogOut className="size-4" /><span className="hidden md:inline">{signingOut ? "Сохранение…" : "Выйти"}</span></Button>
+        <Button variant="ghost" size="sm" title="Выйти" aria-label="Выйти" disabled={signingOut || !runtime.ready} className={"mt-2 w-full " + (collapsed ? "px-0" : "justify-start px-2")} onClick={signOut}><LogOut className="size-4" />{!collapsed && <span>{signingOut ? "Сохранение…" : "Выйти"}</span>}</Button>
       </div>
     </aside>
     <div className="flex min-w-0 flex-1 flex-col">

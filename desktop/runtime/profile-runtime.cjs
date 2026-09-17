@@ -13,9 +13,9 @@ function createProfileRuntime(electron, options = {}) {
   const profiles = new Map();
   let shuttingDown = false;
   let store;
-  let tabs;
+  let tabStoreRef;
   const cookieStore = () => store ||= options.cookieStore || createCookieStore({ safeStorage, userData: app.getPath("userData") });
-  const tabStore = () => tabs ||= options.tabStore || createTabStore({ safeStorage, userData: app.getPath("userData") });
+  const tabStore = () => tabStoreRef ||= options.tabStore || createTabStore({ safeStorage, userData: app.getPath("userData") });
   const extensionStore = options.extensionStore;
 
   function status(entry) {

@@ -73,7 +73,7 @@ function renderer() {
       close.onclick = () => run({ action: "close-tab", id: tab.id });
       item.append(select, close); return item;
     }));
-    if (focusedTab) [...tabs.querySelectorAll("button")].find((button) => button.dataset.focusKey === focusedTab)?.focus();
+    if (focusedTab) [...document.querySelectorAll("[data-focus-key]")].find((button) => button.dataset.focusKey === focusedTab)?.focus();
     newTab.disabled = state.tabs.length >= 32;
     const bookmarks = state.bookmarks || [];
     if (showExtensions) {

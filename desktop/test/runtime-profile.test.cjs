@@ -90,6 +90,7 @@ test("profile browser opens maximized before it becomes visible", async () => {
     }
     maximize() { calls.push("maximize"); }
     show() { calls.push("show"); }
+    async loadURL() {}
     isDestroyed() { return false; }
     destroy() { this.emit("closed"); }
     getContentBounds() { return { width: 1920, height: 1080 }; }

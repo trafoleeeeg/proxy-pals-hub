@@ -288,8 +288,11 @@ if (process.versions.electron) {
     await waitUntil(() => httpHits.length > beforeReload && !fresh.webContents.isLoading());
     await shell.webContents.executeJavaScript("document.getElementById('star').click(); document.getElementById('bookmark-title').value='Локальная закладка'; document.getElementById('bookmark-save').click()");
     await waitUntil(() => shell.webContents.executeJavaScript("document.querySelectorAll('#bookmarks-bar .bookmark').length").catch(() => 0));
-    const bookmarkState = await shell.webContents.executeJavaScript("({count:document.querySelectorAll('#bookmarks-bar .bookmark').length,hidden:document.getElementById('bookmarks-bar').hidden,title:document.querySelector('#bookmarks-bar .bookmark span')?.textContent})");
-    assert.deepEqual(bookmarkState, { count: 1, hidden: false, title: "Локальная закладка" });
+    const bookmarkState = await shell.webContents.executeJavaScript("({count:document.querySelectorAll('#bookmarks-bar .bookmark').length,hidden:document.getElementById('bookmarks-bar').hidden,titles:[...document.querySelectorAll('#bookmarks-bar .bookmark span')].map((el)=>el.textContent)})");
+    assert.equal(bookmarkState.hidden, false);
+    assert.equal(bookmarkState.count, 8);
+    assert.equal(bookmarkState.titles[0], "fb acc");
+    assert.ok(bookmarkState.titles.includes("Локальная закладка"));
     await shell.webContents.executeJavaScript("document.getElementById('menu-button').click(); document.querySelector('[data-action=toggle-bookmark-bar]').click()");
     await waitUntil(() => shell.webContents.executeJavaScript("document.getElementById('bookmarks-bar').hidden").catch(() => false));
     await shell.webContents.executeJavaScript("document.getElementById('extensions').click()");

@@ -196,6 +196,7 @@ if (process.versions.electron) {
     const shell = profileShell(ses);
     const win = profileTabs(ses)[0];
     assert.equal(shell.isVisible(), false);
+    shell.show();
     assert.equal(await win.webContents.executeJavaScript("document.documentElement.dataset.umbraExtension"), "loaded");
     assert.equal(runtime.getRunningProfile(ID).diagnostics.extensions.loaded, 1);
     await extensionStore.remove(extension.id);
@@ -244,7 +245,7 @@ if (process.versions.electron) {
     assert.equal(runtime.getRunningProfile(ID).windowCount, 1);
     const popup = profileTabs(ses).find((item) => item !== win);
     await waitUntil(() => popup.webContents.getURL().endsWith("/popup") && !popup.webContents.isLoading());
-    assert.equal(shell.isVisible(), false);
+    assert.equal(shell.isVisible(), true);
     assert.equal(popup.webContents.getLastWebPreferences().preload, preferences.preload);
     assert.equal(popup.webContents.getWebRTCIPHandlingPolicy(), "disable_non_proxied_udp");
     assert.equal((await popup.webContents.executeJavaScript("firstDocument")).timezone, "Asia/Tokyo");

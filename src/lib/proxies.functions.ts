@@ -225,11 +225,17 @@ export const recordProxyCheck = createServerFn({ method: "POST" })
     if (data.rotationRequestedAt && data.rotationRequestedAt === current["rotation_requested_at"] &&
       (current["rotation_status"] === "success" || current["rotation_status"] === "error")) return { ok: true };
     const staleRotation = !!data.rotationRequestedAt && !confirmsRotation;
+    // Any measurement proves the rotation: a pending "changing" state must not
+    // linger until the 90s timeout once a different address is actually seen.
+    const settlesPending = !confirmsRotation && current["rotation_status"] === "changing" &&
+      data.ok && !!data.ip && !!current["rotation_previous_ip"] && data.ip !== current["rotation_previous_ip"];
     const outcome = confirmsRotation ? rotationOutcome(
       current["rotation_previous_ip"], data,
       data.rotationFinal || rotationExpired(current["rotation_requested_at"]),
       data.rotationConfirmed,
-    ) : null;
+    ) : settlesPending ? "success"
+      : current["rotation_status"] === "changing" && rotationExpired(current["rotation_requested_at"]) ? "error"
+      : null;
     const rotation = outcome ? {
       rotation_status: outcome,
       rotation_last_error: outcome === "error" ? "not_confirmed" : null,

@@ -71,7 +71,7 @@ function LifecycleBar() {
 }
 
 export function AppLayout() {
-  return <WorkspaceProvider><DesktopProfileProvider><AppShell /></DesktopProfileProvider></WorkspaceProvider>;
+  return <WorkspaceProvider><DesktopProfileProvider><ProfileFolderProvider><AppShell /></ProfileFolderProvider></DesktopProfileProvider></WorkspaceProvider>;
 }
 
 function AppShell() {

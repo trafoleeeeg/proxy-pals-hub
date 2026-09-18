@@ -571,8 +571,7 @@ function createProfileRuntime(electron, options = {}) {
         if (entry.proxyRuntime) await entry.proxyRuntime.dispose().catch(() => {});
         if (!entry.closingRequested) profiles.delete(id);
         // Errors from Electron can include navigation URLs and cookie values.
-        const allowed = /^(Invalid|Only HTTP|Unable to (?:apply fingerprint|restore profile cookies|read encrypted|decrypt cookie|save encrypted)|OS cookie|Proxy setup|Profile (?:navigation|is closing))/;
-        throw new Error(allowed.test(error.message) ? error.message : "Profile launch failed");
+        throw new Error(launchErrorText(error.message));
       }
     });
     return entry.startPromise;

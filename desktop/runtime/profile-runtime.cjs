@@ -7,6 +7,7 @@ const { createBookmarkStore, defaultBookmarks, sanitizeBookmarks } = require("./
 const { normalizeFingerprint, applyFingerprint } = require("./fingerprint.cjs");
 const { sanitizeBrowserSettings } = require("./browser-settings.cjs");
 const { SAFE_WEBRTC } = require("./leak-check.cjs");
+const { createFaviconLoader } = require("./favicons.cjs");
 
 function createProfileRuntime(electron, options = {}) {
   const { session, app, safeStorage } = electron;
@@ -22,6 +23,7 @@ function createProfileRuntime(electron, options = {}) {
   const tabStore = () => tabStoreRef ||= options.tabStore || createTabStore({ safeStorage, userData: app.getPath("userData") });
   const bookmarkStore = () => bookmarkStoreRef ||= options.bookmarkStore || createBookmarkStore({ safeStorage, userData: app.getPath("userData") });
   const extensionStore = options.extensionStore;
+  const favicons = options.faviconLoader || (electron.net ? createFaviconLoader({ net: electron.net }) : null);
 
   function status(entry) {
     return {

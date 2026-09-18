@@ -11,6 +11,8 @@ export type LaunchPayload = {
   name: string;
   fingerprint: unknown;
   proxy: unknown;
+  /** Полный список прокси команды с секретами: остаётся в основном процессе клиента. */
+  proxies?: unknown;
   cookies: string;
   lockToken: string;
   cookiesUpdatedAt: string;

@@ -168,7 +168,119 @@ function createProfileRuntime(electron, options = {}) {
         return saveBookmarks(entry, entry.bookmarks || []);
       },
       openExtensionManager: () => { app?.emit?.("umbra:manage-extensions"); },
+      getProxies: () => safeProxyList(entry),
+      getProxyFailover: () => entry.proxyFailover === true,
+      switchProxy: (id) => switchProxy(entry, id),
+      setProxyFailover: async (value) => { entry.proxyFailover = value === true; notifyBrowserSettings(entry); },
     };
+  }
+
+  // Пароли прокси остаются в основном процессе: в окно профиля уходит
+  // только безопасное описание сервера.
+  function safeProxyList(entry) {
+    return (entry.proxyPool || []).map((item) => ({
+      id: item.id, label: item.label || proxyLabel(item), protocol: item.protocol, host: item.host, port: item.port,
+      country: item.country || "", city: item.city || "", active: item.id === entry.activeProxyId,
+      ip: item.id === entry.activeProxyId ? entry.connection?.ip || "" : "",
+      latency: item.id === entry.activeProxyId ? entry.connection?.latency ?? null : null,
+      ok: item.id === entry.activeProxyId ? entry.connection?.ok === true : null,
+      checking: item.id === entry.activeProxyId && !!entry.checkJob,
+    }));
+  }
+
+  function proxyLabel(proxy) {
+    return proxy ? String(proxy.protocol).toUpperCase() + " · " + proxy.host + ":" + proxy.port : "Без прокси";
+  }
+
+  function sanitizeProxyPool(list) {
+    if (!Array.isArray(list)) return [];
+    return list.slice(0, 200).flatMap((item) => {
+      if (!item || typeof item !== "object" || typeof item.id !== "string" || !/^[0-9a-f-]{36}$/i.test(item.id)) return [];
+      if (typeof item.host !== "string" || !item.host || !["http", "https", "socks5"].includes(item.protocol)) return [];
+      const port = Number(item.port);
+      if (!Number.isInteger(port) || port < 1 || port > 65535) return [];
+      return [{
+        id: item.id, label: typeof item.label === "string" ? item.label.slice(0, 200) : "",
+        protocol: item.protocol, host: item.host, port,
+        username: typeof item.username === "string" ? item.username : null,
+        password: typeof item.password === "string" ? item.password : "",
+        country: typeof item.country === "string" ? item.country.slice(0, 80) : "",
+        city: typeof item.city === "string" ? item.city.slice(0, 80) : "",
+      }];
+    });
+  }
+
+  function proxyConnectionOf(item) {
+    return item ? { protocol: item.protocol, host: item.host, port: item.port, username: item.username, password: item.password } : null;
+  }
+
+  function matchPoolId(entry, proxy) {
+    if (!proxy) return null;
+    const found = (entry.proxyPool || []).find((item) => item.protocol === proxy.protocol && item.host === proxy.host && Number(item.port) === Number(proxy.port));
+    return found ? found.id : null;
+  }
+
+  async function switchProxy(entry, id) {
+    if (entry.state !== "running" || entry.closingRequested) throw new Error("Профиль не готов к смене прокси");
+    const target = (entry.proxyPool || []).find((item) => item.id === id);
+    if (!target) throw new Error("Этот прокси недоступен для профиля");
+    if (entry.proxySwitching) throw new Error("Смена прокси уже выполняется");
+    if (target.id === entry.activeProxyId) return true;
+    entry.proxySwitching = true;
+    const previousRuntime = entry.proxyRuntime;
+    const previousTarget = entry.proxyTarget || null;
+    const previousId = entry.activeProxyId || null;
+    const config = proxyConnectionOf(target);
+    try {
+      blockSession(entry.ses);
+      if (previousRuntime) await previousRuntime.dispose().catch(() => {});
+      entry.proxyRuntime = await setupProxy(entry.ses, config);
+      entry.proxyTarget = config;
+      entry.activeProxyId = target.id;
+      entry.proxyLabel = proxyLabel(config);
+      entry.connection = null;
+      entry.checkedAt = null;
+      notifyBrowserSettings(entry);
+      entry.browser?.publish?.();
+      void checkConnection(entry);
+      return true;
+    } catch {
+      // Трафик остаётся заблокированным, пока прежний сервер не поднимется снова.
+      try {
+        entry.proxyRuntime = await setupProxy(entry.ses, previousTarget);
+        entry.proxyTarget = previousTarget;
+        entry.activeProxyId = previousId;
+        entry.proxyLabel = proxyLabel(previousTarget);
+      } catch {
+        entry.proxyRuntime = null;
+        blockSession(entry.ses);
+      }
+      entry.lastError = "Не удалось переключить прокси";
+      entry.browser?.publish?.();
+      throw new Error("Не удалось переключить прокси. Трафик остался на прежнем сервере");
+    } finally { entry.proxySwitching = false; }
+  }
+
+  async function failoverProxy(entry) {
+    const pool = entry.proxyPool || [];
+    if (!entry.proxyFailover || entry.failoverRunning || entry.state !== "running" || pool.length < 2) return null;
+    if (entry.lastFailoverAt && Date.now() - entry.lastFailoverAt < 30000) return null;
+    entry.failoverRunning = true;
+    entry.lastFailoverAt = Date.now();
+    try {
+      const start = pool.findIndex((item) => item.id === entry.activeProxyId);
+      for (let step = 1; step <= pool.length; step++) {
+        const candidate = pool[(start + step + pool.length) % pool.length];
+        if (!candidate || candidate.id === entry.activeProxyId) continue;
+        try {
+          const probe = options.checkProxy ? await options.checkProxy(proxyConnectionOf(candidate)) : { ok: true };
+          if (!probe.ok) continue;
+          await switchProxy(entry, candidate.id);
+          return candidate.id;
+        } catch { /* пробуем следующий сервер */ }
+      }
+      return null;
+    } finally { entry.failoverRunning = false; }
   }
 
   function saveBookmarks(entry, list) {
@@ -184,6 +296,7 @@ function createProfileRuntime(electron, options = {}) {
   function browserSettings(entry) {
     return { profileId: entry.profileId, bookmarks: entry.bookmarks || [], bookmarkBarVisible: entry.bookmarkBarVisible !== false,
       zoomLevel: entry.zoomLevel || 0, extensions: (entry.extensionList || []).filter((item) => item.url).map((item) => ({ id: item.id, pinned: item.pinned === true, url: item.url })),
+      activeProxyId: entry.activeProxyId || null, proxyFailover: entry.proxyFailover === true,
       revision: entry.settingsRevision || 0 };
   }
 
@@ -204,7 +317,8 @@ function createProfileRuntime(electron, options = {}) {
     if (!entry.proxyTarget || !options.checkProxy || entry.state !== "running") return Promise.resolve();
     const job = Promise.resolve().then(() => options.checkProxy(entry.proxyTarget)).then((result) => {
       entry.connection = result; entry.checkedAt = new Date().toISOString();
-    }).catch(() => { entry.connection = { ok: false }; }).finally(() => {
+      if (!result?.ok) void failoverProxy(entry).catch(() => {});
+    }).catch(() => { entry.connection = { ok: false }; void failoverProxy(entry).catch(() => {}); }).finally(() => {
       entry.checkJob = null; entry.browser?.publish?.();
     });
     entry.checkJob = job;
@@ -318,9 +432,20 @@ function createProfileRuntime(electron, options = {}) {
         // remote page is allowed to navigate.
         entry.browserPromise = createBrowser(electron, browserOptions(entry));
         void entry.browserPromise.catch(() => {});
-        entry.proxyRuntime = await setupProxy(entry.ses, payload.proxy);
-        entry.proxyTarget = payload.proxy;
-        entry.proxyLabel = payload.proxy ? String(payload.proxy.protocol).toUpperCase() + " · " + payload.proxy.host + ":" + payload.proxy.port : "Без прокси";
+        entry.proxyPool = sanitizeProxyPool(payload.proxies);
+        entry.proxyFailover = initialSettings?.proxyFailover === true;
+        const selected = initialSettings?.activeProxyId ? entry.proxyPool.find((item) => item.id === initialSettings.activeProxyId) : null;
+        let launchProxy = selected ? proxyConnectionOf(selected) : payload.proxy;
+        try {
+          entry.proxyRuntime = await setupProxy(entry.ses, launchProxy);
+        } catch (proxyFailure) {
+          if (!selected) throw proxyFailure;
+          launchProxy = payload.proxy;
+          entry.proxyRuntime = await setupProxy(entry.ses, launchProxy);
+        }
+        entry.proxyTarget = launchProxy;
+        entry.activeProxyId = matchPoolId(entry, launchProxy);
+        entry.proxyLabel = proxyLabel(launchProxy);
         entry.ses.setUserAgent(entry.fp.userAgent, entry.fp.languages.join(","));
         // Background permission requests cannot enable arbitrary device access.
         entry.ses.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
@@ -461,6 +586,11 @@ function createProfileRuntime(electron, options = {}) {
       if (extensionStore?.applyCloudSettings) {
         await extensionStore.applyCloudSettings(settings.extensions);
         await reloadExtensionList(entry);
+      }
+      entry.proxyFailover = settings.proxyFailover === true;
+      if (settings.activeProxyId && settings.activeProxyId !== entry.activeProxyId
+        && (entry.proxyPool || []).some((item) => item.id === settings.activeProxyId)) {
+        await switchProxy(entry, settings.activeProxyId).catch(() => {});
       }
       for (const tab of entry.windows) if (!tab.isDestroyed()) tab.webContents.setZoomLevel(settings.zoomLevel);
       entry.browser?.publish?.();

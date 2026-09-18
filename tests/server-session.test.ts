@@ -49,10 +49,12 @@ describe("server launch transaction boundary", () => {
     await expect(prepareSessionLaunch(f.context, { profileId: id, deviceId: "desktop-a" }, f.decrypt)).rejects.toThrow("Запуск отменён");
     expect(f.state.rpc[1]).toMatchObject({ name: "mutate_profile_lease", args: { _profile_id: id, _lock_token: token, _operation: "close", _cookies_enc: null, _device_id: "desktop-a" } });
   });
-  test("direct browsing is possible only when no proxy is assigned", async () => {
+  test("direct browsing is possible only when no proxy is assigned, team servers stay switchable", async () => {
     const f = fixture(); f.state.profile.proxy_id = null;
-    expect((await prepareSessionLaunch(f.context, { profileId: id }, f.decrypt)).proxy).toBeNull();
-    expect(f.state.filters.some(([table]) => table === "proxies")).toBe(false);
+    const result = await prepareSessionLaunch(f.context, { profileId: id }, f.decrypt);
+    expect(result.proxy).toBeNull();
+    // Назначенный прокси не запрашивается, но список серверов команды нужен для смены прокси в окне профиля.
+    expect(f.state.filters.filter(([table]) => table === "proxies")).toEqual([["proxies", "team_id", teamId]]);
   });
   test("cookie decryption and audit failures do not leave a silently running lease", async () => {
     const f = fixture();

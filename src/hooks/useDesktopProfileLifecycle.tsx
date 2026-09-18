@@ -114,6 +114,7 @@ export function DesktopProfileProvider({ children }: { children: ReactNode }) {
         const parsed = browserSettingsSchema.safeParse({
           profileId: row["profile_id"], bookmarks: row["bookmarks"], bookmarkBarVisible: row["bookmark_bar_visible"],
           zoomLevel: row["zoom_level"], extensions: row["extensions"], revision: row["revision"], updatedAt: row["updated_at"],
+          activeProxyId: row["active_proxy_id"] ?? null, proxyFailover: row["proxy_failover"] ?? false,
         });
         if (!parsed.success || parsed.data.revision <= (revisions.get(parsed.data.profileId) || 0)) return;
         revisions.set(parsed.data.profileId, parsed.data.revision);

@@ -10,6 +10,7 @@ function parseRow(row: Record<string, unknown>) {
     profileId: row["profile_id"], bookmarks: row["bookmarks"],
     bookmarkBarVisible: row["bookmark_bar_visible"], zoomLevel: row["zoom_level"],
     extensions: row["extensions"], revision: row["revision"], updatedAt: row["updated_at"],
+    activeProxyId: row["active_proxy_id"] ?? null, proxyFailover: row["proxy_failover"] ?? false,
   });
 }
 
@@ -20,6 +21,7 @@ export const saveBrowserSettings = createServerFn({ method: "POST" })
       _profile_id: data.profileId, _bookmarks: data.bookmarks,
       _bookmark_bar_visible: data.bookmarkBarVisible, _zoom_level: data.zoomLevel,
       _extensions: data.extensions, _expected_revision: data.revision,
+      ...(data.activeProxyId ? { _active_proxy_id: data.activeProxyId } : {}), _proxy_failover: data.proxyFailover,
     }).single();
     if (error) {
       if (error.code === "40001") throw new Error("Настройки изменились на другом компьютере");

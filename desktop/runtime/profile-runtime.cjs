@@ -145,6 +145,11 @@ function createProfileRuntime(electron, options = {}) {
       getBookmarks: () => entry.bookmarks || [],
       getBookmarkBarVisible: () => entry.bookmarkBarVisible !== false,
       getExtensions: () => entry.extensionList || [],
+      setExtensionPinned: async (id, pinned) => {
+        if (!extensionStore?.setPinned) return;
+        await extensionStore.setPinned(id, pinned);
+        await reloadExtensionList(entry);
+      },
       addBookmark: (bookmark) => saveBookmarks(entry, [...(entry.bookmarks || []), { ...bookmark }]),
       updateBookmark: (bookmark) => saveBookmarks(entry, (entry.bookmarks || []).map((item) => item.id === bookmark.id
         ? { ...item, title: bookmark.title, url: bookmark.url || item.url, favicon: bookmark.url && bookmark.url !== item.url ? "" : (bookmark.favicon || item.favicon) }
@@ -176,7 +181,7 @@ function createProfileRuntime(electron, options = {}) {
     const all = await extensionStore.list().catch(() => []);
     entry.extensionList = all
       .filter((item) => !entry.extensionsLoaded || entry.extensionsLoaded.has(item.id))
-      .map((item) => ({ id: item.id, name: item.name, version: item.version, enabled: item.enabled !== false, icon: item.icon || "" }));
+      .map((item) => ({ id: item.id, name: item.name, version: item.version, enabled: item.enabled !== false, icon: item.icon || "", pinned: item.pinned === true }));
   }
   function checkConnection(entry) {
     if (entry.checkJob) return entry.checkJob;
@@ -313,7 +318,7 @@ function createProfileRuntime(electron, options = {}) {
       }
        const bookmarkState = await (bookmarkStore().readState?.(id) || bookmarkStore().read(id).then((bookmarks) => ({ bookmarks, barVisible: true, stored: true }))).catch(() => ({ bookmarks: [], barVisible: true, stored: true }));
        entry.bookmarks = bookmarkState.bookmarks;
-       entry.bookmarkBarVisible = bookmarkState.barVisible;
+       entry.bookmarkBarVisible = bookmarkState.bookmarks.length ? true : bookmarkState.barVisible;
        // Новый профиль получает стартовый набор рабочих закладок один раз.
        if (!bookmarkState.stored && !bookmarkState.bookmarks.length) {
          entry.bookmarks = defaultBookmarks();

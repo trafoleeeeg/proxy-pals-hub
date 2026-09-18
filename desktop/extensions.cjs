@@ -34,7 +34,7 @@ function createExtensionStore(getUserData, deps = {}) {
     try {
       const data = JSON.parse(await fs.readFile(registryPath(), "utf8"));
       if (!Array.isArray(data) || data.some((entry) => !entry || !/^[a-f0-9]{24}$/.test(entry.id))) throw new Error();
-      return data.map(({ id, source }) => ({ id, path: directory(id), source: normalizeSource(source) }));
+      return data.map(({ id, source, pinned }) => ({ id, path: directory(id), source: normalizeSource(source), pinned: pinned === true }));
     } catch (error) {
       if (error.code === "ENOENT") return [];
       throw new Error("Не удалось прочитать набор расширений");
@@ -63,6 +63,7 @@ function createExtensionStore(getUserData, deps = {}) {
         const manifest = JSON.parse(await fs.readFile(path.join(entry.path, "manifest.json"), "utf8"));
         if (manifest && typeof manifest.name === "string" && typeof manifest.version === "string") {
           const item = { id: entry.id, name: manifest.name, version: manifest.version };
+          if (entry.pinned) item.pinned = true;
           const icons = manifest.icons && typeof manifest.icons === "object" ? Object.values(manifest.icons) : [];
           const icon = icons.map(String).at(-1);
           if (icon && !path.isAbsolute(icon) && !icon.split(/[\\/]/).includes("..")) {
@@ -145,8 +146,9 @@ function createExtensionStore(getUserData, deps = {}) {
       await fs.mkdir(root(), { recursive: true });
       await fs.rm(destination, { recursive: true, force: true });
       await fs.cp(staging, destination, { recursive: true, dereference: false });
+      const previous = (await read()).find((entry) => entry.id === id);
       const entries = (await read()).filter((entry) => entry.id !== id);
-      entries.push({ id, source: { kind: parsed.kind, downloadUrl: parsed.downloadUrl, pageUrl: parsed.pageUrl } });
+      entries.push({ id, source: { kind: parsed.kind, downloadUrl: parsed.downloadUrl, pageUrl: parsed.pageUrl }, pinned: previous?.pinned === true });
       await write(entries);
       return { id, name: manifest.name, version: manifest.version, source: parsed.kind, url: parsed.pageUrl };
     } finally {
@@ -171,6 +173,14 @@ function createExtensionStore(getUserData, deps = {}) {
     if (!entry) return;
     // Unregister and let the runtime unload it. Never delete code still in use.
     await write(entries.filter((item) => item.id !== id));
+  }
+
+  async function setPinned(id, pinned) {
+    if (!/^[a-f0-9]{24}$/.test(String(id))) throw new Error("Некорректный идентификатор расширения");
+    const entries = await read();
+    if (!entries.some((item) => item.id === id)) return false;
+    await write(entries.map((item) => item.id === id ? { ...item, pinned: pinned === true } : item));
+    return pinned === true;
   }
 
   async function loadIntoSession(ses, loaded = new Map()) {
@@ -207,6 +217,7 @@ function createExtensionStore(getUserData, deps = {}) {
     addFromUrl: (url) => serialize(() => addFromUrl(url)),
     update: (id) => serialize(() => updateFromSource(id)),
     remove: (id) => serialize(() => remove(id)),
+    setPinned: (id, pinned) => serialize(() => setPinned(id, pinned)),
     loadIntoSession: (ses, loaded) => serialize(() => loadIntoSession(ses, loaded)),
   };
 }

@@ -175,7 +175,7 @@ function createProfileRuntime(electron, options = {}) {
     entry.bookmarkQueue = (entry.bookmarkQueue || Promise.resolve()).catch(() => {}).then(async () => {
       const state = await bookmarkStore().write(entry.profileId, { bookmarks: list, barVisible: entry.bookmarkBarVisible !== false });
       entry.bookmarks = state.bookmarks;
-       notifyBrowserSettings(entry);
+      notifyBrowserSettings(entry);
       return entry.bookmarks;
     }).catch(() => { entry.lastError = "Bookmark save failed"; return entry.bookmarks || []; });
     return entry.bookmarkQueue;
@@ -197,7 +197,7 @@ function createProfileRuntime(electron, options = {}) {
     const all = await extensionStore.list().catch(() => []);
     entry.extensionList = all
       .filter((item) => !entry.extensionsLoaded || entry.extensionsLoaded.has(item.id))
-       .map((item) => ({ id: item.id, name: item.name, version: item.version, enabled: item.enabled !== false, icon: item.icon || "", pinned: item.pinned === true, ...(item.url ? { url: item.url } : {}) }));
+      .map((item) => ({ id: item.id, name: item.name, version: item.version, enabled: item.enabled !== false, icon: item.icon || "", pinned: item.pinned === true, ...(item.url ? { url: item.url } : {}) }));
   }
   function checkConnection(entry) {
     if (entry.checkJob) return entry.checkJob;
@@ -213,11 +213,11 @@ function createProfileRuntime(electron, options = {}) {
   }
 
   async function makeWindow(entry, url, primary = false, loadOptions = {}) {
-    if (entry.closingRequested) throw new Error("Profile is closing");
+    if (entry.closingRequested) throw new Error("Профиль закрывается");
     entry.browserPromise ||= createBrowser(electron, browserOptions(entry));
     entry.browser = await entry.browserPromise;
     entry.primary = entry.browser.shell;
-    if (entry.closingRequested) throw new Error("Profile is closing");
+    if (entry.closingRequested) throw new Error("Профиль закрывается");
     const win = entry.browser.createTab();
     entry.windows.add(win);
     win.on("close", (event) => {
@@ -293,8 +293,8 @@ function createProfileRuntime(electron, options = {}) {
     }
     const url = startUrl(payload.startUrl ?? payload.fingerprint?.startUrl ?? payload.fingerprint?.start_url ?? "about:blank", { allowBlank: true });
     revision(payload.cookiesUpdatedAt);
-    if (payload.lockToken != null && (typeof payload.lockToken !== "string" || payload.lockToken.length > 512)) throw new Error("Invalid profile lock token");
-    if (payload.deviceId != null && (typeof payload.deviceId !== "string" || !payload.deviceId || payload.deviceId.length > 512 || /[\r\n\0]/.test(payload.deviceId))) throw new Error("Invalid device ID");
+    if (payload.lockToken != null && (typeof payload.lockToken !== "string" || payload.lockToken.length > 512)) throw new Error("Некорректный токен блокировки профиля");
+    if (payload.deviceId != null && (typeof payload.deviceId !== "string" || !payload.deviceId || payload.deviceId.length > 512 || /[\r\n\0]/.test(payload.deviceId))) throw new Error("Некорректный идентификатор устройства");
     const entry = {
       profileId: id, name: typeof payload.name === "string" ? payload.name.slice(0, 200) : "Profile",
       lockToken: payload.lockToken ?? null, deviceId: payload.deviceId ?? null, partition: `persist:profile-${id}`,
@@ -325,26 +325,26 @@ function createProfileRuntime(electron, options = {}) {
         // Background permission requests cannot enable arbitrary device access.
         entry.ses.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
         entry.ses.setPermissionCheckHandler(() => false);
-      const initialized = await initializeCookies(entry.ses, cookieStore(), { ...payload, profileId: id });
-      entry.cookiesUpdatedAt = initialized.cookiesUpdatedAt;
-      entry.cookieSignature = initialized.signature;
-      entry.cookieSource = initialized.source;
-      entry.extensionsLoaded = new Map();
-      if (extensionStore) {
-        if (initialSettings && extensionStore.applyCloudSettings) await extensionStore.applyCloudSettings(initialSettings.extensions);
-        const extensionResult = await extensionStore.loadIntoSession(entry.ses, entry.extensionsLoaded);
-        entry.extensionErrors = extensionResult.errors;
-        await reloadExtensionList(entry);
-      }
-       const bookmarkState = initialSettings || await (bookmarkStore().readState?.(id) || bookmarkStore().read(id).then((bookmarks) => ({ bookmarks, barVisible: true, stored: true }))).catch(() => ({ bookmarks: [], barVisible: true, stored: true }));
-       entry.bookmarks = bookmarkState.bookmarks;
-       entry.bookmarkBarVisible = initialSettings ? initialSettings.bookmarkBarVisible : (bookmarkState.bookmarks.length ? true : bookmarkState.barVisible);
-       if (initialSettings) await bookmarkStore().write(id, { bookmarks: entry.bookmarks, barVisible: entry.bookmarkBarVisible });
-       // Новый профиль получает стартовый набор рабочих закладок один раз.
-       if (!initialSettings && !bookmarkState.stored && !bookmarkState.bookmarks.length) {
-         entry.bookmarks = defaultBookmarks();
-         void saveBookmarks(entry, entry.bookmarks);
-       }
+        const initialized = await initializeCookies(entry.ses, cookieStore(), { ...payload, profileId: id });
+        entry.cookiesUpdatedAt = initialized.cookiesUpdatedAt;
+        entry.cookieSignature = initialized.signature;
+        entry.cookieSource = initialized.source;
+        entry.extensionsLoaded = new Map();
+        if (extensionStore) {
+          if (initialSettings && extensionStore.applyCloudSettings) await extensionStore.applyCloudSettings(initialSettings.extensions);
+          const extensionResult = await extensionStore.loadIntoSession(entry.ses, entry.extensionsLoaded);
+          entry.extensionErrors = extensionResult.errors;
+          await reloadExtensionList(entry);
+        }
+        const bookmarkState = initialSettings || await (bookmarkStore().readState?.(id) || bookmarkStore().read(id).then((bookmarks) => ({ bookmarks, barVisible: true, stored: true }))).catch(() => ({ bookmarks: [], barVisible: true, stored: true }));
+        entry.bookmarks = bookmarkState.bookmarks;
+        entry.bookmarkBarVisible = initialSettings ? initialSettings.bookmarkBarVisible : (bookmarkState.bookmarks.length ? true : bookmarkState.barVisible);
+        if (initialSettings) await bookmarkStore().write(id, { bookmarks: entry.bookmarks, barVisible: entry.bookmarkBarVisible });
+        // Новый профиль получает стартовый набор рабочих закладок один раз.
+        if (!initialSettings && !bookmarkState.stored && !bookmarkState.bookmarks.length) {
+          entry.bookmarks = defaultBookmarks();
+          void saveBookmarks(entry, entry.bookmarks);
+        }
       const saved = await tabStore().read(id).catch(() => ({ tabs: [], activeIndex: 0 }));
       const plan = url !== "about:blank" ? [url] : (saved.tabs.length ? saved.tabs : ["about:blank"]);
       await makeWindow(entry, plan[0], true);
@@ -440,7 +440,7 @@ function createProfileRuntime(electron, options = {}) {
       entry.extensionErrors = extensionResult.errors;
       await reloadExtensionList(entry);
       entry.browser?.publish?.();
-       notifyBrowserSettings(entry);
+      notifyBrowserSettings(entry);
       return extensionResult.errors.length;
     }));
     return failures.reduce((total, count) => total + count, 0);

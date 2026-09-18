@@ -197,7 +197,7 @@ function createProfileRuntime(electron, options = {}) {
     const all = await extensionStore.list().catch(() => []);
     entry.extensionList = all
       .filter((item) => !entry.extensionsLoaded || entry.extensionsLoaded.has(item.id))
-      .map((item) => ({ id: item.id, name: item.name, version: item.version, enabled: item.enabled !== false, icon: item.icon || "", pinned: item.pinned === true }));
+       .map((item) => ({ id: item.id, name: item.name, version: item.version, enabled: item.enabled !== false, icon: item.icon || "", pinned: item.pinned === true, ...(item.url ? { url: item.url } : {}) }));
   }
   function checkConnection(entry) {
     if (entry.checkJob) return entry.checkJob;
@@ -356,6 +356,7 @@ function createProfileRuntime(electron, options = {}) {
         entry.state = "running";
         watchCookies(entry);
         entry.browser?.publish?.();
+        notifyBrowserSettings(entry);
         void checkConnection(entry);
         return status(entry);
       } catch (error) {

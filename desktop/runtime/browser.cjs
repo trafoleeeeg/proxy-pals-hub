@@ -25,6 +25,7 @@ async function createProfileBrowser(electron, {
   setBookmarkBarVisible = async () => {}, setExtensionPinned = async () => {}, openExtensionManager = () => {}, onTabsChanged = () => {},
   getZoomLevel = () => 0, setZoomLevel = async () => {},
   getProxies = () => [], getProxyFailover = () => false, switchProxy = async () => {}, setProxyFailover = async () => {},
+  getLeaks = () => null, checkLeaks = async () => {},
 }) {
   const { BrowserWindow, WebContentsView, session, ipcMain } = electron;
   let registry = handlers.get(ipcMain);
@@ -60,6 +61,7 @@ async function createProfileBrowser(electron, {
   let error = "";
   let bookmarksOpen = false;
   let proxiesOpen = false;
+  let leakChecking = false;
   let destroyed = false;
   let commandQueue = Promise.resolve();
   const active = () => tabs.get(activeId);
@@ -70,7 +72,7 @@ async function createProfileBrowser(electron, {
     const currentUrl = active()?.webContents.getURL() || active()?.url || "";
     const bookmarks = getBookmarks();
     shell.webContents.send("umbra-runtime:state", { name, activeId, error, home: isHome(active()), info: getInfo(),
-       bookmarks, bookmarksOpen, proxiesOpen, proxies: getProxies(), proxyFailover: getProxyFailover(), bookmarkBarVisible: getBookmarkBarVisible(), extensions: getExtensions(), bookmarked: bookmarks.some((item) => item.url === currentUrl),
+       bookmarks, bookmarksOpen, proxiesOpen, proxies: getProxies(), proxyFailover: getProxyFailover(), leaks: getLeaks(), leakChecking, bookmarkBarVisible: getBookmarkBarVisible(), extensions: getExtensions(), bookmarked: bookmarks.some((item) => item.url === currentUrl),
        canRestoreTab: recentlyClosed.length > 0, find: active()?.find || null,
        zoomPercent: active() ? Math.round(100 * Math.pow(1.2, active().webContents.getZoomLevel())) : 100,
       tabs: tabOrder.map((id) => tabs.get(id)).filter((tab) => tab && !tab.isDestroyed()).map((tab) => ({
@@ -117,11 +119,20 @@ async function createProfileBrowser(electron, {
       case "home": bookmarksOpen = false; proxiesOpen = false; if (tab) await tab.loadURL("about:blank"); break;
       case "show-bookmarks": bookmarksOpen = true; proxiesOpen = false; layout(); break;
       case "hide-bookmarks": bookmarksOpen = false; layout(); break;
-      case "show-proxies": proxiesOpen = true; bookmarksOpen = false; layout(); void checkConnection(); break;
+      case "show-proxies": proxiesOpen = true; bookmarksOpen = false; layout(); void checkConnection(); void command({ action: "check-leaks" }); break;
       case "hide-proxies": proxiesOpen = false; layout(); break;
       case "switch-proxy": {
         try { await switchProxy(String(message.id || "")); }
         catch (failure) { error = failure.message || "Не удалось переключить прокси"; }
+        break;
+      }
+      case "check-leaks": {
+        if (leakChecking) break;
+        leakChecking = true;
+        publish();
+        try { await checkLeaks(); }
+        catch { error = "Не удалось проверить утечки"; }
+        finally { leakChecking = false; }
         break;
       }
       case "toggle-proxy-failover": await setProxyFailover(message.value === true); break;

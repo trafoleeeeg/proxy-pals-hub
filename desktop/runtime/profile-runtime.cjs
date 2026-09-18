@@ -6,6 +6,7 @@ const { createTabStore, sanitizeTabs } = require("./tabs.cjs");
 const { createBookmarkStore, defaultBookmarks } = require("./bookmarks.cjs");
 const { normalizeFingerprint, applyFingerprint } = require("./fingerprint.cjs");
 const { sanitizeBrowserSettings } = require("./browser-settings.cjs");
+const { SAFE_WEBRTC } = require("./leak-check.cjs");
 
 function createProfileRuntime(electron, options = {}) {
   const { session, app, safeStorage } = electron;
@@ -168,11 +169,33 @@ function createProfileRuntime(electron, options = {}) {
         return saveBookmarks(entry, entry.bookmarks || []);
       },
       openExtensionManager: () => { app?.emit?.("umbra:manage-extensions"); },
+      getLeaks: () => entry.leaks || null,
+      checkLeaks: () => runLeakAudit(entry),
       getProxies: () => safeProxyList(entry),
       getProxyFailover: () => entry.proxyFailover === true,
       switchProxy: (id) => switchProxy(entry, id),
       setProxyFailover: async (value) => { entry.proxyFailover = value === true; notifyBrowserSettings(entry); },
     };
+  }
+
+  // Проверка утечек DNS/WebRTC/IP: при утечке трафик профиля блокируется,
+  // пока прокси не будет исправлен.
+  async function runLeakAudit(entry) {
+    if (!options.auditLeaks || entry.state !== "running") return entry.leaks || null;
+    if (entry.leakJob) return entry.leakJob;
+    entry.leakJob = Promise.resolve()
+      .then(() => options.auditLeaks({ ses: entry.ses, hasProxy: !!entry.proxyTarget, webrtcPolicy: entry.webrtcPolicy }))
+      .then((result) => {
+        entry.leaks = { ...result, checkedAt: new Date().toISOString() };
+        if (result.leaked) entry.lastError = "Обнаружена утечка: трафик профиля заблокирован";
+        return entry.leaks;
+      })
+      .catch(() => {
+        entry.leaks = { ok: false, leaked: false, checks: [{ id: "ip", label: "Проверка", state: "error", detail: "Не удалось выполнить проверку" }], checkedAt: new Date().toISOString() };
+        return entry.leaks;
+      })
+      .finally(() => { entry.leakJob = null; });
+    return entry.leakJob;
   }
 
   // Пароли прокси остаются в основном процессе: в окно профиля уходит
@@ -238,6 +261,9 @@ function createProfileRuntime(electron, options = {}) {
       entry.proxyTarget = config;
       entry.activeProxyId = target.id;
       entry.proxyLabel = proxyLabel(config);
+      entry.webrtcPolicy = SAFE_WEBRTC;
+      try { entry.ses.setWebRTCIPHandlingPolicy?.(SAFE_WEBRTC); } catch { /* политика недоступна в этой сборке */ }
+      entry.leaks = null;
       entry.connection = null;
       entry.checkedAt = null;
       notifyBrowserSettings(entry);
@@ -446,6 +472,10 @@ function createProfileRuntime(electron, options = {}) {
         entry.proxyTarget = launchProxy;
         entry.activeProxyId = matchPoolId(entry, launchProxy);
         entry.proxyLabel = proxyLabel(launchProxy);
+        if (launchProxy) {
+          entry.webrtcPolicy = SAFE_WEBRTC;
+          try { entry.ses.setWebRTCIPHandlingPolicy?.(SAFE_WEBRTC); } catch { /* политика недоступна в этой сборке */ }
+        }
         entry.ses.setUserAgent(entry.fp.userAgent, entry.fp.languages.join(","));
         // Background permission requests cannot enable arbitrary device access.
         entry.ses.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));

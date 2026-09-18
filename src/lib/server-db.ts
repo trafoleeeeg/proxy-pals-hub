@@ -14,6 +14,8 @@ type MigrationFunctions = {
   set_member_scope: Rpc<{ _team_id: string; _user_id: string; _scope: "member" | "manager" }, boolean>;
   accept_team_invite: Rpc<{ _token: string }, string>;
   ensure_workspace: Rpc<Record<string, never>, string>;
+  get_team_bookmark_defaults: Rpc<{ _team_id: string }, unknown>;
+  save_team_bookmark_defaults: Rpc<{ _team_id: string; _bookmarks: Json; _bookmark_bar_visible: boolean }, unknown>;
 };
 
 // Local migration contract until Supabase regenerates its integration files.

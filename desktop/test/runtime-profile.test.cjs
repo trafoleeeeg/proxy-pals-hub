@@ -84,6 +84,18 @@ function harness() {
 
 const payload = () => ({ profileId: ID, deviceId: "test-device", name: "Test", lockToken: "test-lock-token", fingerprint: FP, cookies: "[]", cookiesUpdatedAt: null, proxy: null, startUrl: "https://example.test" });
 
+test("saved tabs win over the profile home page unless launch requests an explicit URL", async () => {
+  const h = harness();
+  h.tabRecords.set(ID, { tabs: ["https://one.test/", "https://two.test/"], activeIndex: 1 });
+  const launch = payload();
+  delete launch.startUrl;
+  launch.fingerprint = { ...FP, startUrl: "https://home.test/" };
+  await h.runtime.launchProfileWindow(launch);
+  assert.deepEqual(h.windows.map((win) => win.url), ["https://one.test/", "https://two.test/"]);
+  assert.equal(h.windows[1].shown, true);
+  await h.runtime.closeAllProfiles();
+});
+
 test("hidden profile browser stays hidden without maximizing", async () => {
   const calls = [];
   class Shell extends EventEmitter {

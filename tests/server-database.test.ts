@@ -33,6 +33,7 @@ beforeAll(async () => {
   db = await PGlite.create();
   await db.exec(`
     create role authenticated; create role anon; create role service_role bypassrls;
+    create publication supabase_realtime;
     create schema auth;
     create table auth.users (id uuid primary key, email text, email_confirmed_at timestamptz, raw_user_meta_data jsonb default '{}');
     create function auth.uid() returns uuid language sql stable as
@@ -55,6 +56,16 @@ beforeAll(async () => {
 afterAll(async () => { await db?.close(); });
 
 describe("real migrations and RLS", () => {
+  test("team bookmarks are shared with members but cannot cross team boundaries", async () => {
+    const bookmarks = JSON.stringify([{ id: profile, title: "Почта", url: "https://mail.example.test/" }]);
+    await asUser(owner, "select public.save_team_bookmark_defaults($1, $2::jsonb, true)", [team, bookmarks]);
+    await asUser(outsider, "select public.save_team_bookmark_defaults($1, '[]'::jsonb, true)", [otherTeam]);
+    expect(await asUser(member, "select team_id from public.team_bookmark_defaults")).toEqual([{ team_id: team }]);
+    await expect(asUser(member, "select public.save_team_bookmark_defaults($1, '[]'::jsonb, true)", [team])).rejects.toThrow("Недостаточно прав");
+    await expect(asUser(member, "select public.get_team_bookmark_defaults($1)", [otherTeam])).rejects.toThrow("Нет доступа");
+    const rows = await asUser<{ value: { bookmarks: unknown[] } }>(member, "select public.get_team_bookmark_defaults($1) as value", [team]);
+    expect(rows[0]!.value.bookmarks).toHaveLength(1);
+  });
   test("members need explicit profile access, other teams never see the profile", async () => {
     expect(await asUser(member, "select id from public.browser_profiles")).toHaveLength(0);
     await asUser(owner, "select public.set_profiles_access($1, $2::uuid[], $3, true)", [team, [profile], member]);
@@ -118,7 +129,7 @@ describe("real migrations and RLS", () => {
     expect((await asUser<{ folder: string }>(owner, "select folder from public.browser_profiles where id = $1", [profile]))[0]!.folder).toBe("");
     await asUser(owner, "select public.bulk_mutate_profiles($1, $2::uuid[], 'update', $3::jsonb)", [team, [profile], JSON.stringify({ folder: "Ready", tags: ["a", "b"] })]);
     expect((await asUser<{ folder: string }>(owner, "select folder from public.browser_profiles where id = $1", [profile]))[0]!.folder).toBe("Ready");
-    await expect(asUser(member, "select public.bulk_mutate_profiles($1, $2::uuid[], 'delete', '{}'::jsonb)", [team, [profile]])).rejects.toThrow("Only the team owner");
+    await expect(asUser(member, "select public.bulk_mutate_profiles($1, $2::uuid[], 'delete', '{}'::jsonb)", [team, [profile]])).rejects.toThrow("Недостаточно прав для изменения профилей");
   });
 
   test("assigned proxies cannot disappear or be swapped across teams", async () => {

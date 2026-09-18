@@ -17,16 +17,18 @@ function parseRow(row: Record<string, unknown>) {
 export const saveBrowserSettings = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth]).inputValidator(inputSchema)
   .handler(async ({ data, context }) => {
-    const { data: row, error } = await context.supabase.rpc("save_profile_browser_settings", {
+    const rpc = context.supabase.rpc.bind(context.supabase) as unknown as (name: "save_profile_browser_settings", args: Record<string, unknown>) => { single: () => PromiseLike<{ data: Record<string, unknown> | null; error: { code?: string } | null }> };
+    const { data: row, error } = await rpc("save_profile_browser_settings", {
       _profile_id: data.profileId, _bookmarks: data.bookmarks,
       _bookmark_bar_visible: data.bookmarkBarVisible, _zoom_level: data.zoomLevel,
       _extensions: data.extensions, _expected_revision: data.revision,
-      ...(data.activeProxyId ? { _active_proxy_id: data.activeProxyId } : {}), _proxy_failover: data.proxyFailover,
+      _active_proxy_id: data.activeProxyId, _proxy_failover: data.proxyFailover,
     }).single();
     if (error) {
       if (error.code === "40001") throw new Error("Настройки изменились на другом компьютере");
       throw new Error("Не удалось сохранить настройки браузера");
     }
+    if (!row) throw new Error("Не удалось сохранить настройки браузера");
     return parseRow(row);
   });
 

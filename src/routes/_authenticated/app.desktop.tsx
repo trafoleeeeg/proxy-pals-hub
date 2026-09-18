@@ -1,11 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Download, Link as LinkIcon, Loader2, Monitor, Puzzle, RefreshCw, Trash2 } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
+import { Bookmark, Download, Link as LinkIcon, Loader2, Monitor, Plus, Puzzle, RefreshCw, Save, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useDesktopProfileLifecycle } from "@/hooks/useDesktopProfileLifecycle";
 import { desktop, type InstalledExtension } from "@/lib/desktop";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useWorkspace } from "@/lib/useWorkspace";
+import { getBookmarkDefaults, saveBookmarkDefaults } from "@/lib/bookmark-defaults.functions";
+import type { BookmarkDefaults } from "@/lib/bookmark-defaults";
 
 export const Route = createFileRoute("/_authenticated/app/desktop")({ component: ClientPage });
 const RELEASES = "https://github.com/trafoleeeeg/proxy-pals-hub/releases/latest";
@@ -34,6 +39,7 @@ export function ClientPage() {
       </div>
       <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs text-muted-foreground"><span>Открыто профилей: {runtime.running.length}</span><span>Ожидают синхронизации: {runtime.pending.length}</span></div>
     </section> : <section className="space-y-4 border-y border-border py-5"><h2 className="font-semibold">Установщик Windows</h2><a href={RELEASES} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm text-primary hover:underline"><Download className="size-4" />Скачать установщик из последнего релиза</a></section>}
+    <BookmarkDefaultsManager />
     <ExtensionManager />
     <section className="space-y-2 text-sm text-muted-foreground">
       <h2 className="font-semibold text-foreground">Данные профилей</h2>
@@ -41,6 +47,66 @@ export function ClientPage() {
       <p>Состояние открытых вкладок и полный браузерный профиль между устройствами не переносятся.</p>
     </section>
   </div>;
+}
+
+function BookmarkDefaultsManager() {
+  const workspace = useWorkspace();
+  const ws = workspace.data;
+  const load = useServerFn(getBookmarkDefaults);
+  const save = useServerFn(saveBookmarkDefaults);
+  const qc = useQueryClient();
+  const query = useQuery({
+    queryKey: ["bookmark-defaults", ws?.teamId],
+    queryFn: () => load({ data: { teamId: ws!.teamId } }),
+    enabled: !!ws,
+  });
+  const [rows, setRows] = useState<BookmarkDefaults["bookmarks"]>([]);
+  const [dirty, setDirty] = useState(false);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!query.data || dirty) return;
+    setRows(query.data.bookmarks);
+  }, [dirty, query.data]);
+  const canManage = ws?.canManage === true;
+  function change(id: string, field: "title" | "url", value: string) {
+    setRows((current) => current.map((item) => item.id === id ? { ...item, [field]: value } : item));
+    setDirty(true);
+  }
+  function add() {
+    setRows((current) => [...current, { id: crypto.randomUUID(), title: "Новая закладка", url: "https://" }]);
+    setDirty(true);
+  }
+  async function persist() {
+    if (!ws || busy) return;
+    const normalized = rows.map((item) => ({ ...item, title: item.title.trim(), url: item.url.trim() }));
+    try {
+      for (const item of normalized) {
+        const url = new URL(item.url);
+        if (!/^https?:$/.test(url.protocol)) throw new Error("Разрешены только ссылки HTTP и HTTPS");
+        if (!item.title) throw new Error("Укажите название каждой закладки");
+      }
+      setBusy(true);
+      const saved = await save({ data: { teamId: ws.teamId, bookmarks: normalized, bookmarkBarVisible: true } });
+      qc.setQueryData(["bookmark-defaults", ws.teamId], saved);
+      await desktop()?.pushBookmarkDefaults?.(saved);
+      setRows(saved.bookmarks); setDirty(false);
+      await qc.invalidateQueries({ queryKey: ["bookmark-defaults", ws.teamId] });
+      toast.success("Общие закладки сохранены для всех профилей");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Не удалось сохранить общие закладки");
+    } finally { setBusy(false); }
+  }
+  return <section className="space-y-4 border-y border-border py-5">
+    <div className="flex flex-wrap items-center gap-3">
+      <div><h2 className="flex items-center gap-2 font-semibold"><Bookmark className="size-4" />Общие закладки</h2><p className="mt-1 text-sm text-muted-foreground">Эта панель показывается во всех профилях команды. Личные закладки профиля сохраняются отдельно.</p></div>
+      {canManage && <div className="ml-auto flex gap-2"><Button variant="outline" disabled={busy || rows.length >= 64} onClick={add}><Plus className="size-4" />Добавить ссылку</Button><Button disabled={busy || !dirty} onClick={() => { void persist(); }}>{busy ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}Сохранить</Button></div>}
+    </div>
+    {query.isPending ? <p className="text-sm text-muted-foreground">Загрузка закладок…</p> : query.isError ? <p role="alert" className="text-sm text-destructive">Не удалось загрузить общие закладки.</p> : rows.length ? <div className="space-y-2">{rows.map((item) => <div key={item.id} className="grid gap-2 rounded-md border border-border p-3 sm:grid-cols-[minmax(140px,.6fr)_minmax(220px,1fr)_auto]">
+      <Input aria-label="Название закладки" value={item.title} disabled={!canManage || busy} maxLength={120} onChange={(event) => change(item.id, "title", event.target.value)} />
+      <Input aria-label="Адрес закладки" value={item.url} disabled={!canManage || busy} maxLength={2048} onChange={(event) => change(item.id, "url", event.target.value)} />
+      {canManage && <Button size="icon" variant="ghost" aria-label={`Удалить ${item.title}`} disabled={busy} onClick={() => { setRows((current) => current.filter((row) => row.id !== item.id)); setDirty(true); }}><Trash2 className="size-4 text-destructive" /></Button>}
+    </div>)}</div> : <p className="text-sm text-muted-foreground">Общих закладок пока нет.</p>}
+  </section>;
 }
 
 function ExtensionManager() {

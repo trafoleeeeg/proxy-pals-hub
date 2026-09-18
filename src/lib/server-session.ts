@@ -3,10 +3,11 @@ import { callServerRpc, serverDb, writeAudit, type ServerContext } from "./serve
 import { fingerprintSchema, launchSchema } from "./server-validation";
 import { parseCookieImport } from "./server-cookies";
 import { browserSettingsSchema } from "./browser-settings";
+import { bookmarkDefaultsSchema, DEFAULT_TEAM_BOOKMARKS } from "./bookmark-defaults";
 
 const proxySchema = z.object({
   protocol: z.enum(["http", "https", "socks5"]),
-  host: z.string().min(1).max(253).refine((v) => !/[\s\/@?#]/.test(v)),
+  host: z.string().min(1).max(253).refine((v) => !/[\s/@?#]/.test(v)),
   port: z.number().int().min(1).max(65535), username: z.string().max(1024).nullable(),
   password_enc: z.string().nullable(),
 });
@@ -44,14 +45,21 @@ export async function prepareSessionLaunch(context: ServerContext, data: z.infer
     const cookies = profile.cookies_enc ? JSON.stringify(parseCookieImport(decryptSecret(profile.cookies_enc))) : "[]";
     await writeAudit(context, profile.team_id, "profile.launched", profile.id);
     const { data: settingsRow } = await serverDb(context.supabase).from("profile_browser_settings").select("*").eq("profile_id", profile.id).maybeSingle();
-    const browserSettings = settingsRow ? browserSettingsSchema.safeParse({
+    const parsedBrowserSettings = settingsRow ? browserSettingsSchema.safeParse({
       profileId: settingsRow.profile_id, bookmarks: settingsRow.bookmarks,
       bookmarkBarVisible: settingsRow.bookmark_bar_visible, zoomLevel: settingsRow.zoom_level,
       extensions: settingsRow.extensions, revision: settingsRow.revision, updatedAt: settingsRow.updated_at,
       activeProxyId: settingsRow.active_proxy_id ?? null, proxyFailover: settingsRow.proxy_failover ?? false,
     }) : null;
+    const browserSettings = parsedBrowserSettings?.success ? parsedBrowserSettings.data : null;
+    const defaultsRaw = await callServerRpc(context.supabase, "get_team_bookmark_defaults", { _team_id: profile.team_id });
+    const parsedDefaults = bookmarkDefaultsSchema.parse(defaultsRaw);
+    const bookmarkDefaults = parsedDefaults.revision === 0 && parsedDefaults.bookmarks.length === 0
+      ? { teamId: profile.team_id, bookmarks: [...DEFAULT_TEAM_BOOKMARKS], bookmarkBarVisible: true, revision: 0, updatedAt: null }
+      : parsedDefaults;
     return { profileId: profile.id, name: profile.name, fingerprint, proxy, proxies, cookies,
-      browserSettings: browserSettings?.success ? browserSettings.data : null,
+      browserSettings,
+      bookmarkDefaults,
       lockToken: lease.lockToken, lockExpiresAt: lease.expiresAt, cookiesUpdatedAt: profile.cookies_updated_at, deviceId };
   } catch (error) {
     try {

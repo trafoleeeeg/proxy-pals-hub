@@ -9,6 +9,30 @@ const { sanitizeBrowserSettings } = require("./browser-settings.cjs");
 const { SAFE_WEBRTC } = require("./leak-check.cjs");
 const { createFaviconLoader } = require("./favicons.cjs");
 
+// Сообщения об ошибках запуска показываются пользователю, поэтому они переводятся
+// на русский язык на границе клиента, без утечки URL и значений cookies.
+const LAUNCH_ERROR_TEXT = [
+  [/^Unable to (?:restore|read encrypted|decrypt) cookie/i, "Не удалось восстановить cookies профиля"],
+  [/^Unable to save encrypted/i, "Не удалось сохранить cookies профиля"],
+  [/^Unable to flush encrypted/i, "Не удалось сохранить cookies профиля"],
+  [/^Unable to apply fingerprint/i, "Не удалось применить отпечаток браузера"],
+  [/^OS cookie encryption/i, "Шифрование Windows недоступно, профиль не запущен"],
+  [/^Proxy setup/i, "Не удалось поднять прокси, трафик заблокирован"],
+  [/^Profile is closing/i, "Профиль закрывается, повторите запуск"],
+  [/^Profile navigation/i, "Не удалось открыть стартовую страницу профиля"],
+  [/^Only HTTP/i, "Допустимы только адреса http(s) без логина и пароля"],
+  [/^Invalid cookie/i, "Сохранённые cookies повреждены"],
+  [/^Invalid fingerprint|^Invalid user agent/i, "Некорректные настройки отпечатка профиля"],
+  [/^Invalid proxy|^Unsupported proxy|^SOCKS5/i, "Некорректные параметры прокси"],
+  [/^Invalid start URL/i, "Некорректный стартовый адрес"],
+  [/^Invalid/i, "Некорректные данные профиля"],
+];
+
+function launchErrorText(message) {
+  for (const [pattern, text] of LAUNCH_ERROR_TEXT) if (pattern.test(message || "")) return text;
+  return "Не удалось запустить профиль";
+}
+
 function createProfileRuntime(electron, options = {}) {
   const { session, app, safeStorage } = electron;
   const createBrowser = options.createBrowser || createProfileBrowser;
@@ -439,21 +463,21 @@ function createProfileRuntime(electron, options = {}) {
       entry.fingerprintDiagnostics = await configureFingerprint(win.webContents, entry.fp);
       win.webContents.debugger.on("detach", () => {
         if (entry.closingRequested || win.closing || win.isDestroyed()) return;
-        entry.lastError = "Fingerprint debugger detached; profile stopped";
+        entry.lastError = "Отпечаток браузера отключился, профиль остановлен";
         blockSession(entry.ses);
         closeProfileWindow(entry.profileId).catch(() => {});
       });
       if (entry.closingRequested) throw new Error("Profile is closing");
       if (options.show !== false) win.show();
       if (url !== "about:blank") {
-        if (defer) void navigate(win, url, loadOptions).catch(() => { entry.lastError = "Profile navigation failed"; });
+        if (defer) void navigate(win, url, loadOptions).catch(() => { entry.lastError = "Не удалось открыть страницу"; });
         else await navigate(win, url, loadOptions);
       }
       if (entry.closingRequested) throw new Error("Profile is closing");
       if (options.show !== false) win.show();
       return win;
     } catch (error) {
-      if (!primary) entry.lastError = /^(Profile navigation failed|Unable to apply fingerprint before navigation)/.test(error.message) ? error.message : "Tab launch failed";
+      if (!primary) entry.lastError = launchErrorText(error.message);
       if (!win.isDestroyed()) win.destroy();
       throw error;
     }
@@ -571,8 +595,7 @@ function createProfileRuntime(electron, options = {}) {
         if (entry.proxyRuntime) await entry.proxyRuntime.dispose().catch(() => {});
         if (!entry.closingRequested) profiles.delete(id);
         // Errors from Electron can include navigation URLs and cookie values.
-        const allowed = /^(Invalid|Only HTTP|Unable to (?:apply fingerprint|restore profile cookies|read encrypted|decrypt cookie|save encrypted)|OS cookie|Proxy setup|Profile (?:navigation|is closing))/;
-        throw new Error(allowed.test(error.message) ? error.message : "Profile launch failed");
+        throw new Error(launchErrorText(error.message));
       }
     });
     return entry.startPromise;
@@ -616,7 +639,7 @@ function createProfileRuntime(electron, options = {}) {
       return result;
     })().catch(() => {
       entry.state = "error";
-      entry.lastError = "Profile close failed; retry required";
+      entry.lastError = "Не удалось закрыть профиль, повторите попытку";
       entry.closePromise = null;
       throw new Error(entry.lastError);
     });

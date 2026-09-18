@@ -210,7 +210,7 @@ test("snapshot failures retain the window and allow retry; snapshots carry monot
   const previous = await h.runtime.snapshotProfileCookies(ID);
   h.sessions.get(`persist:profile-${ID}`).cookies.update([{ name: "changed", value: "v", domain: "example.test", path: "/", session: true }]);
   h.setSnapshotFailure(true);
-  await assert.rejects(h.runtime.closeProfileWindow(ID), /close failed/);
+  await assert.rejects(h.runtime.closeProfileWindow(ID), /Не удалось закрыть профиль/);
   assert.equal(h.windows[0].destroyed, false); assert.equal(closed, 0);
   h.setSnapshotFailure(false);
   const result = await h.runtime.closeProfileWindow(ID);
@@ -236,7 +236,7 @@ test("fingerprint camelCase/legacy mappings and document overrides precede navig
 test("closing an in-flight launch cleans up and does not leave a stale registry entry", async () => {
   const h = harness(); const gate = defer(); h.setNavigationGate(gate);
   const launch = h.runtime.launchProfileWindow(payload());
-  const rejected = assert.rejects(launch, /closing/);
+  const rejected = assert.rejects(launch, /Профиль закрывается/);
   await new Promise((resolve) => setImmediate(resolve));
   const closing = h.runtime.closeProfileWindow(ID);
   gate.resolve(); await rejected; await closing;

@@ -425,7 +425,10 @@ function createProfileRuntime(electron, options = {}) {
       });
       if (entry.closingRequested) throw new Error("Profile is closing");
       if (options.show !== false) win.show();
-      if (url !== "about:blank") await navigate(win, url, loadOptions);
+      if (url !== "about:blank") {
+        if (defer) void navigate(win, url, loadOptions).catch(() => { entry.lastError = "Profile navigation failed"; });
+        else await navigate(win, url, loadOptions);
+      }
       if (entry.closingRequested) throw new Error("Profile is closing");
       if (options.show !== false) win.show();
       return win;

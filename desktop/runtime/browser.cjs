@@ -157,6 +157,7 @@ async function createProfileBrowser(electron, {
   }
   function select(tab) {
     if (shell.isDestroyed() || !tab || tab.isDestroyed()) return;
+    closeExtensionPopup();
     activeId = tab.id; layout();
     // Do not let focusing a tab reveal the shell while profiles are still
     // initializing (or while a native test deliberately keeps it hidden).

@@ -102,6 +102,11 @@ async function createProfileBrowser(electron, {
     publishTimer = setTimeout(() => { publishTimer = null; sendState(); }, wait);
     publishTimer.unref?.();
   }
+  // Ответ на действие пользователя отправляем сразу, без задержки объединения.
+  function flushPublish() {
+    if (publishTimer) { clearTimeout(publishTimer); publishTimer = null; }
+    sendState();
+  }
   function layout() {
     if (shell.isDestroyed()) return;
     const { width, height } = shell.getContentBounds();

@@ -364,7 +364,9 @@ function createProfileRuntime(electron, options = {}) {
     return job;
   }
 
-  async function makeWindow(entry, url, primary = false, loadOptions = {}) {
+  // Новая вкладка открывается сразу: загрузка страницы продолжается в фоне и
+  // больше не задерживает очередь команд окна профиля.
+  async function makeWindow(entry, url, primary = false, loadOptions = {}, defer = !primary) {
     if (entry.closingRequested) throw new Error("Профиль закрывается");
     entry.browserPromise ||= createBrowser(electron, browserOptions(entry));
     entry.browser = await entry.browserPromise;

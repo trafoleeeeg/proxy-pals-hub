@@ -9,6 +9,30 @@ const { sanitizeBrowserSettings } = require("./browser-settings.cjs");
 const { SAFE_WEBRTC } = require("./leak-check.cjs");
 const { createFaviconLoader } = require("./favicons.cjs");
 
+// Сообщения об ошибках запуска показываются пользователю, поэтому они переводятся
+// на русский язык на границе клиента, без утечки URL и значений cookies.
+const LAUNCH_ERROR_TEXT = [
+  [/^Unable to (?:restore|read encrypted|decrypt) cookie/i, "Не удалось восстановить cookies профиля"],
+  [/^Unable to save encrypted/i, "Не удалось сохранить cookies профиля"],
+  [/^Unable to flush encrypted/i, "Не удалось сохранить cookies профиля"],
+  [/^Unable to apply fingerprint/i, "Не удалось применить отпечаток браузера"],
+  [/^OS cookie encryption/i, "Шифрование Windows недоступно, профиль не запущен"],
+  [/^Proxy setup/i, "Не удалось поднять прокси, трафик заблокирован"],
+  [/^Profile is closing/i, "Профиль закрывается, повторите запуск"],
+  [/^Profile navigation/i, "Не удалось открыть стартовую страницу профиля"],
+  [/^Only HTTP/i, "Допустимы только адреса http(s) без логина и пароля"],
+  [/^Invalid cookie/i, "Сохранённые cookies повреждены"],
+  [/^Invalid fingerprint|^Invalid user agent/i, "Некорректные настройки отпечатка профиля"],
+  [/^Invalid proxy|^Unsupported proxy|^SOCKS5/i, "Некорректные параметры прокси"],
+  [/^Invalid start URL/i, "Некорректный стартовый адрес"],
+  [/^Invalid/i, "Некорректные данные профиля"],
+];
+
+function launchErrorText(message) {
+  for (const [pattern, text] of LAUNCH_ERROR_TEXT) if (pattern.test(message || "")) return text;
+  return "Не удалось запустить профиль";
+}
+
 function createProfileRuntime(electron, options = {}) {
   const { session, app, safeStorage } = electron;
   const createBrowser = options.createBrowser || createProfileBrowser;

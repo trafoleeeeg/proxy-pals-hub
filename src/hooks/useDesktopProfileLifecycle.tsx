@@ -3,6 +3,9 @@ import { useServerFn } from "@tanstack/react-start";
 import { useQueryClient } from "@tanstack/react-query";
 import { launchProfile, closeProfile, heartbeatProfile, saveProfileSession } from "@/lib/session.functions";
 import { desktop, DesktopProfileLifecycle, type LifecycleSnapshot, type UpdateStatus } from "@/lib/desktop";
+import { saveBrowserSettings, fetchBrowserSettings } from "@/lib/bookmarks-sync.functions";
+import { browserSettingsSchema, type BrowserSettings } from "@/lib/browser-settings";
+import { supabase } from "@/integrations/supabase/client";
 
 const EMPTY: LifecycleSnapshot = { running: [], busy: [], pending: [], errors: {}, notices: {}, restoring: false };
 const noopSubscribe = () => () => {};
@@ -31,6 +34,8 @@ export function DesktopProfileProvider({ children }: { children: ReactNode }) {
   const close = useServerFn(closeProfile);
   const heartbeat = useServerFn(heartbeatProfile);
   const save = useServerFn(saveProfileSession);
+  const saveSettings = useServerFn(saveBrowserSettings);
+  const fetchSettings = useServerFn(fetchBrowserSettings);
   const api = useRef({ launch, close, heartbeat, save });
   api.current = { launch, close, heartbeat, save };
   const qc = useQueryClient();
@@ -70,6 +75,58 @@ export function DesktopProfileProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("online", reconnect);
     };
   }, [qc]);
+
+  useEffect(() => {
+    const bridge = desktop();
+    if (!bridge) return;
+    const timers = new Map<string, number>();
+    const revisions = new Map<string, number>();
+    const pending = new Map<string, BrowserSettings>();
+    const saveLatest = async (profileId: string) => {
+      const value = pending.get(profileId);
+      if (!value) return;
+      try {
+        const saved = await saveSettings({ data: { ...value, revision: revisions.get(profileId) ?? value.revision } });
+        if (pending.get(profileId) === value) pending.delete(profileId);
+        revisions.set(profileId, saved.revision);
+        await bridge.pushBrowserSettings(saved);
+      } catch {
+        const remote = await fetchSettings({ data: { profileId } }).catch(() => null);
+        if (remote) {
+          revisions.set(profileId, remote.revision);
+          await bridge.pushBrowserSettings(remote);
+          if (pending.get(profileId) === value) pending.delete(profileId);
+        } else {
+          timers.set(profileId, window.setTimeout(() => void saveLatest(profileId), 2_000));
+        }
+      }
+    };
+    const off = bridge.onBrowserSettingsChanged((raw) => {
+      const parsed = browserSettingsSchema.safeParse(raw);
+      if (!parsed.success) return;
+      pending.set(parsed.data.profileId, parsed.data);
+      window.clearTimeout(timers.get(parsed.data.profileId));
+      timers.set(parsed.data.profileId, window.setTimeout(() => void saveLatest(parsed.data.profileId), 500));
+    });
+    const channel = supabase.channel("profile-browser-settings")
+      .on("postgres_changes", { event: "*", schema: "public", table: "profile_browser_settings" }, (event) => {
+        const row = event.new as Record<string, unknown>;
+        const parsed = browserSettingsSchema.safeParse({
+          profileId: row["profile_id"], bookmarks: row["bookmarks"], bookmarkBarVisible: row["bookmark_bar_visible"],
+          zoomLevel: row["zoom_level"], extensions: row["extensions"], revision: row["revision"], updatedAt: row["updated_at"],
+        });
+        if (!parsed.success || parsed.data.revision <= (revisions.get(parsed.data.profileId) || 0)) return;
+        revisions.set(parsed.data.profileId, parsed.data.revision);
+        pending.delete(parsed.data.profileId);
+        window.clearTimeout(timers.get(parsed.data.profileId));
+        void bridge.pushBrowserSettings(parsed.data);
+      }).subscribe();
+    return () => {
+      off();
+      for (const timer of timers.values()) window.clearTimeout(timer);
+      void supabase.removeChannel(channel);
+    };
+  }, [fetchSettings, saveSettings]);
 
   useEffect(() => {
     const bridge = desktop();

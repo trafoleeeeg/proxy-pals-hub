@@ -183,6 +183,22 @@ function createExtensionStore(getUserData, deps = {}) {
     return pinned === true;
   }
 
+  async function applyCloudSettings(settings) {
+    const wanted = Array.isArray(settings) ? settings : [];
+    let entries = await read();
+    for (const item of wanted) {
+      if (!item || !/^[a-f0-9]{24}$/.test(String(item.id))) continue;
+      if (!entries.some((entry) => entry.id === item.id) && typeof item.url === "string") {
+        try { await installFromSource(parseExtensionUrl(item.url), item.id); } catch { /* keep other extensions usable */ }
+        entries = await read();
+      }
+    }
+    await write(entries.map((entry) => {
+      const remote = wanted.find((item) => item.id === entry.id);
+      return remote ? { ...entry, pinned: remote.pinned === true } : entry;
+    }));
+  }
+
   async function loadIntoSession(ses, loaded = new Map()) {
     const entries = await read();
     const errors = [];
@@ -218,6 +234,7 @@ function createExtensionStore(getUserData, deps = {}) {
     update: (id) => serialize(() => updateFromSource(id)),
     remove: (id) => serialize(() => remove(id)),
     setPinned: (id, pinned) => serialize(() => setPinned(id, pinned)),
+    applyCloudSettings: (settings) => serialize(() => applyCloudSettings(settings)),
     loadIntoSession: (ses, loaded) => serialize(() => loadIntoSession(ses, loaded)),
   };
 }

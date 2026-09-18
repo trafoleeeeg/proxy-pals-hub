@@ -23,6 +23,7 @@ async function createProfileBrowser(electron, {
   getBookmarks = () => [], addBookmark = async () => {}, removeBookmark = async () => {}, getExtensions = () => [],
   updateBookmark = async () => {}, reorderBookmarks = async () => {}, getBookmarkBarVisible = () => true,
   setBookmarkBarVisible = async () => {}, setExtensionPinned = async () => {}, openExtensionManager = () => {}, onTabsChanged = () => {},
+  getZoomLevel = () => 0, setZoomLevel = async () => {},
 }) {
   const { BrowserWindow, WebContentsView, session, ipcMain } = electron;
   let registry = handlers.get(ipcMain);
@@ -192,8 +193,8 @@ async function createProfileBrowser(electron, {
       case "zoom-in": case "zoom-out": case "zoom-reset": {
         if (!tab) break;
         const step = message.action === "zoom-in" ? 0.5 : -0.5;
-        const level = message.action === "zoom-reset" ? 0 : Math.max(-3, Math.min(5, tab.webContents.getZoomLevel() + step));
-        tab.webContents.setZoomLevel(level);
+         const level = message.action === "zoom-reset" ? 0 : Math.max(-3, Math.min(5, tab.webContents.getZoomLevel() + step));
+         tab.webContents.setZoomLevel(level); await setZoomLevel(level);
         break;
       }
       case "reorder-bookmarks": if (Array.isArray(message.ids)) await reorderBookmarks(message.ids); break;
@@ -306,6 +307,7 @@ async function createProfileBrowser(electron, {
         },
       });
       tabs.set(tab.id, tab); tabOrder.push(tab.id); shell.contentView.addChildView(view); select(tab);
+       wc.setZoomLevel(getZoomLevel());
       wc.on("before-input-event", shortcuts);
       wc.on("found-in-page", (_event, result) => { tab.find = { active: result.activeMatchOrdinal, total: result.matches }; publish(); });
       wc.on("context-menu", (_event, params) => {

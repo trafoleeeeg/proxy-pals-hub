@@ -111,7 +111,9 @@ export type LifecycleSnapshot = {
   restoring: boolean;
 };
 
-// Tokens and cookie snapshots stay inside this controller, never in query caches or UI state.
+// Tokens and cookie snapshots stay inside this controller, never in query caches,
+// browser settings, Realtime payloads or UI state. The encrypted server save is
+// the cross-device synchronization channel for cookies.
 export class DesktopProfileLifecycle {
   private sessions = new Map<string, RunningProfile>();
   private pending = new Map<string, SessionKey & { cookies?: string; snapshotId?: string; saved?: boolean; terminal?: TerminalClose }>();

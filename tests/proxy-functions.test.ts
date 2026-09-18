@@ -230,7 +230,7 @@ describe("proxy persistence and secret boundaries", () => {
     for (const key of Object.keys(connection)) expect(mutations(f)[1]!.payload).not.toHaveProperty(key);
   });
 
-  test("creation sets authenticated ownership and encrypts the password", async () => {
+  test("creation synchronizes only an encrypted proxy password with authenticated ownership", async () => {
     const f = fixture();
     expect(await invoke("saveProxy", { ...fields, password: "p:@%", created_by: otherUser, team_id: otherTeam }, f)).toEqual({ id });
     const inserted = mutations(f)[0]!.payload;

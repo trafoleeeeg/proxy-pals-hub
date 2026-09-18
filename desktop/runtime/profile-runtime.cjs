@@ -330,7 +330,20 @@ function createProfileRuntime(electron, options = {}) {
   function allBookmarks(entry) {
     const presets = (entry.presetBookmarks || []).map((item) => ({ ...item, managed: true }));
     const presetUrls = new Set(presets.map((item) => item.url));
-    return [...presets, ...(entry.bookmarks || []).filter((item) => !presetUrls.has(item.url))];
+    const list = [...presets, ...(entry.bookmarks || []).filter((item) => !presetUrls.has(item.url))];
+    if (!favicons) return list;
+    return list.map((item) => item.favicon ? item : { ...item, favicon: favicons.get(item.url) || "" });
+  }
+
+  // Подгружаем настоящие значки сайтов для закладок без картинки — через
+  // сессию профиля, то есть через его прокси.
+  function loadBookmarkIcons(entry) {
+    if (!favicons || !entry.ses || entry.iconJob) return;
+    const missing = allBookmarks(entry).filter((item) => !item.favicon).map((item) => item.url);
+    if (!missing.length) return;
+    entry.iconJob = favicons.load(entry.ses, missing, () => entry.browser?.publish?.())
+      .catch(() => {})
+      .finally(() => { entry.iconJob = null; entry.browser?.publish?.(); });
   }
 
   function browserSettings(entry) {

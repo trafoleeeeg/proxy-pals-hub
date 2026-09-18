@@ -34,7 +34,9 @@ function renderer() {
     if (result?.error) showError(result.error);
   }).catch(() => showError("Не удалось выполнить действие"));
   const closePopovers = (except) => {
+    const closesManager = manager !== except && !manager.hidden;
     for (const popover of [bookmarkPopover, extensionsPopover, menu, manager]) if (popover !== except) popover.hidden = true;
+    if (closesManager) void run({ action: "hide-bookmarks" });
   };
   const togglePopover = (popover, anchor) => {
     const show = popover.hidden;
@@ -188,8 +190,8 @@ function renderer() {
     current = state.tabs.find((tab) => tab.id === state.activeId);
     byId("home").hidden = !state.home;
     renderHome(state.info);
-    document.title = state.name + " — Umbra";
-    if (document.activeElement !== address) address.value = current?.url === "about:blank" ? "" : current?.url || "";
+    document.title = state.bookmarksOpen ? "Закладки — Umbra" : state.name + " — Umbra";
+    if (document.activeElement !== address) address.value = state.bookmarksOpen ? "umbra://bookmarks" : current?.url === "about:blank" ? "" : current?.url || "";
     showError(state.error || current?.error || "");
     byId("back").disabled = !current?.canGoBack;
     byId("forward").disabled = !current?.canGoForward;

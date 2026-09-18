@@ -108,12 +108,12 @@ async function createProfileBrowser(electron, {
     const tab = active();
     switch (message.action) {
       case "state": break;
-      case "new": await openTab("about:blank"); focusAddress(); break;
-      case "home": if (tab) await tab.loadURL("about:blank"); break;
+      case "new": bookmarksOpen = false; await openTab("about:blank"); focusAddress(); break;
+      case "home": bookmarksOpen = false; if (tab) await tab.loadURL("about:blank"); break;
       case "show-bookmarks": bookmarksOpen = true; layout(); break;
       case "hide-bookmarks": bookmarksOpen = false; layout(); break;
       case "check-connection": await checkConnection(); break;
-      case "select": select(tabs.get(message.id)); break;
+      case "select": bookmarksOpen = false; select(tabs.get(message.id)); break;
       case "close-tab": {
         const target = tabs.get(message.id || activeId);
         if (target) {
@@ -157,6 +157,7 @@ async function createProfileBrowser(electron, {
       case "open-bookmark": {
         const saved = getBookmarks().find((item) => item.id === message.id);
         if (!saved) break;
+        bookmarksOpen = false;
         if (message.newTab || !tab) await openTab(saved.url);
         else { tab.error = ""; void tab.loadURL(saved.url).catch(() => {}); }
         break;

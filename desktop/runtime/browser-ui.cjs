@@ -357,7 +357,11 @@ function renderer() {
       });
       return button;
     }));
+    }
     const extensions = state.extensions || [];
+    const extensionKey = extensions.map((item) => item.id + ":" + item.pinned + ":" + item.enabled).join("|");
+    if (extensionKey !== extensionSignature) {
+    extensionSignature = extensionKey;
     byId("extensions-count").textContent = extensions.length ? String(extensions.length) : "";
     const list = byId("extensions-list");
     list.replaceChildren(...extensions.map((extension) => {

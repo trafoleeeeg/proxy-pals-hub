@@ -191,7 +191,11 @@ export class DesktopProfileLifecycle {
     this.emit();
     const job = (async () => {
       try {
-        await withDesktopTimeout(this.loadOutbox(), "Очередь сохранения не ответила вовремя");
+        const outbox = await withDesktopTimeout(this.bridge.pendingProfileClosures(), "Очередь сохранения не ответила вовремя");
+        if (!outbox.ok) throw new Error("Не удалось прочитать ожидающие сессии.");
+        // Mark only affected profiles as unavailable immediately. Uploading
+        // their durable snapshots continues in sync() and must not hold the UI.
+        this.outboxFailures = new Set(outbox.profiles.map((profile) => profile.profileId));
         const result = await withDesktopTimeout(this.bridge.listRunningProfiles(), "Приложение не ответило вовремя");
         if (!result.ok) throw new Error();
         for (const profile of result.profiles) {

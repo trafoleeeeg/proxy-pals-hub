@@ -120,7 +120,7 @@ describe("desktop profile lifecycle", () => {
     const f = fixture(); f.state.outbox = [event("a")];
     const ack = f.bridge.acknowledgeProfileClosure;
     f.bridge.acknowledgeProfileClosure = async () => ({ ok: false });
-    await f.controller.restore();
+    await f.controller.restore(); await f.controller.sync();
     expect(f.state.closeCalls).toHaveLength(1); expect(f.state.outbox).toHaveLength(1);
     f.bridge.acknowledgeProfileClosure = ack;
     await f.controller.sync();
@@ -145,7 +145,7 @@ describe("desktop profile lifecycle", () => {
     expect(writes).toBe(1);
     f.bridge.acknowledgeProfileClosure = ack;
     const restarted = new DesktopProfileLifecycle(f.bridge, f.api);
-    await restarted.restore();
+    await restarted.restore(); await restarted.sync();
     expect(f.state.closeCalls).toHaveLength(2);
     expect(f.state.closeCalls[1]).toEqual(f.state.closeCalls[0]);
     expect(writes).toBe(1);

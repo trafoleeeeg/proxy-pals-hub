@@ -26,7 +26,6 @@ export async function confirmRotation({
   // require the same new address in two consecutive fresh connections.
   // Проверяем часто, чтобы подтверждение нового IP занимало секунды, а не минуту.
   let candidateIp: string | null = null;
-  let stale = false;
   for (let attempt = 0; attempt < attempts; attempt++) {
     // Короткие паузы: подтверждение занимает секунды, а не минуту.
     await wait(attempt === 0 ? 300 : 700);
@@ -42,13 +41,11 @@ export async function confirmRotation({
       return { ...result, rotationConfirmed: true };
     }
     candidateIp = changedIp;
-    // Промежуточную запись не ждём: она не должна задерживать следующую проверку.
-    const saved = record(result, final, false);
-    if (final) await saved;
-    else void Promise.resolve(saved).then((value) => {
-      if (value && typeof value === "object" && "staleRotation" in value && value.staleRotation === true) stale = true;
-    }).catch(() => {});
-    if (stale) return { ...result, rotationConfirmed: false };
+    const saved = await record(result, final, false);
+    if (saved && typeof saved === "object" && "staleRotation" in saved && saved.staleRotation === true) {
+      return { ...result, rotationConfirmed: false };
+    }
+  }
   }
   throw new Error("Провайдер принял запрос, но новый IP не подтверждён. Повторите проверку позже.");
 }

@@ -90,9 +90,10 @@ function renderer() {
     manager.hidden = false;
     renderManager();
     managerSearch.focus();
+    void run({ action: "show-bookmarks" });
   }
   byId("bookmarks-button").addEventListener("click", openManager);
-  byId("manager-close").addEventListener("click", () => { manager.hidden = true; });
+  byId("manager-close").addEventListener("click", () => { manager.hidden = true; void run({ action: "hide-bookmarks" }); });
   function openFind() {
     closePopovers();
     findbar.hidden = false;
@@ -179,8 +180,9 @@ function renderer() {
     if (state.focusAddress) { address.focus(); address.select(); return; }
     if (state.focusFind) { openFind(); return; }
     latestState = state;
+    manager.hidden = !state.bookmarksOpen;
     const signature = (state.bookmarks || []).map((item) => item.id + ":" + item.url).join("|");
-    if (!manager.hidden && signature !== managerSignature) renderManager();
+    if (state.bookmarksOpen && signature !== managerSignature) renderManager();
     managerSignature = signature;
     byId("find-count").textContent = state.find && findInput.value ? `${state.find.active}/${state.find.total}` : "";
     current = state.tabs.find((tab) => tab.id === state.activeId);

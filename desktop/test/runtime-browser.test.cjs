@@ -19,6 +19,8 @@ function harness() {
     }
     getURL() { return this.url; }
     getTitle() { return this.title; }
+    getZoomLevel() { return this.zoomLevel || 0; }
+    setZoomLevel(level) { this.zoomLevel = level; }
     isLoading() { return this.loading; }
     isDestroyed() { return false; }
     async loadURL(url) { this.url = url; this.title = url === "about:blank" ? "" : new URL(url).hostname; this.emit("did-navigate", {}, url); }
@@ -131,4 +133,26 @@ test("saving the current page passes its fetched favicon to the bookmark store",
   await h.command({ action: "bookmark" });
   assert.equal(h.getBookmarks()[0].favicon, `data:image/png;base64,${favicon.toString("base64")}`);
   h.browser.destroy();
+});
+
+test("browser publishes zoom percentage and hides the page behind bookmark manager", async () => {
+  const h = await harness().start();
+  assert.equal(h.stateEvents.at(-1).zoomPercent, 100);
+  await h.command({ action: "zoom-in" });
+  assert.equal(h.stateEvents.at(-1).zoomPercent, 110);
+  await h.command({ action: "show-bookmarks" });
+  assert.equal(h.stateEvents.at(-1).bookmarksOpen, true);
+  assert.equal(h.views.at(-1).visible, false);
+  await h.command({ action: "hide-bookmarks" });
+  assert.equal(h.stateEvents.at(-1).bookmarksOpen, false);
+  assert.equal(h.views.at(-1).visible, true);
+  h.browser.destroy();
+});
+
+test("browser UI contains a dedicated bookmark manager, search and compact zoom controls", () => {
+  const source = decodeURIComponent(browserUrl().split(",", 2)[1]);
+  assert.match(source, /id="bookmarks-button"/);
+  assert.match(source, /id="manager-search"/);
+  assert.match(source, /id="zoom-value"/);
+  assert.match(source, /action: "show-bookmarks"/);
 });

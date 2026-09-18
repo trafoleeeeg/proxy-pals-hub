@@ -322,6 +322,7 @@ function createProfileRuntime(electron, options = {}) {
       const state = await bookmarkStore().write(entry.profileId, { bookmarks: list, barVisible: entry.bookmarkBarVisible !== false });
       entry.bookmarks = state.bookmarks;
       notifyBrowserSettings(entry);
+      loadBookmarkIcons(entry);
       return entry.bookmarks;
     }).catch(() => { entry.lastError = "Bookmark save failed"; return entry.bookmarks || []; });
     return entry.bookmarkQueue;

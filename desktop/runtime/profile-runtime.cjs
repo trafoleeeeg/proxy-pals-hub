@@ -7,6 +7,7 @@ const { createBookmarkStore, defaultBookmarks, sanitizeBookmarks } = require("./
 const { normalizeFingerprint, applyFingerprint } = require("./fingerprint.cjs");
 const { sanitizeBrowserSettings } = require("./browser-settings.cjs");
 const { SAFE_WEBRTC } = require("./leak-check.cjs");
+const { createFaviconLoader } = require("./favicons.cjs");
 
 function createProfileRuntime(electron, options = {}) {
   const { session, app, safeStorage } = electron;
@@ -22,6 +23,7 @@ function createProfileRuntime(electron, options = {}) {
   const tabStore = () => tabStoreRef ||= options.tabStore || createTabStore({ safeStorage, userData: app.getPath("userData") });
   const bookmarkStore = () => bookmarkStoreRef ||= options.bookmarkStore || createBookmarkStore({ safeStorage, userData: app.getPath("userData") });
   const extensionStore = options.extensionStore;
+  const favicons = options.faviconLoader || (electron.net ? createFaviconLoader({ net: electron.net }) : null);
 
   function status(entry) {
     return {
@@ -320,6 +322,7 @@ function createProfileRuntime(electron, options = {}) {
       const state = await bookmarkStore().write(entry.profileId, { bookmarks: list, barVisible: entry.bookmarkBarVisible !== false });
       entry.bookmarks = state.bookmarks;
       notifyBrowserSettings(entry);
+      loadBookmarkIcons(entry);
       return entry.bookmarks;
     }).catch(() => { entry.lastError = "Bookmark save failed"; return entry.bookmarks || []; });
     return entry.bookmarkQueue;
@@ -328,7 +331,20 @@ function createProfileRuntime(electron, options = {}) {
   function allBookmarks(entry) {
     const presets = (entry.presetBookmarks || []).map((item) => ({ ...item, managed: true }));
     const presetUrls = new Set(presets.map((item) => item.url));
-    return [...presets, ...(entry.bookmarks || []).filter((item) => !presetUrls.has(item.url))];
+    const list = [...presets, ...(entry.bookmarks || []).filter((item) => !presetUrls.has(item.url))];
+    if (!favicons) return list;
+    return list.map((item) => item.favicon ? item : { ...item, favicon: favicons.get(item.url) || "" });
+  }
+
+  // Подгружаем настоящие значки сайтов для закладок без картинки — через
+  // сессию профиля, то есть через его прокси.
+  function loadBookmarkIcons(entry) {
+    if (!favicons || !entry.ses || entry.iconJob) return;
+    const missing = allBookmarks(entry).filter((item) => !item.favicon).map((item) => item.url);
+    if (!missing.length) return;
+    entry.iconJob = favicons.load(entry.ses, missing, () => entry.browser?.publish?.())
+      .catch(() => {})
+      .finally(() => { entry.iconJob = null; entry.browser?.publish?.(); });
   }
 
   function browserSettings(entry) {
@@ -364,7 +380,9 @@ function createProfileRuntime(electron, options = {}) {
     return job;
   }
 
-  async function makeWindow(entry, url, primary = false, loadOptions = {}) {
+  // Новая вкладка открывается сразу: загрузка страницы продолжается в фоне и
+  // больше не задерживает очередь команд окна профиля.
+  async function makeWindow(entry, url, primary = false, loadOptions = {}, defer = !primary) {
     if (entry.closingRequested) throw new Error("Профиль закрывается");
     entry.browserPromise ||= createBrowser(electron, browserOptions(entry));
     entry.browser = await entry.browserPromise;
@@ -423,7 +441,10 @@ function createProfileRuntime(electron, options = {}) {
       });
       if (entry.closingRequested) throw new Error("Profile is closing");
       if (options.show !== false) win.show();
-      if (url !== "about:blank") await navigate(win, url, loadOptions);
+      if (url !== "about:blank") {
+        if (defer) void navigate(win, url, loadOptions).catch(() => { entry.lastError = "Profile navigation failed"; });
+        else await navigate(win, url, loadOptions);
+      }
       if (entry.closingRequested) throw new Error("Profile is closing");
       if (options.show !== false) win.show();
       return win;
@@ -533,6 +554,7 @@ function createProfileRuntime(electron, options = {}) {
         entry.browser?.publish?.();
         notifyBrowserSettings(entry);
         void checkConnection(entry);
+        loadBookmarkIcons(entry);
         return status(entry);
       } catch (error) {
         entry.state = "failed";

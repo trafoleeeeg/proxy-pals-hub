@@ -66,19 +66,46 @@ async function createProfileBrowser(electron, {
   let commandQueue = Promise.resolve();
   const active = () => tabs.get(activeId);
   const isHome = (tab) => !!tab && tab.url === "about:blank";
-  function publish() {
+  // Тяжёлые списки (закладки со значками, расширения, прокси) отправляем в окно
+  // только когда они действительно изменились, а сами обновления объединяем,
+  // иначе поток событий загрузки страницы забивает канал и окно начинает тормозить.
+  const heavySignatures = new Map();
+  let publishTimer = null;
+  let publishedAt = 0;
+  const MIN_PUBLISH_INTERVAL = 60;
+  function sendState() {
     if (shell.isDestroyed()) return;
+    publishedAt = Date.now();
     layout();
     const currentUrl = active()?.webContents.getURL() || active()?.url || "";
     const bookmarks = getBookmarks();
-    shell.webContents.send("umbra-runtime:state", { name, activeId, error, home: isHome(active()), info: getInfo(),
+    const payload = { name, activeId, error, home: isHome(active()), info: getInfo(),
        bookmarks, bookmarksOpen, proxiesOpen, proxies: getProxies(), proxyFailover: getProxyFailover(), leaks: getLeaks(), leakChecking, bookmarkBarVisible: getBookmarkBarVisible(), extensions: getExtensions(), bookmarked: bookmarks.some((item) => item.url === currentUrl),
        canRestoreTab: recentlyClosed.length > 0, find: active()?.find || null,
        zoomPercent: active() ? Math.round(100 * Math.pow(1.2, active().webContents.getZoomLevel())) : 100,
       tabs: tabOrder.map((id) => tabs.get(id)).filter((tab) => tab && !tab.isDestroyed()).map((tab) => ({
       id: tab.id, url: tab.webContents.getURL() || tab.url, title: tab.webContents.getTitle(), favicon: tab.favicon || "", error: tab.error,
       loading: tab.webContents.isLoading(), canGoBack: tab.webContents.navigationHistory.canGoBack(), canGoForward: tab.webContents.navigationHistory.canGoForward(),
-    })) });
+    })) };
+    for (const key of ["bookmarks", "extensions", "proxies", "leaks", "info"]) {
+      let signature;
+      try { signature = JSON.stringify(payload[key]); } catch { signature = null; }
+      if (signature !== null && heavySignatures.get(key) === signature) delete payload[key];
+      else heavySignatures.set(key, signature);
+    }
+    shell.webContents.send("umbra-runtime:state", payload);
+  }
+  function publish() {
+    if (shell.isDestroyed() || publishTimer) return;
+    const wait = Math.max(0, MIN_PUBLISH_INTERVAL - (Date.now() - publishedAt));
+    if (!wait) { sendState(); return; }
+    publishTimer = setTimeout(() => { publishTimer = null; sendState(); }, wait);
+    publishTimer.unref?.();
+  }
+  // Ответ на действие пользователя отправляем сразу, без задержки объединения.
+  function flushPublish() {
+    if (publishTimer) { clearTimeout(publishTimer); publishTimer = null; }
+    sendState();
   }
   function layout() {
     if (shell.isDestroyed()) return;
@@ -97,7 +124,7 @@ async function createProfileBrowser(electron, {
     if (show && shell.isVisible()) {
       if (isHome(tab)) shell.webContents.focus(); else tab.webContents.focus();
     }
-    publish();
+    flushPublish();
     if (ready) onTabsChanged();
   }
   function closeTab(target) {
@@ -239,7 +266,7 @@ async function createProfileBrowser(electron, {
       case "reload": if (tab) { tab.error = ""; if (tab.webContents.isLoading()) tab.webContents.stop(); else tab.webContents.reload(); } break;
        default: throw new Error("Неизвестная команда браузера");
     }
-    publish();
+    flushPublish();
   }
   function dispatch(message) {
     // Switching existing tabs must not wait for a slow new tab or network check.
@@ -294,6 +321,7 @@ async function createProfileBrowser(electron, {
   shell.on("close", (event) => { event.preventDefault(); void closeProfile().catch(() => { error = "Не удалось сохранить профиль. Повторите закрытие."; publish(); }); });
   shell.on("closed", () => {
     destroyed = true;
+    clearTimeout(publishTimer); publishTimer = null;
     registry.delete(shellContents);
     for (const tab of [...tabs.values()]) tab.destroy();
     if (!registry.size) { ipcMain.removeHandler("umbra-runtime:browser"); handlers.delete(ipcMain); }

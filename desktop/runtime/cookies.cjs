@@ -24,6 +24,8 @@ function canonicalCookies(cookies) {
 async function restoreCookies(ses, cookies) {
   // Replace, including removals; merging would revive cookies deleted elsewhere.
   await ses.clearStorageData({ storages: ["cookies"] });
+  let restored = 0;
+  let skipped = 0;
   for (const cookie of cookies) {
     if (cookie.expirationDate != null && cookie.expirationDate <= Date.now() / 1000) continue;
     const host = cookie.domain.replace(/^\./, "");
@@ -35,10 +37,18 @@ async function restoreCookies(ses, cookies) {
     if (!cookie.hostOnly) details.domain = cookie.domain;
     if (!cookie.session && cookie.expirationDate != null) details.expirationDate = cookie.expirationDate;
     if (cookie.sameSite) details.sameSite = cookie.sameSite;
-    try { await ses.cookies.set(details); }
-    catch { throw new Error("Unable to restore profile cookies"); }
+    try {
+      await ses.cookies.set(details);
+      restored += 1;
+    } catch {
+      // Chromium occasionally rejects obsolete or origin-incompatible cookies
+      // from an older snapshot. One bad entry must not prevent the profile from
+      // opening or discard every other valid cookie.
+      skipped += 1;
+    }
   }
   await ses.cookies.flushStore();
+  return { restored, skipped };
 }
 
 function createCookieStore({ safeStorage, userData }) {
@@ -108,11 +118,11 @@ async function initializeCookies(ses, store, payload) {
     selected = { cookies: existing.length ? existing : parseCookies(payload.cookies ?? "[]"), cookiesUpdatedAt: null };
     source = existing.length ? "native-disk" : "cloud";
   }
-  await restoreCookies(ses, selected.cookies);
+  const restoreResult = await restoreCookies(ses, selected.cookies);
   const cookies = await ses.cookies.get({});
   const cookiesUpdatedAt = selected.cookiesUpdatedAt || new Date().toISOString();
   await store.write(payload.profileId, cookies, cookiesUpdatedAt);
-  return { cookiesUpdatedAt, signature: canonicalCookies(cookies), source };
+  return { cookiesUpdatedAt, signature: canonicalCookies(cookies), source, skippedCookies: restoreResult.skipped };
 }
 
 module.exports = { createCookieStore, initializeCookies, canonicalCookies, parseCookies, restoreCookies };

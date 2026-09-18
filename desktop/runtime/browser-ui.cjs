@@ -364,17 +364,26 @@ function renderer() {
     extensionSignature = extensionKey;
     byId("extensions-count").textContent = extensions.length ? String(extensions.length) : "";
     const list = byId("extensions-list");
+    const openExtension = (extension) => {
+      extensionsPopover.hidden = true;
+      void run({ action: "open-extension", id: extension.id });
+    };
     list.replaceChildren(...extensions.map((extension) => {
       const row = document.createElement("div"); row.className = "extension-row";
+      const open = document.createElement("button"); open.type = "button"; open.className = "extension-open";
+      open.title = extension.popup ? `Открыть ${extension.name}` : `${extension.name}: своего окна нет`;
+      open.setAttribute("aria-label", open.title);
       const image = document.createElement(extension.icon ? "img" : "span"); image.className = "extension-icon";
       if (extension.icon) { image.src = extension.icon; image.alt = ""; } else image.innerHTML = icon("globe");
       const text = document.createElement("div"); const title = document.createElement("strong"); title.textContent = extension.name;
       const meta = document.createElement("small"); meta.textContent = `Версия ${extension.version} · ${extension.enabled === false ? "отключено" : "включено"}`;
+      text.append(title, meta); open.append(image, text);
+      open.onclick = () => openExtension(extension);
       const pin = document.createElement("button"); pin.type = "button"; pin.className = "pin-extension";
       pin.title = extension.pinned ? "Открепить от панели" : "Закрепить на панели";
       pin.setAttribute("aria-label", pin.title); pin.textContent = extension.pinned ? "●" : "○";
       pin.onclick = () => void run({ action: "pin-extension", id: extension.id, pinned: !extension.pinned });
-      text.append(title, meta); row.append(image, text, pin); return row;
+      row.append(open, pin); return row;
     }));
     byId("extensions-empty").hidden = extensions.length > 0;
     pinnedExtensions.replaceChildren(...extensions.filter((extension) => extension.pinned).map((extension) => {
@@ -382,7 +391,8 @@ function renderer() {
       button.title = extension.name; button.setAttribute("aria-label", `Расширение: ${extension.name}`);
       if (extension.icon) { const image = document.createElement("img"); image.src = extension.icon; image.alt = ""; button.append(image); }
       else button.innerHTML = icon("globe");
-      button.onclick = () => togglePopover(extensionsPopover, button);
+      // Клик по значку открывает само расширение, как в Chrome.
+      button.onclick = () => extension.popup ? openExtension(extension) : togglePopover(extensionsPopover, button);
       return button;
     }));
     }

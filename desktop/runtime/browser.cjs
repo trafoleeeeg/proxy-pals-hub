@@ -66,19 +66,41 @@ async function createProfileBrowser(electron, {
   let commandQueue = Promise.resolve();
   const active = () => tabs.get(activeId);
   const isHome = (tab) => !!tab && tab.url === "about:blank";
-  function publish() {
+  // Тяжёлые списки (закладки со значками, расширения, прокси) отправляем в окно
+  // только когда они действительно изменились, а сами обновления объединяем,
+  // иначе поток событий загрузки страницы забивает канал и окно начинает тормозить.
+  const heavySignatures = new Map();
+  let publishTimer = null;
+  let publishedAt = 0;
+  const MIN_PUBLISH_INTERVAL = 60;
+  function sendState() {
     if (shell.isDestroyed()) return;
+    publishedAt = Date.now();
     layout();
     const currentUrl = active()?.webContents.getURL() || active()?.url || "";
     const bookmarks = getBookmarks();
-    shell.webContents.send("umbra-runtime:state", { name, activeId, error, home: isHome(active()), info: getInfo(),
+    const payload = { name, activeId, error, home: isHome(active()), info: getInfo(),
        bookmarks, bookmarksOpen, proxiesOpen, proxies: getProxies(), proxyFailover: getProxyFailover(), leaks: getLeaks(), leakChecking, bookmarkBarVisible: getBookmarkBarVisible(), extensions: getExtensions(), bookmarked: bookmarks.some((item) => item.url === currentUrl),
        canRestoreTab: recentlyClosed.length > 0, find: active()?.find || null,
        zoomPercent: active() ? Math.round(100 * Math.pow(1.2, active().webContents.getZoomLevel())) : 100,
       tabs: tabOrder.map((id) => tabs.get(id)).filter((tab) => tab && !tab.isDestroyed()).map((tab) => ({
       id: tab.id, url: tab.webContents.getURL() || tab.url, title: tab.webContents.getTitle(), favicon: tab.favicon || "", error: tab.error,
       loading: tab.webContents.isLoading(), canGoBack: tab.webContents.navigationHistory.canGoBack(), canGoForward: tab.webContents.navigationHistory.canGoForward(),
-    })) });
+    })) };
+    for (const key of ["bookmarks", "extensions", "proxies", "leaks", "info"]) {
+      let signature;
+      try { signature = JSON.stringify(payload[key]); } catch { signature = null; }
+      if (signature !== null && heavySignatures.get(key) === signature) delete payload[key];
+      else heavySignatures.set(key, signature);
+    }
+    shell.webContents.send("umbra-runtime:state", payload);
+  }
+  function publish() {
+    if (shell.isDestroyed() || publishTimer) return;
+    const wait = Math.max(0, MIN_PUBLISH_INTERVAL - (Date.now() - publishedAt));
+    if (!wait) { sendState(); return; }
+    publishTimer = setTimeout(() => { publishTimer = null; sendState(); }, wait);
+    publishTimer.unref?.();
   }
   function layout() {
     if (shell.isDestroyed()) return;

@@ -95,6 +95,15 @@ export function desktop(): UmbraBridge | null {
 
 type SessionKey = { profileId: string; lockToken: string; deviceId?: string };
 type TerminalClose = "access_revoked" | "lease_lost";
+const DESKTOP_OPERATION_TIMEOUT_MS = 15_000;
+async function withDesktopTimeout<T>(operation: Promise<T>, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), DESKTOP_OPERATION_TIMEOUT_MS);
+  });
+  try { return await Promise.race([operation, timeout]); }
+  finally { if (timer) clearTimeout(timer); }
+}
 function terminalClose(response: unknown): TerminalClose | null {
   if (!response || typeof response !== "object" || !("ok" in response) || response.ok !== false || !("terminal" in response)) return null;
   return response.terminal === "access_revoked" || response.terminal === "lease_lost" ? response.terminal : null;
@@ -182,8 +191,8 @@ export class DesktopProfileLifecycle {
     this.emit();
     const job = (async () => {
       try {
-        await this.loadOutbox();
-        const result = await this.bridge.listRunningProfiles();
+        await withDesktopTimeout(this.loadOutbox(), "Очередь сохранения не ответила вовремя");
+        const result = await withDesktopTimeout(this.bridge.listRunningProfiles(), "Приложение не ответило вовремя");
         if (!result.ok) throw new Error();
         for (const profile of result.profiles) {
           if (!this.jobs.has(profile.profileId) && (!profile.lockToken || !this.closedTokens.has(profile.lockToken))) this.sessions.set(profile.profileId, profile);

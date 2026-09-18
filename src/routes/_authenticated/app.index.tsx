@@ -145,7 +145,7 @@ function ProfilesWorkspace() {
   const withProxy = (profiles.data ?? []).filter((profile) => !!profile.proxy_id).length;
 
   if (workspace.isPending) return <p role="status" className="text-sm text-muted-foreground">Загрузка рабочего пространства…</p>;
-  if (workspace.isError) return <p role="alert" className="text-sm text-destructive">Не удалось загрузить команду. <Button variant="outline" onClick={() => workspace.refetch()}>Повторить</Button></p>;
+  if (workspace.isError) return <div role="alert" className="flex flex-wrap items-center gap-3 text-sm text-destructive"><span>Не удалось загрузить рабочее пространство.</span><Button variant="outline" disabled={workspace.isFetching} onClick={() => workspace.refetch()}><RefreshCw className={workspace.isFetching ? "size-4 animate-spin" : "size-4"} />{workspace.isFetching ? "Подключение…" : "Повторить"}</Button></div>;
 
   return <div className="space-y-3">
     <div className="flex flex-wrap items-center gap-3 border-b border-border pb-3">

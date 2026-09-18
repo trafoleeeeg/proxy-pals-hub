@@ -364,7 +364,11 @@ function createProfileRuntime(electron, options = {}) {
     const all = await extensionStore.list().catch(() => []);
     entry.extensionList = all
       .filter((item) => !entry.extensionsLoaded || entry.extensionsLoaded.has(item.id))
-      .map((item) => ({ id: item.id, name: item.name, version: item.version, enabled: item.enabled !== false, icon: item.icon || "", pinned: item.pinned === true, ...(item.url ? { url: item.url } : {}) }));
+      .map((item) => ({
+        id: item.id, name: item.name, version: item.version, enabled: item.enabled !== false, icon: item.icon || "",
+        pinned: item.pinned === true, popup: item.popup || "", runtimeId: entry.extensionsLoaded?.get(item.id) || "",
+        ...(item.url ? { url: item.url } : {}),
+      }));
   }
   function checkConnection(entry) {
     if (entry.checkJob) return entry.checkJob;

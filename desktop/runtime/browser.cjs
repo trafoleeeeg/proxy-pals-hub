@@ -115,9 +115,49 @@ async function createProfileBrowser(electron, {
       tab.view.setBounds({ x: 0, y: top, width: Math.max(1, width), height: Math.max(1, height - top) });
        tab.view.setVisible(tab.id === activeId && !isHome(tab) && !bookmarksOpen && !proxiesOpen);
     }
+    if (extensionPopup) {
+      const popupWidth = Math.min(420, Math.max(240, width - 20));
+      const popupHeight = Math.min(600, Math.max(180, height - chromeHeight - 16));
+      extensionPopup.setBounds({ x: Math.max(0, width - popupWidth - 10), y: chromeHeight, width: popupWidth, height: popupHeight });
+    }
+  }
+  // Окно расширения открывается поверх страницы, как всплывающее окно в Chrome.
+  let extensionPopup = null;
+  let extensionPopupId = "";
+  function closeExtensionPopup() {
+    const view = extensionPopup;
+    extensionPopup = null; extensionPopupId = "";
+    if (!view) return;
+    try { shell.contentView.removeChildView(view); } catch { /* окно уже закрыто */ }
+    try { view.webContents.close(); } catch { /* уже уничтожено */ }
+  }
+  function openExtensionPopup(extension) {
+    if (!extension?.runtimeId || !extension.popup) { error = "У этого расширения нет собственного окна"; return; }
+    closeExtensionPopup();
+    const view = new WebContentsView({
+      webPreferences: { session: session.fromPartition(partition), sandbox: true, contextIsolation: true, nodeIntegration: false, devTools: false },
+    });
+    extensionPopup = view; extensionPopupId = extension.id;
+    view.setBackgroundColor("#ffffff");
+    shell.contentView.addChildView(view);
+    layout();
+    view.webContents.on("blur", () => closeExtensionPopup());
+    view.webContents.setWindowOpenHandler(({ url }) => {
+      closeExtensionPopup();
+      try { void openTab(startUrl(url)); } catch { /* неподдерживаемый адрес */ }
+      return { action: "deny" };
+    });
+    view.webContents.loadURL(`chrome-extension://${extension.runtimeId}/${extension.popup}`).then(() => {
+      view.webContents.focus();
+    }).catch(() => {
+      closeExtensionPopup();
+      error = "Не удалось открыть окно расширения";
+      flushPublish();
+    });
   }
   function select(tab) {
     if (shell.isDestroyed() || !tab || tab.isDestroyed()) return;
+    closeExtensionPopup();
     activeId = tab.id; layout();
     // Do not let focusing a tab reveal the shell while profiles are still
     // initializing (or while a native test deliberately keeps it hidden).
@@ -249,6 +289,13 @@ async function createProfileBrowser(electron, {
       case "toggle-bookmark-bar": await setBookmarkBarVisible(!getBookmarkBarVisible()); break;
       case "manage-extensions": openExtensionManager(); break;
       case "pin-extension": await setExtensionPinned(message.id, message.pinned === true); break;
+      case "open-extension": {
+        if (extensionPopupId === message.id) { closeExtensionPopup(); break; }
+        const extension = (getExtensions() || []).find((item) => item.id === message.id);
+        if (!extension) { error = "Расширение не найдено"; break; }
+        openExtensionPopup(extension);
+        break;
+      }
       case "chrome-overlay-height": {
         const next = Math.round(Number(message.value) || 0);
         if (next >= 0 && next <= 720 && next !== overlayHeight) { overlayHeight = next; layout(); }
@@ -322,6 +369,7 @@ async function createProfileBrowser(electron, {
   shell.on("closed", () => {
     destroyed = true;
     clearTimeout(publishTimer); publishTimer = null;
+    extensionPopup = null; extensionPopupId = "";
     registry.delete(shellContents);
     for (const tab of [...tabs.values()]) tab.destroy();
     if (!registry.size) { ipcMain.removeHandler("umbra-runtime:browser"); handlers.delete(ipcMain); }

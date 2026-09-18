@@ -37,7 +37,7 @@ function fixture() {
 }
 
 describe("server launch transaction boundary", () => {
-  test("launch carries a device-owned token, cookie revision and same-team proxy", async () => {
+  test("launch restores cloud cookies and the encrypted same-team proxy password on another device", async () => {
     const f = fixture();
     const result = await prepareSessionLaunch(f.context, { profileId: id, deviceId: "desktop-a" }, f.decrypt);
     expect(result).toMatchObject({ profileId: id, lockToken: token, deviceId: "desktop-a", cookies: "[]", proxy: { protocol: "socks5", password: "synthetic-password" } });

@@ -63,7 +63,8 @@ function defaultBookmarks() {
 }
 
 // The encrypted local copy is the offline cache. Only validated bookmark
-// metadata may also be synchronized; cookies and proxy credentials never are.
+// metadata uses this settings channel. Cookies and proxy credentials synchronize
+// separately through their encrypted, access-controlled server flows.
 function createBookmarkStore({ safeStorage, userData }) {
   const root = path.join(userData, "profile-bookmarks");
   function available() {

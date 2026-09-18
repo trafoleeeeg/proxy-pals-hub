@@ -284,10 +284,10 @@ function createProfileRuntime(electron, options = {}) {
 
   function launchProfileWindow(payload, onClosed) {
     const id = profileId(payload?.profileId);
-    if (shuttingDown) return Promise.reject(new Error("Application is shutting down"));
+    if (shuttingDown) return Promise.reject(new Error("Приложение завершает работу"));
     const existing = profiles.get(id);
     if (existing) {
-      if (existing.closingRequested) return Promise.reject(new Error("Profile is closing"));
+      if (existing.closingRequested) return Promise.reject(new Error("Профиль закрывается"));
       if (existing.primary && !existing.primary.isDestroyed()) existing.primary.focus();
       return existing.startPromise;
     }
@@ -341,7 +341,7 @@ function createProfileRuntime(electron, options = {}) {
        entry.bookmarkBarVisible = initialSettings ? initialSettings.bookmarkBarVisible : (bookmarkState.bookmarks.length ? true : bookmarkState.barVisible);
        if (initialSettings) await bookmarkStore().write(id, { bookmarks: entry.bookmarks, barVisible: entry.bookmarkBarVisible });
        // Новый профиль получает стартовый набор рабочих закладок один раз.
-       if (!bookmarkState.stored && !bookmarkState.bookmarks.length) {
+       if (!initialSettings && !bookmarkState.stored && !bookmarkState.bookmarks.length) {
          entry.bookmarks = defaultBookmarks();
          void saveBookmarks(entry, entry.bookmarks);
        }
@@ -440,6 +440,7 @@ function createProfileRuntime(electron, options = {}) {
       entry.extensionErrors = extensionResult.errors;
       await reloadExtensionList(entry);
       entry.browser?.publish?.();
+       notifyBrowserSettings(entry);
       return extensionResult.errors.length;
     }));
     return failures.reduce((total, count) => total + count, 0);

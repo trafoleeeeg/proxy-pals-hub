@@ -62,8 +62,8 @@ function defaultBookmarks() {
   return sanitizeBookmarks(DEFAULT_BOOKMARKS);
 }
 
-// Profile bookmarks stay on this device only: encrypted with the OS key store
-// and never uploaded together with the profile's browsing session.
+// The encrypted local copy is the offline cache. Only validated bookmark
+// metadata may also be synchronized; cookies and proxy credentials never are.
 function createBookmarkStore({ safeStorage, userData }) {
   const root = path.join(userData, "profile-bookmarks");
   function available() {

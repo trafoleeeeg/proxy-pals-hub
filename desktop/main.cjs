@@ -127,7 +127,7 @@ function profileId(value) {
 handle("umbra:launch-profile", async (payload) => {
   if (closing || quitting || updates?.isInstalling()) throw new Error("Приложение закрывается или устанавливает обновление");
   profileId(payload?.profileId);
-  if (JSON.stringify(payload).length > 6 * 1024 * 1024) throw new Error("Profile payload is too large");
+  if (JSON.stringify(payload).length > 6 * 1024 * 1024) throw new Error("Данные профиля слишком большие");
   await launchProfileWindow(payload, profileClosed);
   return { ok: true };
 });

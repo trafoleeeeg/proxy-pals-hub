@@ -4,6 +4,7 @@ const { autoUpdater } = require("electron-updater");
 const {
   launchProfileWindow, closeProfileWindow, snapshotProfileCookies,
   listRunningProfiles, closeAllProfiles, refreshExtensions, extensionStore,
+  applyBrowserSettings,
 } = require("./launcher.cjs");
 const { checkProxy } = require("./proxy-check.cjs");
 const { isTrustedSender, isWebUrl } = require("./ipc-policy.cjs");
@@ -139,6 +140,7 @@ handle("umbra:profile-cookies", async (id) => {
   return { ok: true, cookies: null, ...snapshot };
 });
 handle("umbra:list-running-profiles", () => ({ ok: true, profiles: listRunningProfiles() }));
+handle("umbra:browser-settings-push", async (settings) => ({ ok: true, applied: await applyBrowserSettings(settings) }));
 handle("umbra:pending-profile-closures", () => ({ ok: true, profiles: outbox.list() }));
 handle("umbra:acknowledge-profile-closure", (id) => { outbox.acknowledge(id); return { ok: true }; });
 handle("umbra:archive-profile-closure", (id) => { outbox.archive(id); return { ok: true }; });
@@ -225,6 +227,7 @@ else {
       },
     });
     createWindow();
+    app.on("umbra:browser-settings-changed", (settings) => send("umbra:browser-settings-changed", settings));
     app.on("umbra:manage-extensions", () => {
       if (!mainWindow || mainWindow.isDestroyed()) return;
       if (mainWindow.isMinimized()) mainWindow.restore();

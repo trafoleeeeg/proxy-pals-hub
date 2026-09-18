@@ -19,6 +19,12 @@ if (window.location.origin === trustedOrigin) contextBridge.exposeInMainWorld("u
     ipcRenderer.on("umbra:profile-closed", handler);
     return () => ipcRenderer.removeListener("umbra:profile-closed", handler);
   },
+  pushBrowserSettings: (settings) => ipcRenderer.invoke("umbra:browser-settings-push", settings),
+  onBrowserSettingsChanged: (cb) => {
+    const handler = (_e, payload) => cb(payload);
+    ipcRenderer.on("umbra:browser-settings-changed", handler);
+    return () => ipcRenderer.removeListener("umbra:browser-settings-changed", handler);
+  },
   openExternal: (url) => ipcRenderer.invoke("umbra:open-external", url),
   checkProxy: (payload) => ipcRenderer.invoke("umbra:check-proxy", payload),
   listExtensions: () => ipcRenderer.invoke("umbra:extensions-list"),

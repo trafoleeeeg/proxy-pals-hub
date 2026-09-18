@@ -5,6 +5,7 @@ const { createCookieStore, initializeCookies, canonicalCookies } = require("./co
 const { createTabStore, sanitizeTabs } = require("./tabs.cjs");
 const { createBookmarkStore, defaultBookmarks } = require("./bookmarks.cjs");
 const { normalizeFingerprint, applyFingerprint } = require("./fingerprint.cjs");
+const { sanitizeBrowserSettings } = require("./browser-settings.cjs");
 
 function createProfileRuntime(electron, options = {}) {
   const { session, app, safeStorage } = electron;
@@ -145,10 +146,13 @@ function createProfileRuntime(electron, options = {}) {
       getBookmarks: () => entry.bookmarks || [],
       getBookmarkBarVisible: () => entry.bookmarkBarVisible !== false,
       getExtensions: () => entry.extensionList || [],
+      getZoomLevel: () => entry.zoomLevel || 0,
+      setZoomLevel: async (level) => { entry.zoomLevel = level; notifyBrowserSettings(entry); },
       setExtensionPinned: async (id, pinned) => {
         if (!extensionStore?.setPinned) return;
         await extensionStore.setPinned(id, pinned);
         await reloadExtensionList(entry);
+        notifyBrowserSettings(entry);
       },
       addBookmark: (bookmark) => saveBookmarks(entry, [...(entry.bookmarks || []), { ...bookmark }]),
       updateBookmark: (bookmark) => saveBookmarks(entry, (entry.bookmarks || []).map((item) => item.id === bookmark.id
@@ -171,9 +175,21 @@ function createProfileRuntime(electron, options = {}) {
     entry.bookmarkQueue = (entry.bookmarkQueue || Promise.resolve()).catch(() => {}).then(async () => {
       const state = await bookmarkStore().write(entry.profileId, { bookmarks: list, barVisible: entry.bookmarkBarVisible !== false });
       entry.bookmarks = state.bookmarks;
+       notifyBrowserSettings(entry);
       return entry.bookmarks;
     }).catch(() => { entry.lastError = "Bookmark save failed"; return entry.bookmarks || []; });
     return entry.bookmarkQueue;
+  }
+
+  function browserSettings(entry) {
+    return { profileId: entry.profileId, bookmarks: entry.bookmarks || [], bookmarkBarVisible: entry.bookmarkBarVisible !== false,
+      zoomLevel: entry.zoomLevel || 0, extensions: (entry.extensionList || []).map((item) => ({ id: item.id, pinned: item.pinned === true, ...(item.url ? { source: item.url } : {}) })),
+      revision: entry.settingsRevision || 0 };
+  }
+
+  function notifyBrowserSettings(entry) {
+    if (entry.applyingSettings || entry.state !== "running") return;
+    options.onBrowserSettingsChanged?.(browserSettings(entry));
   }
 
   async function reloadExtensionList(entry) {
@@ -285,6 +301,9 @@ function createProfileRuntime(electron, options = {}) {
       state: "starting", startedAt: new Date().toISOString(), windows: new Set(), pendingWindows: new Set(),
       snapshotQueue: Promise.resolve(), onClosed, closingRequested: false,
     };
+    const initialSettings = sanitizeBrowserSettings(payload.browserSettings, id);
+    entry.zoomLevel = initialSettings?.zoomLevel || 0;
+    entry.settingsRevision = initialSettings?.revision || 0;
     profiles.set(id, entry);
     entry.startPromise = Promise.resolve().then(async () => {
       try {
@@ -312,13 +331,15 @@ function createProfileRuntime(electron, options = {}) {
       entry.cookieSource = initialized.source;
       entry.extensionsLoaded = new Map();
       if (extensionStore) {
+        if (initialSettings && extensionStore.applyCloudSettings) await extensionStore.applyCloudSettings(initialSettings.extensions);
         const extensionResult = await extensionStore.loadIntoSession(entry.ses, entry.extensionsLoaded);
         entry.extensionErrors = extensionResult.errors;
         await reloadExtensionList(entry);
       }
-       const bookmarkState = await (bookmarkStore().readState?.(id) || bookmarkStore().read(id).then((bookmarks) => ({ bookmarks, barVisible: true, stored: true }))).catch(() => ({ bookmarks: [], barVisible: true, stored: true }));
+       const bookmarkState = initialSettings || await (bookmarkStore().readState?.(id) || bookmarkStore().read(id).then((bookmarks) => ({ bookmarks, barVisible: true, stored: true }))).catch(() => ({ bookmarks: [], barVisible: true, stored: true }));
        entry.bookmarks = bookmarkState.bookmarks;
-       entry.bookmarkBarVisible = bookmarkState.bookmarks.length ? true : bookmarkState.barVisible;
+       entry.bookmarkBarVisible = initialSettings ? initialSettings.bookmarkBarVisible : (bookmarkState.bookmarks.length ? true : bookmarkState.barVisible);
+       if (initialSettings) await bookmarkStore().write(id, { bookmarks: entry.bookmarks, barVisible: entry.bookmarkBarVisible });
        // Новый профиль получает стартовый набор рабочих закладок один раз.
        if (!bookmarkState.stored && !bookmarkState.bookmarks.length) {
          entry.bookmarks = defaultBookmarks();
@@ -423,9 +444,31 @@ function createProfileRuntime(electron, options = {}) {
     return failures.reduce((total, count) => total + count, 0);
   }
 
+  async function applyBrowserSettings(value) {
+    const id = profileId(value?.profileId);
+    const entry = profiles.get(id);
+    if (!entry) return false;
+    await entry.startPromise;
+    const settings = sanitizeBrowserSettings(value, id);
+    if (!settings || settings.revision <= (entry.settingsRevision || 0)) return false;
+    entry.applyingSettings = true;
+    try {
+      entry.settingsRevision = settings.revision; entry.zoomLevel = settings.zoomLevel;
+      entry.bookmarks = settings.bookmarks; entry.bookmarkBarVisible = settings.bookmarkBarVisible;
+      await bookmarkStore().write(id, { bookmarks: settings.bookmarks, barVisible: settings.bookmarkBarVisible });
+      if (extensionStore?.applyCloudSettings) {
+        await extensionStore.applyCloudSettings(settings.extensions);
+        await reloadExtensionList(entry);
+      }
+      for (const tab of entry.windows) if (!tab.isDestroyed()) tab.webContents.setZoomLevel(settings.zoomLevel);
+      entry.browser?.publish?.();
+      return true;
+    } finally { entry.applyingSettings = false; }
+  }
+
   return {
     launchProfileWindow, closeProfileWindow, snapshotProfileCookies, closeAllProfiles,
-    refreshExtensions,
+    refreshExtensions, applyBrowserSettings,
     listRunningProfiles: () => [...profiles.values()].map(status),
     getRunningProfile: (id) => { const entry = profiles.get(profileId(id)); return entry ? status(entry) : null; },
   };

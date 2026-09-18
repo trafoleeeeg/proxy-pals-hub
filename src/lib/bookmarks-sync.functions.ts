@@ -7,9 +7,9 @@ const inputSchema = browserSettingsSchema.omit({ updatedAt: true });
 
 function parseRow(row: Record<string, unknown>) {
   return browserSettingsSchema.parse({
-    profileId: row.profile_id, bookmarks: row.bookmarks,
-    bookmarkBarVisible: row.bookmark_bar_visible, zoomLevel: row.zoom_level,
-    extensions: row.extensions, revision: row.revision, updatedAt: row.updated_at,
+    profileId: row["profile_id"], bookmarks: row["bookmarks"],
+    bookmarkBarVisible: row["bookmark_bar_visible"], zoomLevel: row["zoom_level"],
+    extensions: row["extensions"], revision: row["revision"], updatedAt: row["updated_at"],
   });
 }
 

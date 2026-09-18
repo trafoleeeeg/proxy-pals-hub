@@ -6,6 +6,7 @@ import { desktop, DesktopProfileLifecycle, type LifecycleSnapshot, type UpdateSt
 import { saveBrowserSettings, fetchBrowserSettings } from "@/lib/bookmarks-sync.functions";
 import { browserSettingsSchema, type BrowserSettings } from "@/lib/browser-settings";
 import { supabase } from "@/integrations/supabase/client";
+import { bookmarkDefaultsSchema } from "@/lib/bookmark-defaults";
 
 const EMPTY: LifecycleSnapshot = { running: [], busy: [], pending: [], errors: {}, notices: {}, restoring: false };
 const noopSubscribe = () => () => {};
@@ -82,21 +83,34 @@ export function DesktopProfileProvider({ children }: { children: ReactNode }) {
     const timers = new Map<string, number>();
     const revisions = new Map<string, number>();
     const pending = new Map<string, BrowserSettings>();
+    const saving = new Set<string>();
+    let disposed = false;
     const saveLatest = async (profileId: string) => {
+      if (disposed || saving.has(profileId)) return;
       const value = pending.get(profileId);
       if (!value) return;
+      saving.add(profileId);
       try {
         const saved = await saveSettings({ data: { ...value, revision: revisions.get(profileId) ?? value.revision } });
         if (pending.get(profileId) === value) pending.delete(profileId);
         revisions.set(profileId, saved.revision);
-        await bridge.pushBrowserSettings(saved);
+        if (!pending.has(profileId)) await bridge.pushBrowserSettings(saved);
       } catch {
         const remote = await fetchSettings({ data: { profileId } }).catch(() => null);
         if (remote) {
           revisions.set(profileId, remote.revision);
-          await bridge.pushBrowserSettings(remote);
-          if (pending.get(profileId) === value) pending.delete(profileId);
-        } else {
+          try {
+            const saved = await saveSettings({ data: { ...value, revision: remote.revision } });
+            if (pending.get(profileId) === value) pending.delete(profileId);
+            revisions.set(profileId, saved.revision);
+            if (!pending.has(profileId)) await bridge.pushBrowserSettings(saved);
+            return;
+          } catch { /* сеть или повторный конфликт: сохраняем локальную очередь */ }
+        }
+      } finally {
+        saving.delete(profileId);
+        if (!disposed && pending.has(profileId)) {
+          window.clearTimeout(timers.get(profileId));
           timers.set(profileId, window.setTimeout(() => void saveLatest(profileId), 2_000));
         }
       }
@@ -116,18 +130,41 @@ export function DesktopProfileProvider({ children }: { children: ReactNode }) {
           zoomLevel: row["zoom_level"], extensions: row["extensions"], revision: row["revision"], updatedAt: row["updated_at"],
           activeProxyId: row["active_proxy_id"] ?? null, proxyFailover: row["proxy_failover"] ?? false,
         });
-        if (!parsed.success || parsed.data.revision <= (revisions.get(parsed.data.profileId) || 0)) return;
+        if (!parsed.success || pending.has(parsed.data.profileId) || parsed.data.revision <= (revisions.get(parsed.data.profileId) || 0)) return;
         revisions.set(parsed.data.profileId, parsed.data.revision);
-        pending.delete(parsed.data.profileId);
         window.clearTimeout(timers.get(parsed.data.profileId));
         void bridge.pushBrowserSettings(parsed.data);
       }).subscribe();
     return () => {
+      disposed = true;
       off();
       for (const timer of timers.values()) window.clearTimeout(timer);
       void supabase.removeChannel(channel);
     };
   }, [fetchSettings, saveSettings]);
+
+  useEffect(() => {
+    const invalidateProfiles = () => { void qc.invalidateQueries({ queryKey: ["profiles"] }); };
+    const invalidateProxies = () => {
+      void qc.invalidateQueries({ queryKey: ["proxies"] });
+      void qc.invalidateQueries({ queryKey: ["profiles"] });
+    };
+    const invalidateBookmarks = () => { void qc.invalidateQueries({ queryKey: ["bookmark-defaults"] }); };
+    const channel = supabase.channel("workspace-cloud-sync")
+      .on("postgres_changes", { event: "*", schema: "public", table: "browser_profiles" }, invalidateProfiles)
+      .on("postgres_changes", { event: "*", schema: "public", table: "proxies" }, invalidateProxies)
+      .on("postgres_changes", { event: "*", schema: "public", table: "team_bookmark_defaults" }, (event) => {
+        invalidateBookmarks();
+        const row = event.new as Record<string, unknown>;
+        const parsed = bookmarkDefaultsSchema.safeParse({
+          teamId: row["team_id"], bookmarks: row["bookmarks"], bookmarkBarVisible: row["bookmark_bar_visible"],
+          revision: row["revision"], updatedAt: row["updated_at"],
+        });
+        if (parsed.success) void desktop()?.pushBookmarkDefaults?.(parsed.data).catch(() => {});
+      })
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [qc]);
 
   useEffect(() => {
     const bridge = desktop();

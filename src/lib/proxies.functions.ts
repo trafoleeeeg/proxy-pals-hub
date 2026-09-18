@@ -62,6 +62,8 @@ export const listProxies = createServerFn({ method: "POST" })
   .inputValidator((data: { teamId: string }) => validateProxyTeam(data))
   .handler(async ({ data, context }) => {
     await requireTeam(context, data.teamId, false);
+    // Generated Supabase types lag behind the rotation columns in migrations.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const db = context.supabase as any;
     const { data: rows, error } = await db.from("proxies")
       .select("id, label, protocol, host, port, username, country, city, last_checked_at, last_check_ok, last_check_ip, last_check_latency_ms, last_check_error, password_enc, rotation_url_enc, rotation_status, rotation_previous_ip, rotation_new_ip, rotation_changed_at, rotation_requested_at, rotation_last_error")
@@ -212,6 +214,8 @@ export const recordProxyCheck = createServerFn({ method: "POST" })
   })
   .handler(async ({ data, context }) => {
     await requireProxy(context, data);
+    // Generated Supabase types lag behind the rotation columns in migrations.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const db = context.supabase as any;
     const { data: current, error: currentError } = await db.from("proxies")
       .select("last_check_ip, rotation_status, rotation_changed_at, rotation_previous_ip, rotation_new_ip, rotation_requested_at")
@@ -225,17 +229,11 @@ export const recordProxyCheck = createServerFn({ method: "POST" })
     if (data.rotationRequestedAt && data.rotationRequestedAt === current["rotation_requested_at"] &&
       (current["rotation_status"] === "success" || current["rotation_status"] === "error")) return { ok: true };
     const staleRotation = !!data.rotationRequestedAt && !confirmsRotation;
-    // Any measurement proves the rotation: a pending "changing" state must not
-    // linger until the 90s timeout once a different address is actually seen.
-    const settlesPending = !confirmsRotation && current["rotation_status"] === "changing" &&
-      data.ok && !!data.ip && !!current["rotation_previous_ip"] && data.ip !== current["rotation_previous_ip"];
     const outcome = confirmsRotation ? rotationOutcome(
       current["rotation_previous_ip"], data,
       data.rotationFinal || rotationExpired(current["rotation_requested_at"]),
       data.rotationConfirmed,
-    ) : settlesPending ? "success"
-      : current["rotation_status"] === "changing" && rotationExpired(current["rotation_requested_at"]) ? "error"
-      : null;
+    ) : null;
     const rotation = outcome ? {
       rotation_status: outcome,
       rotation_last_error: outcome === "error" ? "not_confirmed" : null,
@@ -252,7 +250,7 @@ export const recordProxyCheck = createServerFn({ method: "POST" })
     if (confirmsRotation) update = update.eq("rotation_requested_at", data.rotationRequestedAt).eq("rotation_status", "changing");
     const { data: row, error } = await update.select("id").maybeSingle();
     if (error || !row) throw new Error("Проверка завершена, но результат не сохранён. Проверьте доступ и повторите попытку");
-    return { ok: true, staleRotation };
+    return data.rotationRequestedAt ? { ok: true, staleRotation } : { ok: true };
   });
 
 /** Requests the provider's mobile IP rotation endpoint. The follow-up desktop
@@ -262,6 +260,8 @@ export const rotateProxyIp = createServerFn({ method: "POST" })
   .inputValidator((data: Target) => validateProxyTarget(data))
   .handler(async ({ data, context }) => {
     await requireProxy(context, data);
+    // Generated Supabase types lag behind the rotation columns in migrations.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const db = context.supabase as any;
     const { data: proxy, error: readError } = await db.from("proxies")
       .select("rotation_url_enc, last_check_ip, last_check_ok, last_checked_at, rotation_status, rotation_requested_at")

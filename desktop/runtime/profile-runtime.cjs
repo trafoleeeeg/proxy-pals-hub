@@ -3,7 +3,7 @@ const { createProfileBrowser } = require("./browser.cjs");
 const { createRuntimeProxy, blockSession } = require("./proxy.cjs");
 const { createCookieStore, initializeCookies, canonicalCookies } = require("./cookies.cjs");
 const { createTabStore, sanitizeTabs } = require("./tabs.cjs");
-const { createBookmarkStore, defaultBookmarks } = require("./bookmarks.cjs");
+const { createBookmarkStore, defaultBookmarks, sanitizeBookmarks } = require("./bookmarks.cjs");
 const { normalizeFingerprint, applyFingerprint } = require("./fingerprint.cjs");
 const { sanitizeBrowserSettings } = require("./browser-settings.cjs");
 const { SAFE_WEBRTC } = require("./leak-check.cjs");
@@ -144,7 +144,7 @@ function createProfileRuntime(electron, options = {}) {
       },
       closeProfile: () => closeProfileWindow(entry.profileId),
       onTabsChanged: () => recordTabs(entry),
-      getBookmarks: () => entry.bookmarks || [],
+      getBookmarks: () => allBookmarks(entry),
       getBookmarkBarVisible: () => entry.bookmarkBarVisible !== false,
       getExtensions: () => entry.extensionList || [],
       getZoomLevel: () => entry.zoomLevel || 0,
@@ -155,11 +155,17 @@ function createProfileRuntime(electron, options = {}) {
         await reloadExtensionList(entry);
         notifyBrowserSettings(entry);
       },
-      addBookmark: (bookmark) => saveBookmarks(entry, [...(entry.bookmarks || []), { ...bookmark }]),
-      updateBookmark: (bookmark) => saveBookmarks(entry, (entry.bookmarks || []).map((item) => item.id === bookmark.id
+      addBookmark: (bookmark) => allBookmarks(entry).some((item) => item.url === bookmark.url)
+        ? Promise.resolve(allBookmarks(entry))
+        : saveBookmarks(entry, [...(entry.bookmarks || []), { ...bookmark }]),
+      updateBookmark: (bookmark) => (entry.presetBookmarks || []).some((item) => item.id === bookmark.id)
+        ? Promise.resolve(allBookmarks(entry))
+        : saveBookmarks(entry, (entry.bookmarks || []).map((item) => item.id === bookmark.id
         ? { ...item, title: bookmark.title, url: bookmark.url || item.url, favicon: bookmark.url && bookmark.url !== item.url ? "" : (bookmark.favicon || item.favicon) }
         : item)),
-      removeBookmark: (id) => saveBookmarks(entry, (entry.bookmarks || []).filter((item) => item.id !== id)),
+      removeBookmark: (id) => (entry.presetBookmarks || []).some((item) => item.id === id)
+        ? Promise.resolve(allBookmarks(entry))
+        : saveBookmarks(entry, (entry.bookmarks || []).filter((item) => item.id !== id)),
       reorderBookmarks: (ids) => {
         const byId = new Map((entry.bookmarks || []).map((item) => [item.id, item]));
         return saveBookmarks(entry, ids.map((id) => byId.get(id)).filter(Boolean));
@@ -319,6 +325,12 @@ function createProfileRuntime(electron, options = {}) {
     return entry.bookmarkQueue;
   }
 
+  function allBookmarks(entry) {
+    const presets = (entry.presetBookmarks || []).map((item) => ({ ...item, managed: true }));
+    const presetUrls = new Set(presets.map((item) => item.url));
+    return [...presets, ...(entry.bookmarks || []).filter((item) => !presetUrls.has(item.url))];
+  }
+
   function browserSettings(entry) {
     return { profileId: entry.profileId, bookmarks: entry.bookmarks || [], bookmarkBarVisible: entry.bookmarkBarVisible !== false,
       zoomLevel: entry.zoomLevel || 0, extensions: (entry.extensionList || []).filter((item) => item.url).map((item) => ({ id: item.id, pinned: item.pinned === true, url: item.url })),
@@ -432,6 +444,7 @@ function createProfileRuntime(electron, options = {}) {
       return existing.startPromise;
     }
     const url = startUrl(payload.startUrl ?? payload.fingerprint?.startUrl ?? payload.fingerprint?.start_url ?? "about:blank", { allowBlank: true });
+    const hasExplicitStartUrl = payload.startUrl != null;
     revision(payload.cookiesUpdatedAt);
     if (payload.lockToken != null && (typeof payload.lockToken !== "string" || payload.lockToken.length > 512)) throw new Error("Некорректный токен блокировки профиля");
     if (payload.deviceId != null && (typeof payload.deviceId !== "string" || !payload.deviceId || payload.deviceId.length > 512 || /[\r\n\0]/.test(payload.deviceId))) throw new Error("Некорректный идентификатор устройства");
@@ -442,6 +455,10 @@ function createProfileRuntime(electron, options = {}) {
       snapshotQueue: Promise.resolve(), onClosed, closingRequested: false,
     };
     const initialSettings = sanitizeBrowserSettings(payload.browserSettings, id);
+    const bookmarkDefaults = payload.bookmarkDefaults && typeof payload.bookmarkDefaults === "object" ? payload.bookmarkDefaults : null;
+    entry.presetBookmarks = sanitizeBookmarks(bookmarkDefaults?.bookmarks);
+    entry.teamId = bookmarkDefaults?.teamId;
+    entry.presetBookmarkBarVisible = bookmarkDefaults?.bookmarkBarVisible !== false;
     entry.zoomLevel = initialSettings?.zoomLevel || 0;
     entry.settingsRevision = initialSettings?.revision || 0;
     profiles.set(id, entry);
@@ -493,19 +510,22 @@ function createProfileRuntime(electron, options = {}) {
         }
         const bookmarkState = initialSettings || await (bookmarkStore().readState?.(id) || bookmarkStore().read(id).then((bookmarks) => ({ bookmarks, barVisible: true, stored: true }))).catch(() => ({ bookmarks: [], barVisible: true, stored: true }));
         entry.bookmarks = bookmarkState.bookmarks;
-        entry.bookmarkBarVisible = initialSettings ? initialSettings.bookmarkBarVisible : (bookmarkState.bookmarks.length ? true : bookmarkState.barVisible);
+        entry.bookmarkBarVisible = entry.presetBookmarks.length && entry.presetBookmarkBarVisible
+          ? true
+          : (initialSettings ? initialSettings.bookmarkBarVisible : (bookmarkState.bookmarks.length ? true : bookmarkState.barVisible));
         if (initialSettings) await bookmarkStore().write(id, { bookmarks: entry.bookmarks, barVisible: entry.bookmarkBarVisible });
         // Новый профиль получает стартовый набор рабочих закладок один раз.
-        if (!initialSettings && !bookmarkState.stored && !bookmarkState.bookmarks.length) {
+        if (!initialSettings && !entry.presetBookmarks.length && !bookmarkState.stored && !bookmarkState.bookmarks.length) {
           entry.bookmarks = defaultBookmarks();
           void saveBookmarks(entry, entry.bookmarks);
         }
       const saved = await tabStore().read(id).catch(() => ({ tabs: [], activeIndex: 0 }));
-      const plan = url !== "about:blank" ? [url] : (saved.tabs.length ? saved.tabs : ["about:blank"]);
+      const restoreSaved = saved.tabs.length > 0 && !hasExplicitStartUrl;
+      const plan = restoreSaved ? saved.tabs : [url];
       await makeWindow(entry, plan[0], true);
       for (const extra of plan.slice(1)) await makeWindow(entry, extra).catch(() => {});
       const restoredTabs = [...entry.windows];
-      const focusTab = restoredTabs[url !== "about:blank" ? 0 : Math.min(saved.activeIndex, restoredTabs.length - 1)];
+      const focusTab = restoredTabs[restoreSaved ? Math.min(saved.activeIndex, restoredTabs.length - 1) : 0];
       if (focusTab && !focusTab.isDestroyed()) focusTab.show?.();
         entry.browser?.markReady?.();
         entry.state = "running";
@@ -631,6 +651,20 @@ function createProfileRuntime(electron, options = {}) {
   return {
     launchProfileWindow, closeProfileWindow, snapshotProfileCookies, closeAllProfiles,
     refreshExtensions, applyBrowserSettings,
+    applyBookmarkDefaults: async (value) => {
+      if (!value || typeof value.teamId !== "string" || !/^[0-9a-f-]{36}$/i.test(value.teamId)) return false;
+      const bookmarks = sanitizeBookmarks(value.bookmarks);
+      for (const entry of profiles.values()) {
+        if (entry.teamId !== value.teamId) continue;
+        await entry.startPromise.catch(() => {});
+        if (entry.state !== "running") continue;
+        entry.presetBookmarks = bookmarks;
+        entry.presetBookmarkBarVisible = value.bookmarkBarVisible !== false;
+        if (bookmarks.length && entry.presetBookmarkBarVisible) entry.bookmarkBarVisible = true;
+        entry.browser?.publish?.();
+      }
+      return true;
+    },
     listRunningProfiles: () => [...profiles.values()].map(status),
     getRunningProfile: (id) => { const entry = profiles.get(profileId(id)); return entry ? status(entry) : null; },
   };

@@ -20,6 +20,7 @@ if (window.location.origin === trustedOrigin) contextBridge.exposeInMainWorld("u
     return () => ipcRenderer.removeListener("umbra:profile-closed", handler);
   },
   pushBrowserSettings: (settings) => ipcRenderer.invoke("umbra:browser-settings-push", settings),
+  pushBookmarkDefaults: (settings) => ipcRenderer.invoke("umbra:bookmark-defaults-push", settings),
   onBrowserSettingsChanged: (cb) => {
     const handler = (_e, payload) => cb(payload);
     ipcRenderer.on("umbra:browser-settings-changed", handler);

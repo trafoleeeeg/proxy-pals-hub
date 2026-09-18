@@ -17,6 +17,7 @@ function fixture() {
   const client = {
     rpc: async (name: string, args: Record<string, unknown>) => {
       state.rpc.push({ name, args });
+      if (name === "get_team_bookmark_defaults") return { data: { teamId, bookmarks: [], bookmarkBarVisible: true, revision: 0, updatedAt: null }, error: null };
       if (name === "acquire_profile_lease") return { data: { lockToken: token, expiresAt: "2026-09-15T00:05:00Z" }, error: null };
       return state.failRelease ? { data: null, error: { message: "lease-write-failed" } } : { data: {}, error: null };
     },
@@ -42,7 +43,7 @@ describe("server launch transaction boundary", () => {
     const result = await prepareSessionLaunch(f.context, { profileId: id, deviceId: "desktop-a" }, f.decrypt);
     expect(result).toMatchObject({ profileId: id, lockToken: token, deviceId: "desktop-a", cookies: "[]", proxy: { protocol: "socks5", password: "synthetic-password" } });
     expect(f.state.filters).toContainEqual(["proxies", "team_id", teamId]);
-    expect(f.state.rpc).toHaveLength(1);
+    expect(f.state.rpc.map((call) => call.name)).toEqual(["acquire_profile_lease", "get_team_bookmark_defaults"]);
   });
   test("missing assigned proxy cancels launch and releases only the acquired token", async () => {
     const f = fixture(); f.state.proxy = null;

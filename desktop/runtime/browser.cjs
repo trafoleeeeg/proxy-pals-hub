@@ -30,7 +30,7 @@ async function createProfileBrowser(electron, {
     registry = new Map(); handlers.set(ipcMain, registry);
     ipcMain.handle("umbra-runtime:browser", (event, command) => {
       const handler = registry.get(event.sender);
-      if (!handler || event.senderFrame !== event.sender.mainFrame) throw new Error("Untrusted browser sender");
+       if (!handler || event.senderFrame !== event.sender.mainFrame) throw new Error("Недоверенный отправитель команды браузера");
       return handler(command);
     });
   }
@@ -66,7 +66,8 @@ async function createProfileBrowser(electron, {
     const bookmarks = getBookmarks();
     shell.webContents.send("umbra-runtime:state", { name, activeId, error, home: isHome(active()), info: getInfo(),
       bookmarks, bookmarkBarVisible: getBookmarkBarVisible(), extensions: getExtensions(), bookmarked: bookmarks.some((item) => item.url === currentUrl),
-      canRestoreTab: recentlyClosed.length > 0, find: active()?.find || null,
+       canRestoreTab: recentlyClosed.length > 0, find: active()?.find || null,
+       zoomPercent: active() ? Math.round(100 * Math.pow(1.2, active().webContents.getZoomLevel())) : 100,
       tabs: tabOrder.map((id) => tabs.get(id)).filter((tab) => tab && !tab.isDestroyed()).map((tab) => ({
       id: tab.id, url: tab.webContents.getURL() || tab.url, title: tab.webContents.getTitle(), favicon: tab.favicon || "", error: tab.error,
       loading: tab.webContents.isLoading(), canGoBack: tab.webContents.navigationHistory.canGoBack(), canGoForward: tab.webContents.navigationHistory.canGoForward(),
@@ -124,7 +125,7 @@ async function createProfileBrowser(electron, {
         break;
       }
       case "reorder-tabs": {
-        if (!Array.isArray(message.ids) || message.ids.length !== tabOrder.length || new Set(message.ids).size !== tabOrder.length || message.ids.some((id) => !tabs.has(id))) throw new Error("Invalid tab order");
+         if (!Array.isArray(message.ids) || message.ids.length !== tabOrder.length || new Set(message.ids).size !== tabOrder.length || message.ids.some((id) => !tabs.has(id))) throw new Error("Некорректный порядок вкладок");
         tabOrder = [...message.ids]; if (ready) onTabsChanged(); break;
       }
       case "close-profile": await closeProfile(); break;
@@ -202,7 +203,7 @@ async function createProfileBrowser(electron, {
       case "back": if (tab?.webContents.navigationHistory.canGoBack()) tab.webContents.navigationHistory.goBack(); break;
       case "forward": if (tab?.webContents.navigationHistory.canGoForward()) tab.webContents.navigationHistory.goForward(); break;
       case "reload": if (tab) { tab.error = ""; if (tab.webContents.isLoading()) tab.webContents.stop(); else tab.webContents.reload(); } break;
-      default: throw new Error("Unknown browser command");
+       default: throw new Error("Неизвестная команда браузера");
     }
     publish();
   }

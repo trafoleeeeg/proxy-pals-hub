@@ -554,6 +554,7 @@ function createProfileRuntime(electron, options = {}) {
         entry.browser?.publish?.();
         notifyBrowserSettings(entry);
         void checkConnection(entry);
+        loadBookmarkIcons(entry);
         return status(entry);
       } catch (error) {
         entry.state = "failed";

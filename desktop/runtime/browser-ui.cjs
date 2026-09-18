@@ -385,6 +385,7 @@ function renderer() {
       button.onclick = () => togglePopover(extensionsPopover, button);
       return button;
     }));
+    }
     manager.style.top = byId("chrome").offsetHeight + "px";
     proxyPage.style.top = byId("chrome").offsetHeight + "px";
     syncHeight();

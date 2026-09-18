@@ -24,7 +24,7 @@ export function useWorkspaceSelection() {
   const selection = useContext(Selection);
   const fn = useServerFn(listWorkspaces);
   const workspaces = useQuery({
-    queryKey: ["workspaces"], queryFn: () => withWorkspaceTimeout(fn({})), staleTime: 60_000, retry: 1,
+    queryKey: ["workspaces"], queryFn: () => withWorkspaceTimeout(fn({})), staleTime: 60_000, retry: false,
   });
   return { ...selection, workspaces };
 }
@@ -36,6 +36,6 @@ export function useWorkspace() {
     queryKey: ["workspace", teamId],
     queryFn: () => withWorkspaceTimeout(fn({ data: teamId ? { teamId } : {} })),
     staleTime: 60_000,
-    retry: 1,
+    retry: false,
   });
 }

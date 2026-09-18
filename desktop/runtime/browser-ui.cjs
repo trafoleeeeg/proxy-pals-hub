@@ -25,6 +25,8 @@ function renderer() {
   let draggedBookmark;
   let sentChromeHeight;
   let managerSignature;
+  let barSignature;
+  let extensionSignature;
   const icon = (name) => {
     const paths = {
       globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/>',
@@ -281,6 +283,7 @@ function renderer() {
     if (state.proxiesOpen) renderProxies();
     const signature = (state.bookmarks || []).map((item) => item.id + ":" + item.url + ":" + (item.favicon ? "i" : "")).join("|");
     if (state.bookmarksOpen && signature !== managerSignature) renderManager();
+    managerSignature = signature;
     byId("find-count").textContent = state.find && findInput.value ? `${state.find.active}/${state.find.total}` : "";
     current = state.tabs.find((tab) => tab.id === state.activeId);
     byId("home").hidden = !state.home;

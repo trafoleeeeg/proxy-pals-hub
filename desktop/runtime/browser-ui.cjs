@@ -270,16 +270,17 @@ function renderer() {
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") closePopovers();
   });
-  api.subscribe((state) => {
-    if (state.focusAddress) { address.focus(); address.select(); return; }
-    if (state.focusFind) { openFind(); return; }
+  api.subscribe((incoming) => {
+    if (incoming.focusAddress) { address.focus(); address.select(); return; }
+    if (incoming.focusFind) { openFind(); return; }
+    // Тяжёлые списки приходят только при изменении, поэтому дополняем прошлое состояние.
+    const state = { ...latestState, ...incoming };
     latestState = state;
     manager.hidden = !state.bookmarksOpen;
     proxyPage.hidden = !state.proxiesOpen;
     if (state.proxiesOpen) renderProxies();
-    const signature = (state.bookmarks || []).map((item) => item.id + ":" + item.url).join("|");
+    const signature = (state.bookmarks || []).map((item) => item.id + ":" + item.url + ":" + (item.favicon ? "i" : "")).join("|");
     if (state.bookmarksOpen && signature !== managerSignature) renderManager();
-    managerSignature = signature;
     byId("find-count").textContent = state.find && findInput.value ? `${state.find.active}/${state.find.total}` : "";
     current = state.tabs.find((tab) => tab.id === state.activeId);
     byId("home").hidden = !state.home;

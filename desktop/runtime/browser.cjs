@@ -24,6 +24,7 @@ async function createProfileBrowser(electron, {
   updateBookmark = async () => {}, reorderBookmarks = async () => {}, getBookmarkBarVisible = () => true,
   setBookmarkBarVisible = async () => {}, setExtensionPinned = async () => {}, openExtensionManager = () => {}, onTabsChanged = () => {},
   getZoomLevel = () => 0, setZoomLevel = async () => {},
+  getProxies = () => [], getProxyFailover = () => false, switchProxy = async () => {}, setProxyFailover = async () => {},
 }) {
   const { BrowserWindow, WebContentsView, session, ipcMain } = electron;
   let registry = handlers.get(ipcMain);
@@ -58,6 +59,7 @@ async function createProfileBrowser(electron, {
   let ready = false;
   let error = "";
   let bookmarksOpen = false;
+  let proxiesOpen = false;
   let destroyed = false;
   let commandQueue = Promise.resolve();
   const active = () => tabs.get(activeId);
@@ -68,7 +70,7 @@ async function createProfileBrowser(electron, {
     const currentUrl = active()?.webContents.getURL() || active()?.url || "";
     const bookmarks = getBookmarks();
     shell.webContents.send("umbra-runtime:state", { name, activeId, error, home: isHome(active()), info: getInfo(),
-       bookmarks, bookmarksOpen, bookmarkBarVisible: getBookmarkBarVisible(), extensions: getExtensions(), bookmarked: bookmarks.some((item) => item.url === currentUrl),
+       bookmarks, bookmarksOpen, proxiesOpen, proxies: getProxies(), proxyFailover: getProxyFailover(), bookmarkBarVisible: getBookmarkBarVisible(), extensions: getExtensions(), bookmarked: bookmarks.some((item) => item.url === currentUrl),
        canRestoreTab: recentlyClosed.length > 0, find: active()?.find || null,
        zoomPercent: active() ? Math.round(100 * Math.pow(1.2, active().webContents.getZoomLevel())) : 100,
       tabs: tabOrder.map((id) => tabs.get(id)).filter((tab) => tab && !tab.isDestroyed()).map((tab) => ({
@@ -82,7 +84,7 @@ async function createProfileBrowser(electron, {
     for (const tab of tabs.values()) {
       const top = Math.max(chromeHeight, overlayHeight);
       tab.view.setBounds({ x: 0, y: top, width: Math.max(1, width), height: Math.max(1, height - top) });
-       tab.view.setVisible(tab.id === activeId && !isHome(tab) && !bookmarksOpen);
+       tab.view.setVisible(tab.id === activeId && !isHome(tab) && !bookmarksOpen && !proxiesOpen);
     }
   }
   function select(tab) {
@@ -111,12 +113,20 @@ async function createProfileBrowser(electron, {
     const tab = active();
     switch (message.action) {
       case "state": break;
-      case "new": bookmarksOpen = false; await openTab("about:blank"); focusAddress(); break;
-      case "home": bookmarksOpen = false; if (tab) await tab.loadURL("about:blank"); break;
-      case "show-bookmarks": bookmarksOpen = true; layout(); break;
+      case "new": bookmarksOpen = false; proxiesOpen = false; await openTab("about:blank"); focusAddress(); break;
+      case "home": bookmarksOpen = false; proxiesOpen = false; if (tab) await tab.loadURL("about:blank"); break;
+      case "show-bookmarks": bookmarksOpen = true; proxiesOpen = false; layout(); break;
       case "hide-bookmarks": bookmarksOpen = false; layout(); break;
+      case "show-proxies": proxiesOpen = true; bookmarksOpen = false; layout(); void checkConnection(); break;
+      case "hide-proxies": proxiesOpen = false; layout(); break;
+      case "switch-proxy": {
+        try { await switchProxy(String(message.id || "")); }
+        catch (failure) { error = failure.message || "Не удалось переключить прокси"; }
+        break;
+      }
+      case "toggle-proxy-failover": await setProxyFailover(message.value === true); break;
       case "check-connection": await checkConnection(); break;
-      case "select": bookmarksOpen = false; select(tabs.get(message.id)); break;
+      case "select": bookmarksOpen = false; proxiesOpen = false; select(tabs.get(message.id)); break;
       case "close-tab": {
         const target = tabs.get(message.id || activeId);
         if (target) {
@@ -160,7 +170,7 @@ async function createProfileBrowser(electron, {
       case "open-bookmark": {
         const saved = getBookmarks().find((item) => item.id === message.id);
         if (!saved) break;
-        bookmarksOpen = false;
+        bookmarksOpen = false; proxiesOpen = false;
         if (message.newTab || !tab) await openTab(saved.url);
         else { tab.error = ""; void tab.loadURL(saved.url).catch(() => {}); }
         break;
@@ -212,7 +222,7 @@ async function createProfileBrowser(electron, {
         if (Number.isFinite(next) && rounded >= 80 && rounded <= 180 && rounded !== chromeHeight) { chromeHeight = rounded; layout(); }
         return;
       }
-      case "navigate": if (tab) { bookmarksOpen = false; tab.error = ""; void tab.loadURL(addressUrl(message.value)).catch(() => {}); } break;
+      case "navigate": if (tab) { bookmarksOpen = false; proxiesOpen = false; tab.error = ""; void tab.loadURL(addressUrl(message.value)).catch(() => {}); } break;
       case "back": if (tab?.webContents.navigationHistory.canGoBack()) tab.webContents.navigationHistory.goBack(); break;
       case "forward": if (tab?.webContents.navigationHistory.canGoForward()) tab.webContents.navigationHistory.goForward(); break;
       case "reload": if (tab) { tab.error = ""; if (tab.webContents.isLoading()) tab.webContents.stop(); else tab.webContents.reload(); } break;
@@ -222,7 +232,7 @@ async function createProfileBrowser(electron, {
   }
   function dispatch(message) {
     // Switching existing tabs must not wait for a slow new tab or network check.
-    if (message?.action === "select") { select(tabs.get(message.id)); return Promise.resolve({}); }
+    if (message?.action === "select") { bookmarksOpen = false; proxiesOpen = false; select(tabs.get(message.id)); return Promise.resolve({}); }
     commandQueue = commandQueue.then(() => command(message)).then(() => ({})).catch(() => {
       error = "Не удалось выполнить действие. Проверьте адрес и подключение прокси."; publish(); return { error };
     });

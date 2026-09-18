@@ -266,39 +266,52 @@ export type Database = {
       }
       profile_browser_settings: {
         Row: {
+          active_proxy_id: string | null
           bookmark_bar_visible: boolean
           bookmarks: Json
           created_at: string
           extensions: Json
           profile_id: string
+          proxy_failover: boolean
           revision: number
           updated_at: string
           updated_by: string | null
           zoom_level: number
         }
         Insert: {
+          active_proxy_id?: string | null
           bookmark_bar_visible?: boolean
           bookmarks?: Json
           created_at?: string
           extensions?: Json
           profile_id: string
+          proxy_failover?: boolean
           revision?: number
           updated_at?: string
           updated_by?: string | null
           zoom_level?: number
         }
         Update: {
+          active_proxy_id?: string | null
           bookmark_bar_visible?: boolean
           bookmarks?: Json
           created_at?: string
           extensions?: Json
           profile_id?: string
+          proxy_failover?: boolean
           revision?: number
           updated_at?: string
           updated_by?: string | null
           zoom_level?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "profile_browser_settings_active_proxy_id_fkey"
+            columns: ["active_proxy_id"]
+            isOneToOne: false
+            referencedRelation: "proxies"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "profile_browser_settings_profile_id_fkey"
             columns: ["profile_id"]
@@ -680,19 +693,23 @@ export type Database = {
       }
       save_profile_browser_settings: {
         Args: {
+          _active_proxy_id?: string
           _bookmark_bar_visible: boolean
           _bookmarks: Json
           _expected_revision?: number
           _extensions: Json
           _profile_id: string
+          _proxy_failover?: boolean
           _zoom_level: number
         }
         Returns: {
+          active_proxy_id: string | null
           bookmark_bar_visible: boolean
           bookmarks: Json
           created_at: string
           extensions: Json
           profile_id: string
+          proxy_failover: boolean
           revision: number
           updated_at: string
           updated_by: string | null

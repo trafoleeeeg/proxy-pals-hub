@@ -17,6 +17,8 @@ export const browserSettingsSchema = z.object({
     url: z.string().url().refine((value) => value.startsWith("https://"), "Разрешены только HTTPS-ссылки"),
     pinned: z.boolean(),
   }).strict()).max(64),
+  activeProxyId: z.string().uuid().nullable().default(null),
+  proxyFailover: z.boolean().default(false),
   revision: z.number().int().min(0),
   updatedAt: z.string().datetime().optional(),
 }).strict();

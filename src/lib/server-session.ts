@@ -31,6 +31,16 @@ export async function prepareSessionLaunch(context: ServerContext, data: z.infer
       if (!validated.success) throw new Error("Настройки назначенного прокси некорректны");
       proxy = { protocol: row.protocol, host: row.host, port: row.port, username: row.username, password: decryptSecret(row.password_enc) };
     }
+    const { data: proxyRows } = await serverDb(context.supabase).from("proxies")
+      .select("id, label, protocol, host, port, username, password_enc, country, city")
+      .eq("team_id", profile.team_id);
+    const proxies = [...(proxyRows || [])].sort((a, b) => String(a.label).localeCompare(String(b.label), "ru")).flatMap((row) => {
+      const validated = proxySchema.safeParse(row);
+      if (!validated.success) return [];
+      return [{ id: row.id, label: row.label, protocol: row.protocol, host: row.host, port: row.port,
+        username: row.username, password: decryptSecret(row.password_enc),
+        country: row.country ?? null, city: row.city ?? null }];
+    });
     const cookies = profile.cookies_enc ? JSON.stringify(parseCookieImport(decryptSecret(profile.cookies_enc))) : "[]";
     await writeAudit(context, profile.team_id, "profile.launched", profile.id);
     const { data: settingsRow } = await serverDb(context.supabase).from("profile_browser_settings").select("*").eq("profile_id", profile.id).maybeSingle();
@@ -38,8 +48,9 @@ export async function prepareSessionLaunch(context: ServerContext, data: z.infer
       profileId: settingsRow.profile_id, bookmarks: settingsRow.bookmarks,
       bookmarkBarVisible: settingsRow.bookmark_bar_visible, zoomLevel: settingsRow.zoom_level,
       extensions: settingsRow.extensions, revision: settingsRow.revision, updatedAt: settingsRow.updated_at,
+      activeProxyId: settingsRow.active_proxy_id ?? null, proxyFailover: settingsRow.proxy_failover ?? false,
     }) : null;
-    return { profileId: profile.id, name: profile.name, fingerprint, proxy, cookies,
+    return { profileId: profile.id, name: profile.name, fingerprint, proxy, proxies, cookies,
       browserSettings: browserSettings?.success ? browserSettings.data : null,
       lockToken: lease.lockToken, lockExpiresAt: lease.expiresAt, cookiesUpdatedAt: profile.cookies_updated_at, deviceId };
   } catch (error) {

@@ -220,24 +220,25 @@ export class DesktopProfileLifecycle {
       let payload: LaunchPayload | undefined;
       try {
         payload = await this.api.launch(profileId, this.bridge.platform);
-        if (!payload.lockToken) throw new Error();
+        if (!payload.lockToken) throw new Error("Сервер не выдал токен сессии профиля.");
         this.sessions.set(profileId, {
           profileId, name: payload.name, lockToken: payload.lockToken, cookiesUpdatedAt: payload.cookiesUpdatedAt,
           ...(payload.deviceId ? { deviceId: payload.deviceId } : {}),
         });
         const result = await this.bridge.launchProfile(payload);
-        if (!result.ok) throw new Error();
+        if (!result.ok) throw new Error(result.error || "Приложение не смогло открыть окно профиля.");
         delete this.errors[profileId];
         delete this.notices[profileId];
-      } catch {
+      } catch (error) {
         this.sessions.delete(profileId);
         if (payload?.lockToken) {
           this.pending.set(payload.lockToken, { profileId, lockToken: payload.lockToken, ...(payload.deviceId ? { deviceId: payload.deviceId } : {}) });
           await this.flushClose(payload.lockToken).catch(() => {});
         }
+        const reason = error instanceof Error && error.message.trim() ? error.message.trim() : "";
         this.errors[profileId] = payload && this.pending.has(payload.lockToken)
           ? "Запуск не выполнен. Снятие блокировки ожидает связи с сервером."
-          : "Не удалось запустить профиль. Проверьте доступ, блокировку и параметры подключения.";
+          : reason || "Не удалось запустить профиль. Проверьте доступ, блокировку и параметры подключения.";
         throw new Error(this.errors[profileId]);
       }
     });

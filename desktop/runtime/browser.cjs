@@ -115,6 +115,45 @@ async function createProfileBrowser(electron, {
       tab.view.setBounds({ x: 0, y: top, width: Math.max(1, width), height: Math.max(1, height - top) });
        tab.view.setVisible(tab.id === activeId && !isHome(tab) && !bookmarksOpen && !proxiesOpen);
     }
+    if (extensionPopup) {
+      const popupWidth = Math.min(420, Math.max(240, width - 20));
+      const popupHeight = Math.min(600, Math.max(180, height - chromeHeight - 16));
+      extensionPopup.setBounds({ x: Math.max(0, width - popupWidth - 10), y: chromeHeight, width: popupWidth, height: popupHeight });
+    }
+  }
+  // Окно расширения открывается поверх страницы, как всплывающее окно в Chrome.
+  let extensionPopup = null;
+  let extensionPopupId = "";
+  function closeExtensionPopup() {
+    const view = extensionPopup;
+    extensionPopup = null; extensionPopupId = "";
+    if (!view) return;
+    try { shell.contentView.removeChildView(view); } catch { /* окно уже закрыто */ }
+    try { view.webContents.close(); } catch { /* уже уничтожено */ }
+  }
+  function openExtensionPopup(extension) {
+    if (!extension?.runtimeId || !extension.popup) { error = "У этого расширения нет собственного окна"; return; }
+    closeExtensionPopup();
+    const view = new WebContentsView({
+      webPreferences: { session: session.fromPartition(partition), sandbox: true, contextIsolation: true, nodeIntegration: false, devTools: false },
+    });
+    extensionPopup = view; extensionPopupId = extension.id;
+    view.setBackgroundColor("#ffffff");
+    shell.contentView.addChildView(view);
+    layout();
+    view.webContents.on("blur", () => closeExtensionPopup());
+    view.webContents.setWindowOpenHandler(({ url }) => {
+      closeExtensionPopup();
+      try { void openTab(startUrl(url)); } catch { /* неподдерживаемый адрес */ }
+      return { action: "deny" };
+    });
+    view.webContents.loadURL(`chrome-extension://${extension.runtimeId}/${extension.popup}`).then(() => {
+      view.webContents.focus();
+    }).catch(() => {
+      closeExtensionPopup();
+      error = "Не удалось открыть окно расширения";
+      flushPublish();
+    });
   }
   function select(tab) {
     if (shell.isDestroyed() || !tab || tab.isDestroyed()) return;

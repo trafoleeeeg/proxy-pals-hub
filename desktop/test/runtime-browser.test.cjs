@@ -10,6 +10,7 @@ function harness() {
   const views = [];
   let layoutCount = 0;
   let bookmarks = [];
+  let extensions = [{ id: "aaaaaaaaaaaaaaaaaaaaaaaa", name: "Тест", version: "1.0", pinned: false }];
   class Contents extends EventEmitter {
     constructor() {
       super(); this.url = "about:blank"; this.title = ""; this.loading = false;
@@ -59,6 +60,8 @@ function harness() {
       name: "Тест", fp: { screen: { width: 1280, height: 720 } }, partition: "persist:test",
       openTab, closeProfile: async () => {}, show: false, onTabsChanged: () => changed.push(true),
       getBookmarks: () => bookmarks,
+      getExtensions: () => extensions,
+      setExtensionPinned: async (id, pinned) => { extensions = extensions.map((item) => item.id === id ? { ...item, pinned } : item); },
       addBookmark: async (bookmark) => { bookmarks = [...bookmarks, { id: "11111111-1111-4111-8111-111111111111", ...bookmark }]; },
     });
     browser.markReady();
@@ -149,10 +152,24 @@ test("browser publishes zoom percentage and hides the page behind bookmark manag
   h.browser.destroy();
 });
 
+test("page view yields space for shell popovers and extensions can be pinned", async () => {
+  const h = await harness().start();
+  await h.command({ action: "chrome-overlay-height", value: 420 });
+  assert.equal(h.views.at(-1).bounds.y, 420);
+  await h.command({ action: "pin-extension", id: "aaaaaaaaaaaaaaaaaaaaaaaa", pinned: true });
+  assert.equal(h.stateEvents.at(-1).extensions[0].pinned, true);
+  await h.command({ action: "chrome-overlay-height", value: 0 });
+  assert.equal(h.views.at(-1).bounds.y, CHROME_HEIGHT);
+  h.browser.destroy();
+});
+
 test("browser UI contains a dedicated bookmark manager, search and compact zoom controls", () => {
   const source = decodeURIComponent(browserUrl().split(",", 2)[1]);
   assert.match(source, /id="bookmarks-button"/);
   assert.match(source, /id="manager-search"/);
   assert.match(source, /id="zoom-value"/);
   assert.match(source, /action: "show-bookmarks"/);
+  assert.match(source, /id="pinned-extensions"/);
+  assert.match(source, /action: "chrome-overlay-height"/);
+  assert.match(source, /action: "pin-extension"/);
 });

@@ -266,7 +266,7 @@ async function createProfileBrowser(electron, {
       case "reload": if (tab) { tab.error = ""; if (tab.webContents.isLoading()) tab.webContents.stop(); else tab.webContents.reload(); } break;
        default: throw new Error("Неизвестная команда браузера");
     }
-    publish();
+    flushPublish();
   }
   function dispatch(message) {
     // Switching existing tabs must not wait for a slow new tab or network check.

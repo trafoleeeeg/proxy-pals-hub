@@ -188,8 +188,8 @@ function createExtensionStore(getUserData, deps = {}) {
     let entries = await read();
     for (const item of wanted) {
       if (!item || !/^[a-f0-9]{24}$/.test(String(item.id))) continue;
-      if (!entries.some((entry) => entry.id === item.id) && typeof item.source === "string") {
-        try { await installFromSource(parseExtensionUrl(item.source), item.id); } catch { /* keep other extensions usable */ }
+      if (!entries.some((entry) => entry.id === item.id) && typeof item.url === "string") {
+        try { await installFromSource(parseExtensionUrl(item.url), item.id); } catch { /* keep other extensions usable */ }
         entries = await read();
       }
     }

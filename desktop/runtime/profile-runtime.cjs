@@ -183,7 +183,7 @@ function createProfileRuntime(electron, options = {}) {
 
   function browserSettings(entry) {
     return { profileId: entry.profileId, bookmarks: entry.bookmarks || [], bookmarkBarVisible: entry.bookmarkBarVisible !== false,
-      zoomLevel: entry.zoomLevel || 0, extensions: (entry.extensionList || []).map((item) => ({ id: item.id, pinned: item.pinned === true, ...(item.url ? { source: item.url } : {}) })),
+      zoomLevel: entry.zoomLevel || 0, extensions: (entry.extensionList || []).filter((item) => item.url).map((item) => ({ id: item.id, pinned: item.pinned === true, url: item.url })),
       revision: entry.settingsRevision || 0 };
   }
 

@@ -14,7 +14,7 @@ export const browserSettingsSchema = z.object({
   zoomLevel: z.number().min(-3).max(5),
   extensions: z.array(z.object({
     id: z.string().regex(/^[a-f0-9]{24}$/),
-    source: z.string().url().refine((value) => value.startsWith("https://"), "Разрешены только HTTPS-ссылки").optional(),
+    url: z.string().url().refine((value) => value.startsWith("https://"), "Разрешены только HTTPS-ссылки"),
     pinned: z.boolean(),
   }).strict()).max(64),
   revision: z.number().int().min(0),

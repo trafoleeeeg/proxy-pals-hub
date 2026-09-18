@@ -86,7 +86,7 @@ describe("desktop profile lifecycle", () => {
 
   test("sync calls cannot overlap and snapshots from a different token are rejected", async () => {
     const f = fixture([{ profileId: "a", name: "A", lockToken: "lease-a" }]);
-    await f.controller.restore();
+    await f.controller.restore(); await f.controller.sync();
     f.bridge.profileCookies = async () => { await pause(); return { ok: true, cookies: "[]", lockToken: "older-lease" }; };
     const first = f.controller.sync(); const second = f.controller.sync();
     expect(second).toBe(first); await first;
@@ -97,7 +97,7 @@ describe("desktop profile lifecycle", () => {
 
   test("close events are serialized behind an in-flight cookie save", async () => {
     const f = fixture([{ profileId: "a", name: "A", lockToken: "lease-a" }]);
-    await f.controller.restore();
+    await f.controller.restore(); await f.controller.sync();
     let release!: () => void; let started!: () => void;
     const entered = new Promise<void>((resolve) => { started = resolve; });
     f.api.save = async () => { started(); await new Promise<void>((resolve) => { release = resolve; }); };
@@ -140,7 +140,7 @@ describe("desktop profile lifecycle", () => {
     };
     const ack = f.bridge.acknowledgeProfileClosure;
     f.bridge.acknowledgeProfileClosure = async () => ({ ok: false });
-    await f.controller.restore();
+    await f.controller.restore(); await f.controller.sync();
     expect(f.state.outbox).toHaveLength(1);
     expect(writes).toBe(1);
     f.bridge.acknowledgeProfileClosure = ack;
@@ -194,7 +194,7 @@ describe("desktop profile lifecycle", () => {
     expect(f.state.outbox).toHaveLength(1);
     f.bridge.archiveProfileClosure = archive;
     const restarted = new DesktopProfileLifecycle(f.bridge, f.api);
-    await restarted.restore();
+    await restarted.restore(); await restarted.sync();
     expect(f.state.closeCalls).toHaveLength(2);
     expect(f.state.closeCalls[1]).toEqual(f.state.closeCalls[0]);
     expect(f.state.archiveCalls).toEqual(["durable-id"]);
@@ -206,7 +206,7 @@ describe("desktop profile lifecycle", () => {
   test("transient server close failure never archives the snapshot", async () => {
     const f = fixture(); f.state.outbox = [event("a")];
     f.api.close = async (data) => { f.state.closeCalls.push(data); throw new Error("offline"); };
-    await f.controller.restore();
+    await f.controller.restore(); await f.controller.sync();
     expect(f.controller.getSnapshot().pending).toContain("a");
     expect(f.state.archiveCalls).toEqual([]);
     expect(f.state.ackCalls).toEqual([]);
@@ -216,7 +216,7 @@ describe("desktop profile lifecycle", () => {
   test("missing server close receipt cannot acknowledge or archive durable cookies", async () => {
     const f = fixture(); f.state.outbox = [event("a")];
     f.api.close = async (data) => { f.state.closeCalls.push(data); };
-    await f.controller.restore();
+    await f.controller.restore(); await f.controller.sync();
     expect(f.controller.getSnapshot().pending).toContain("a");
     expect(f.state.ackCalls).toEqual([]);
     expect(f.state.archiveCalls).toEqual([]);
@@ -225,7 +225,7 @@ describe("desktop profile lifecycle", () => {
 
   test("an empty native close reply cannot discard cookies from a prior window close", async () => {
     const f = fixture([{ profileId: "a", name: "A", lockToken: "lease-a" }]);
-    await f.controller.restore();
+    await f.controller.restore(); await f.controller.sync();
     f.state.running = [];
     f.state.outbox = [{ ...event("a"), cookies: '[{"name":"last","value":"cookie"}]' }];
     f.bridge.closeProfile = async () => ({ ok: true });

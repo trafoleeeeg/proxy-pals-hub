@@ -19,6 +19,8 @@ test("extension store validates manifests, copies entries and loads them into se
   const loadedState = await store.loadIntoSession(session, new Map());
   assert.equal(loadedState.loaded.length, 1);
   assert.equal(loaded.length, 1);
+  await store.setPinned(added.id, true);
+  assert.equal((await store.list())[0].pinned, true);
   await store.remove(added.id);
   assert.deepEqual(await store.list(), []);
   await fs.rm(temp, { recursive: true, force: true });

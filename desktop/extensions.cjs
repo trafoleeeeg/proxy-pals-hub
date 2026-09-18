@@ -146,8 +146,9 @@ function createExtensionStore(getUserData, deps = {}) {
       await fs.mkdir(root(), { recursive: true });
       await fs.rm(destination, { recursive: true, force: true });
       await fs.cp(staging, destination, { recursive: true, dereference: false });
+      const previous = (await read()).find((entry) => entry.id === id);
       const entries = (await read()).filter((entry) => entry.id !== id);
-      entries.push({ id, source: { kind: parsed.kind, downloadUrl: parsed.downloadUrl, pageUrl: parsed.pageUrl } });
+      entries.push({ id, source: { kind: parsed.kind, downloadUrl: parsed.downloadUrl, pageUrl: parsed.pageUrl }, pinned: previous?.pinned === true });
       await write(entries);
       return { id, name: manifest.name, version: manifest.version, source: parsed.kind, url: parsed.pageUrl };
     } finally {

@@ -22,7 +22,7 @@ async function createProfileBrowser(electron, {
   name, fp, partition, openTab, closeProfile, getInfo = () => ({}), checkConnection = async () => {}, show = true,
   getBookmarks = () => [], addBookmark = async () => {}, removeBookmark = async () => {}, getExtensions = () => [],
   updateBookmark = async () => {}, reorderBookmarks = async () => {}, getBookmarkBarVisible = () => true,
-  setBookmarkBarVisible = async () => {}, openExtensionManager = () => {}, onTabsChanged = () => {},
+  setBookmarkBarVisible = async () => {}, setExtensionPinned = async () => {}, openExtensionManager = () => {}, onTabsChanged = () => {},
 }) {
   const { BrowserWindow, WebContentsView, session, ipcMain } = electron;
   let registry = handlers.get(ipcMain);
@@ -53,6 +53,7 @@ async function createProfileBrowser(electron, {
   const shellContents = shell.webContents;
   let activeId;
   let chromeHeight = CHROME_HEIGHT;
+  let overlayHeight = 0;
   let ready = false;
   let error = "";
   let bookmarksOpen = false;
@@ -78,7 +79,8 @@ async function createProfileBrowser(electron, {
     if (shell.isDestroyed()) return;
     const { width, height } = shell.getContentBounds();
     for (const tab of tabs.values()) {
-      tab.view.setBounds({ x: 0, y: chromeHeight, width: Math.max(1, width), height: Math.max(1, height - chromeHeight) });
+      const top = Math.max(chromeHeight, overlayHeight);
+      tab.view.setBounds({ x: 0, y: top, width: Math.max(1, width), height: Math.max(1, height - top) });
        tab.view.setVisible(tab.id === activeId && !isHome(tab) && !bookmarksOpen);
     }
   }
@@ -197,6 +199,12 @@ async function createProfileBrowser(electron, {
       case "reorder-bookmarks": if (Array.isArray(message.ids)) await reorderBookmarks(message.ids); break;
       case "toggle-bookmark-bar": await setBookmarkBarVisible(!getBookmarkBarVisible()); break;
       case "manage-extensions": openExtensionManager(); break;
+      case "pin-extension": await setExtensionPinned(message.id, message.pinned === true); break;
+      case "chrome-overlay-height": {
+        const next = Math.round(Number(message.value) || 0);
+        if (next >= 0 && next <= 720 && next !== overlayHeight) { overlayHeight = next; layout(); }
+        return;
+      }
       case "chrome-height": {
         const next = Number(message.value);
         const rounded = Math.round(next);

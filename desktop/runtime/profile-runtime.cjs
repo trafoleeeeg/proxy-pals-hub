@@ -463,21 +463,21 @@ function createProfileRuntime(electron, options = {}) {
       entry.fingerprintDiagnostics = await configureFingerprint(win.webContents, entry.fp);
       win.webContents.debugger.on("detach", () => {
         if (entry.closingRequested || win.closing || win.isDestroyed()) return;
-        entry.lastError = "Fingerprint debugger detached; profile stopped";
+        entry.lastError = "Отпечаток браузера отключился, профиль остановлен";
         blockSession(entry.ses);
         closeProfileWindow(entry.profileId).catch(() => {});
       });
       if (entry.closingRequested) throw new Error("Profile is closing");
       if (options.show !== false) win.show();
       if (url !== "about:blank") {
-        if (defer) void navigate(win, url, loadOptions).catch(() => { entry.lastError = "Profile navigation failed"; });
+        if (defer) void navigate(win, url, loadOptions).catch(() => { entry.lastError = "Не удалось открыть страницу"; });
         else await navigate(win, url, loadOptions);
       }
       if (entry.closingRequested) throw new Error("Profile is closing");
       if (options.show !== false) win.show();
       return win;
     } catch (error) {
-      if (!primary) entry.lastError = /^(Profile navigation failed|Unable to apply fingerprint before navigation)/.test(error.message) ? error.message : "Tab launch failed";
+      if (!primary) entry.lastError = launchErrorText(error.message);
       if (!win.isDestroyed()) win.destroy();
       throw error;
     }
@@ -639,7 +639,7 @@ function createProfileRuntime(electron, options = {}) {
       return result;
     })().catch(() => {
       entry.state = "error";
-      entry.lastError = "Profile close failed; retry required";
+      entry.lastError = "Не удалось закрыть профиль, повторите попытку";
       entry.closePromise = null;
       throw new Error(entry.lastError);
     });

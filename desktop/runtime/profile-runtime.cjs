@@ -145,6 +145,11 @@ function createProfileRuntime(electron, options = {}) {
       getBookmarks: () => entry.bookmarks || [],
       getBookmarkBarVisible: () => entry.bookmarkBarVisible !== false,
       getExtensions: () => entry.extensionList || [],
+      setExtensionPinned: async (id, pinned) => {
+        if (!extensionStore?.setPinned) return;
+        await extensionStore.setPinned(id, pinned);
+        await reloadExtensionList(entry);
+      },
       addBookmark: (bookmark) => saveBookmarks(entry, [...(entry.bookmarks || []), { ...bookmark }]),
       updateBookmark: (bookmark) => saveBookmarks(entry, (entry.bookmarks || []).map((item) => item.id === bookmark.id
         ? { ...item, title: bookmark.title, url: bookmark.url || item.url, favicon: bookmark.url && bookmark.url !== item.url ? "" : (bookmark.favicon || item.favicon) }

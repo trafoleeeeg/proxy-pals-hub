@@ -46,6 +46,5 @@ export async function confirmRotation({
       return { ...result, rotationConfirmed: false };
     }
   }
-  }
   throw new Error("Провайдер принял запрос, но новый IP не подтверждён. Повторите проверку позже.");
 }

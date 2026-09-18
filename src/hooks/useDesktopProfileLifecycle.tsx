@@ -85,14 +85,20 @@ export function DesktopProfileProvider({ children }: { children: ReactNode }) {
     const saveLatest = async (profileId: string) => {
       const value = pending.get(profileId);
       if (!value) return;
-      pending.delete(profileId);
       try {
         const saved = await saveSettings({ data: { ...value, revision: revisions.get(profileId) ?? value.revision } });
+        if (pending.get(profileId) === value) pending.delete(profileId);
         revisions.set(profileId, saved.revision);
         await bridge.pushBrowserSettings(saved);
       } catch {
         const remote = await fetchSettings({ data: { profileId } }).catch(() => null);
-        if (remote) { revisions.set(profileId, remote.revision); await bridge.pushBrowserSettings(remote); }
+        if (remote) {
+          revisions.set(profileId, remote.revision);
+          await bridge.pushBrowserSettings(remote);
+          if (pending.get(profileId) === value) pending.delete(profileId);
+        } else {
+          timers.set(profileId, window.setTimeout(() => void saveLatest(profileId), 2_000));
+        }
       }
     };
     const off = bridge.onBrowserSettingsChanged((raw) => {
@@ -111,6 +117,8 @@ export function DesktopProfileProvider({ children }: { children: ReactNode }) {
         });
         if (!parsed.success || parsed.data.revision <= (revisions.get(parsed.data.profileId) || 0)) return;
         revisions.set(parsed.data.profileId, parsed.data.revision);
+        pending.delete(parsed.data.profileId);
+        window.clearTimeout(timers.get(parsed.data.profileId));
         void bridge.pushBrowserSettings(parsed.data);
       }).subscribe();
     return () => {

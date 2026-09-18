@@ -600,6 +600,7 @@ export type Database = {
           created_at: string
           id: string
           role: Database["public"]["Enums"]["app_role"]
+          scope: string
           team_id: string
           user_id: string
         }
@@ -607,6 +608,7 @@ export type Database = {
           created_at?: string
           id?: string
           role?: Database["public"]["Enums"]["app_role"]
+          scope?: string
           team_id: string
           user_id: string
         }
@@ -614,6 +616,7 @@ export type Database = {
           created_at?: string
           id?: string
           role?: Database["public"]["Enums"]["app_role"]
+          scope?: string
           team_id?: string
           user_id?: string
         }
@@ -721,6 +724,10 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      set_member_scope: {
+        Args: { _scope: string; _team_id: string; _user_id: string }
+        Returns: boolean
       }
       set_profiles_access: {
         Args: {

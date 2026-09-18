@@ -3,7 +3,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import type { Fingerprint } from "./fingerprint";
 import type { Json } from "@/integrations/supabase/types";
 import { bulkCreateSchema, bulkDeleteSchema, bulkUpdateSchema, idSchema, importCookiesSchema, profileIdSchema, saveProfileSchema, teamSchema } from "./server-validation";
-import { callServerRpc, requireProfile, requireTeamAccess, requireTeamOwner, requireTeamProxy, writeAudit } from "./server-db";
+import { callServerRpc, requireProfile, requireTeamAccess, requireTeamManager, requireTeamProxy, writeAudit } from "./server-db";
 import { parseCookieImport } from "./server-cookies";
 
 export type ProfileRow = {
@@ -66,7 +66,7 @@ export const saveProfile = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(saveProfileSchema)
   .handler(async ({ data, context }) => {
-    await requireTeamOwner(context, data.teamId);
+    await requireTeamManager(context, data.teamId);
     await requireTeamProxy(context, data.teamId, data.proxyId);
     const payload = {
       name: data.name,
@@ -103,7 +103,7 @@ export const bulkCreateProfiles = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(bulkCreateSchema)
   .handler(async ({ data, context }) => {
-    await requireTeamOwner(context, data.teamId);
+    await requireTeamManager(context, data.teamId);
     const rows = data.fingerprints.map((fp, i) => ({
       team_id: data.teamId,
       name: `${data.prefix} ${i + 1}`,
@@ -153,7 +153,7 @@ export const cloneProfile = createServerFn({ method: "POST" })
 export const bulkUpdateProfiles = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth]).inputValidator(bulkUpdateSchema)
   .handler(async ({ data, context }) => {
-    await requireTeamOwner(context, data.teamId);
+    await requireTeamManager(context, data.teamId);
     await requireTeamProxy(context, data.teamId, data.changes.proxyId);
     const updated = await callServerRpc(context.supabase, "bulk_mutate_profiles", {
       _team_id: data.teamId, _profile_ids: data.ids, _operation: "update", _changes: data.changes as Json,
@@ -170,7 +170,8 @@ export const bulkDeleteProfiles = createServerFn({ method: "POST" })
 export const importProfileCookies = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth]).inputValidator(importCookiesSchema)
   .handler(async ({ data, context }) => {
-    await requireProfile(context, data.profileId, true);
+    // Cookies остаются секретом владельца: администратор их не выгружает и не подменяет.
+    await requireProfile(context, data.profileId, "owner");
     const cookies = parseCookieImport(data.text);
     const { encryptSecret } = await import("./crypto.server");
     await callServerRpc(context.supabase, "import_profile_cookies", {
@@ -182,7 +183,7 @@ export const importProfileCookies = createServerFn({ method: "POST" })
 export const exportProfileCookies = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth]).inputValidator(profileIdSchema)
   .handler(async ({ data, context }) => {
-    const profile = await requireProfile(context, data.profileId, true);
+    const profile = await requireProfile(context, data.profileId, "owner");
     const { data: row, error } = await context.supabase.from("browser_profiles").select("cookies_enc").eq("id", data.profileId).single();
     if (error) throw new Error(error.message);
     const { decryptSecret } = await import("./crypto.server");

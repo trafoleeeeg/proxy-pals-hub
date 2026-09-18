@@ -12,6 +12,7 @@ import {
   removeMember,
   listAudit,
   setProfileAccess,
+  setMemberScope,
 } from "@/lib/team.functions";
 import { listProfiles } from "@/lib/profiles.functions";
 import { ProfileBulkDialog } from "@/components/profile-bulk";
@@ -22,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 export const Route = createFileRoute("/_authenticated/app/team")({
@@ -39,6 +41,7 @@ export function TeamPage() {
   const audit = useServerFn(listAudit);
   const profilesFn = useServerFn(listProfiles);
   const accessFn = useServerFn(setProfileAccess);
+  const scopeFn = useServerFn(setMemberScope);
   const [email, setEmail] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [bulkAccess, setBulkAccess] = useState<string[] | null>(null);
@@ -47,6 +50,7 @@ export function TeamPage() {
   useEffect(() => { setSelected([]); setBulkAccess(null); setRemoving(null); }, [ws?.teamId]);
 
   const isOwner = ws?.role === "owner";
+  const canManage = !!ws?.canManage;
 
   const team = useQuery({
     queryKey: ["team", ws?.teamId],
@@ -63,7 +67,7 @@ export function TeamPage() {
   const log = useQuery({
     queryKey: ["audit", ws?.teamId],
     queryFn: () => audit({ data: { teamId: ws!.teamId } }),
-    enabled: !!ws?.teamId && isOwner,
+    enabled: !!ws?.teamId && canManage,
   });
 
   useEffect(() => {
@@ -87,6 +91,13 @@ export function TeamPage() {
     onError: () => toast.error("Не удалось создать приглашение. Проверьте почту и права владельца."),
   });
 
+  const scopeMut = useMutation({
+    mutationFn: (v: { userId: string; scope: "member" | "manager" }) =>
+      scopeFn({ data: { teamId: ws!.teamId, userId: v.userId, scope: v.scope } }),
+    onSuccess: async () => { toast.success("Уровень доступа изменён"); await refresh(); },
+    onError: () => toast.error("Не удалось изменить уровень доступа. Это может сделать только владелец."),
+  });
+
   const accessMut = useMutation({
     mutationFn: (v: { profileId: string; userId: string; granted: boolean }) =>
       accessFn({ data: v }),
@@ -105,10 +116,34 @@ export function TeamPage() {
   if (workspace.isPending) return <p role="status" className="text-sm text-muted-foreground">Загрузка команды…</p>;
   if (workspace.isError) return <p role="alert" className="text-sm text-destructive">Команда недоступна. <Button variant="outline" onClick={() => workspace.refetch()}>Повторить</Button></p>;
 
-  if (!isOwner) {
+  if (!canManage) {
     return (
       <div className="py-8 text-sm text-muted-foreground">
-        Управление командой доступно только владельцу.
+        Управление командой доступно владельцу и администраторам.
+      </div>
+    );
+  }
+
+  if (!isOwner) {
+    return (
+      <div>
+        <h1 className="text-2xl font-semibold">Журнал действий</h1>
+        <p className="mt-1 text-sm text-muted-foreground">Состав команды и приглашения меняет только владелец.</p>
+        {log.isPending && <p role="status" className="py-3 text-sm">Загрузка журнала…</p>}
+        <div className="mt-4 rounded-lg border border-border bg-card">
+          <Table>
+            <TableHeader><TableRow><TableHead>Когда</TableHead><TableHead>Кто</TableHead><TableHead>Действие</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {(log.data ?? []).map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell className="mono text-xs">{new Date(r.created_at).toLocaleString("ru-RU")}</TableCell>
+                  <TableCell className="text-xs">{r.email ?? "—"}</TableCell>
+                  <TableCell className="mono text-xs">{r.action}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       </div>
     );
   }
@@ -152,6 +187,7 @@ export function TeamPage() {
                 <TableRow>
                   <TableHead>Почта</TableHead>
                   <TableHead>Роль</TableHead>
+                  <TableHead>Уровень доступа</TableHead>
                   <TableHead />
                 </TableRow>
               </TableHeader>
@@ -163,6 +199,19 @@ export function TeamPage() {
                       <Badge variant={m.role === "owner" ? "default" : "outline"}>
                         {m.role === "owner" ? "владелец" : "сотрудник"}
                       </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {m.role === "owner" ? (
+                        <span className="text-xs text-muted-foreground">полный доступ</span>
+                      ) : (
+                        <Select value={m.scope} disabled={scopeMut.isPending} onValueChange={(v) => scopeMut.mutate({ userId: m.userId, scope: v as "member" | "manager" })}>
+                          <SelectTrigger aria-label={`Уровень доступа ${m.email}`} className="h-8 w-44"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="member">только свои профили</SelectItem>
+                            <SelectItem value="manager">администратор</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       {m.role === "member" && (

@@ -264,6 +264,50 @@ export type Database = {
           },
         ]
       }
+      profile_browser_settings: {
+        Row: {
+          bookmark_bar_visible: boolean
+          bookmarks: Json
+          created_at: string
+          extensions: Json
+          profile_id: string
+          revision: number
+          updated_at: string
+          updated_by: string | null
+          zoom_level: number
+        }
+        Insert: {
+          bookmark_bar_visible?: boolean
+          bookmarks?: Json
+          created_at?: string
+          extensions?: Json
+          profile_id: string
+          revision?: number
+          updated_at?: string
+          updated_by?: string | null
+          zoom_level?: number
+        }
+        Update: {
+          bookmark_bar_visible?: boolean
+          bookmarks?: Json
+          created_at?: string
+          extensions?: Json
+          profile_id?: string
+          revision?: number
+          updated_at?: string
+          updated_by?: string | null
+          zoom_level?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "profile_browser_settings_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: true
+            referencedRelation: "browser_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profile_field_definitions: {
         Row: {
           created_at: string
@@ -633,6 +677,33 @@ export type Database = {
       remove_team_member: {
         Args: { _team_id: string; _user_id: string }
         Returns: boolean
+      }
+      save_profile_browser_settings: {
+        Args: {
+          _bookmark_bar_visible: boolean
+          _bookmarks: Json
+          _expected_revision?: number
+          _extensions: Json
+          _profile_id: string
+          _zoom_level: number
+        }
+        Returns: {
+          bookmark_bar_visible: boolean
+          bookmarks: Json
+          created_at: string
+          extensions: Json
+          profile_id: string
+          revision: number
+          updated_at: string
+          updated_by: string | null
+          zoom_level: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "profile_browser_settings"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       set_profiles_access: {
         Args: {

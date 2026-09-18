@@ -19,6 +19,7 @@ function harness() {
   const records = new Map();
   const tabRecords = new Map();
   const bookmarkRecords = new Map();
+  let browserConfig;
   class Window extends EventEmitter {
     constructor(options) {
       super(); this.options = options; this.destroyed = false;
@@ -61,7 +62,7 @@ function harness() {
     } },
   };
   const runtime = createProfileRuntime(electron, {
-    createBrowser: async (_electron, options) => ({
+    createBrowser: async (_electron, options) => (browserConfig = options, {
       shell: { isDestroyed: () => false, focus() {} }, destroy() {},
       createTab: () => new Window({ webPreferences: { partition: options.partition, contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, devTools: false } }),
     }),
@@ -79,10 +80,28 @@ function harness() {
       write: async (id, state) => { bookmarkRecords.set(id, structuredClone(state)); return structuredClone(state); },
     },
   });
-  return { runtime, windows, sessions, records, tabRecords, bookmarkRecords, get configured() { return configured; }, get disposed() { return disposed; }, setFlushGate: (gate) => { flushGate = gate; }, setNavigationGate: (gate) => { navigationGate = gate; }, setSnapshotFailure: (value) => { snapshotFailure = value; } };
+  return { runtime, windows, sessions, records, tabRecords, bookmarkRecords, get browserConfig() { return browserConfig; }, get configured() { return configured; }, get disposed() { return disposed; }, setFlushGate: (gate) => { flushGate = gate; }, setNavigationGate: (gate) => { navigationGate = gate; }, setSnapshotFailure: (value) => { snapshotFailure = value; } };
 }
 
 const payload = () => ({ profileId: ID, deviceId: "test-device", name: "Test", lockToken: "test-lock-token", fingerprint: FP, cookies: "[]", cookiesUpdatedAt: null, proxy: null, startUrl: "https://example.test" });
+
+test("team bookmarks update in running profiles without changing personal bookmarks", async () => {
+  const h = harness();
+  const teamId = "20000000-0000-4000-8000-000000000001";
+  const personal = { id: ID, title: "Личная", url: "https://personal.test/" };
+  h.bookmarkRecords.set(ID, { bookmarks: [personal], barVisible: false, stored: true });
+  await h.runtime.launchProfileWindow({ ...payload(), bookmarkDefaults: {
+    teamId, bookmarks: [{ id: teamId, title: "Команда", url: "https://team.test/" }], bookmarkBarVisible: true,
+  } });
+  assert.equal(h.browserConfig.getBookmarkBarVisible(), true);
+  assert.equal(h.browserConfig.getBookmarks().length, 2);
+  await h.runtime.applyBookmarkDefaults({ teamId: ID, bookmarks: [] });
+  assert.equal(h.browserConfig.getBookmarks().length, 2);
+  await h.runtime.applyBookmarkDefaults({ teamId, bookmarks: [], bookmarkBarVisible: true });
+  assert.deepEqual(h.browserConfig.getBookmarks(), [personal]);
+  assert.deepEqual(h.bookmarkRecords.get(ID).bookmarks, [personal]);
+  await h.runtime.closeAllProfiles();
+});
 
 test("saved tabs win over the profile home page unless launch requests an explicit URL", async () => {
   const h = harness();

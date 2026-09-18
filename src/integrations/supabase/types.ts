@@ -551,6 +551,44 @@ export type Database = {
           },
         ]
       }
+      team_bookmark_defaults: {
+        Row: {
+          bookmark_bar_visible: boolean
+          bookmarks: Json
+          created_at: string
+          revision: number
+          team_id: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          bookmark_bar_visible?: boolean
+          bookmarks?: Json
+          created_at?: string
+          revision?: number
+          team_id: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          bookmark_bar_visible?: boolean
+          bookmarks?: Json
+          created_at?: string
+          revision?: number
+          team_id?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "team_bookmark_defaults_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: true
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       team_invites: {
         Row: {
           accepted_at: string | null
@@ -676,6 +714,7 @@ export type Database = {
       }
       ensure_workspace: { Args: never; Returns: string }
       force_profile_unlock: { Args: { _profile_id: string }; Returns: boolean }
+      get_team_bookmark_defaults: { Args: { _team_id: string }; Returns: Json }
       import_profile_cookies: {
         Args: { _cookies_enc: string; _profile_id: string }
         Returns: string
@@ -724,6 +763,14 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      save_team_bookmark_defaults: {
+        Args: {
+          _bookmark_bar_visible: boolean
+          _bookmarks: Json
+          _team_id: string
+        }
+        Returns: Json
       }
       set_member_scope: {
         Args: { _scope: string; _team_id: string; _user_id: string }

@@ -62,9 +62,14 @@ export function DesktopProfileProvider({ children }: { children: ReactNode }) {
     const off = bridge.onProfileClosed((event) => {
       void lifecycle.closed(event).catch(() => {}).finally(invalidate);
     });
-    const synchronize = () => lifecycle.restore().then(() => lifecycle.sync()).catch(() => {}).finally(invalidate);
+    const synchronize = () => lifecycle.restore().catch(() => {}).finally(invalidate);
     void synchronize().finally(() => {
-      if (!disposed) setReady(true);
+      if (!disposed) {
+        setReady(true);
+        // Durable session uploads continue after the panel is usable. Their
+        // failures remain attached to the affected profile instead of the app.
+        void lifecycle.sync().catch(() => {}).finally(invalidate);
+      }
     });
     const timer = window.setInterval(() => { void lifecycle.sync().catch(() => {}).finally(invalidate); }, 60_000);
     const reconnect = () => { void synchronize(); };

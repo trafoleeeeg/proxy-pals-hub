@@ -22,14 +22,23 @@ function createSessionOutbox(directory, protection) {
     },
     list() {
       if (!fs.existsSync(directory)) return [];
-      return fs.readdirSync(directory)
-        .filter((name) => name.endsWith(".bin") && UUID.test(name.slice(0, -4)))
-        .map((name) => {
-          const entry = JSON.parse(protection.decryptString(fs.readFileSync(path.join(directory, name))));
+      const entries = [];
+      for (const name of fs.readdirSync(directory).filter((value) => value.endsWith(".bin") && UUID.test(value.slice(0, -4)))) {
+        const active = path.join(directory, name);
+        try {
+          const entry = JSON.parse(protection.decryptString(fs.readFileSync(active)));
           if (entry.snapshotId + ".bin" !== name || !UUID.test(entry.profileId)) throw new Error("Invalid saved session");
-          return entry;
-        })
-        .sort((a, b) => a.savedAt.localeCompare(b.savedAt));
+          entries.push(entry);
+        } catch {
+          // Keep unreadable encrypted bytes for manual recovery, but do not let
+          // one damaged record block the complete application after an update.
+          const quarantined = path.join(directory, "unreadable", name);
+          fs.mkdirSync(path.dirname(quarantined), { recursive: true });
+          if (!fs.existsSync(quarantined)) fs.renameSync(active, quarantined);
+          else fs.rmSync(active, { force: true });
+        }
+      }
+      return entries.sort((a, b) => a.savedAt.localeCompare(b.savedAt));
     },
     archive(id) {
       const active = filename(id);

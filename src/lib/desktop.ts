@@ -15,6 +15,7 @@ export type LaunchPayload = {
   lockToken: string;
   cookiesUpdatedAt: string;
   deviceId?: string;
+  browserSettings?: import("./browser-settings").BrowserSettings | null;
 };
 
 export type RunningProfile = {
@@ -41,6 +42,8 @@ export type UmbraBridge = {
   archiveProfileClosure: (snapshotId: string) => Promise<{ ok: boolean }>;
   profileCookies: (profileId: string) => Promise<{ ok: boolean; cookies: string | null } & Partial<ProfileRuntimeSnapshot>>;
   onProfileClosed: (cb: (p: ProfileClosed) => void) => () => void;
+  pushBrowserSettings: (settings: import("./browser-settings").BrowserSettings) => Promise<{ ok: boolean; error?: string }>;
+  onBrowserSettingsChanged: (cb: (settings: import("./browser-settings").BrowserSettings) => void) => () => void;
   openExternal: (url: string) => Promise<{ ok: boolean }>;
   listExtensions?: () => Promise<{ ok: boolean; extensions?: InstalledExtension[]; error?: string }>;
   addExtension?: () => Promise<{ ok: boolean; extension?: InstalledExtension; failures?: number; error?: string }>;

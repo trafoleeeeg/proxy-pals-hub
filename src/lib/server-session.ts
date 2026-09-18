@@ -2,6 +2,7 @@ import { z } from "zod";
 import { callServerRpc, serverDb, writeAudit, type ServerContext } from "./server-db";
 import { fingerprintSchema, launchSchema } from "./server-validation";
 import { parseCookieImport } from "./server-cookies";
+import { browserSettingsSchema } from "./browser-settings";
 
 const proxySchema = z.object({
   protocol: z.enum(["http", "https", "socks5"]),
@@ -32,7 +33,14 @@ export async function prepareSessionLaunch(context: ServerContext, data: z.infer
     }
     const cookies = profile.cookies_enc ? JSON.stringify(parseCookieImport(decryptSecret(profile.cookies_enc))) : "[]";
     await writeAudit(context, profile.team_id, "profile.launched", profile.id);
+    const { data: settingsRow } = await serverDb(context.supabase).from("profile_browser_settings").select("*").eq("profile_id", profile.id).maybeSingle();
+    const browserSettings = settingsRow ? browserSettingsSchema.safeParse({
+      profileId: settingsRow.profile_id, bookmarks: settingsRow.bookmarks,
+      bookmarkBarVisible: settingsRow.bookmark_bar_visible, zoomLevel: settingsRow.zoom_level,
+      extensions: settingsRow.extensions, revision: settingsRow.revision, updatedAt: settingsRow.updated_at,
+    }) : null;
     return { profileId: profile.id, name: profile.name, fingerprint, proxy, cookies,
+      browserSettings: browserSettings?.success ? browserSettings.data : null,
       lockToken: lease.lockToken, lockExpiresAt: lease.expiresAt, cookiesUpdatedAt: profile.cookies_updated_at, deviceId };
   } catch (error) {
     try {

@@ -316,6 +316,7 @@ async function createProfileBrowser(electron, {
   shell.on("close", (event) => { event.preventDefault(); void closeProfile().catch(() => { error = "Не удалось сохранить профиль. Повторите закрытие."; publish(); }); });
   shell.on("closed", () => {
     destroyed = true;
+    clearTimeout(publishTimer); publishTimer = null;
     registry.delete(shellContents);
     for (const tab of [...tabs.values()]) tab.destroy();
     if (!registry.size) { ipcMain.removeHandler("umbra-runtime:browser"); handlers.delete(ipcMain); }

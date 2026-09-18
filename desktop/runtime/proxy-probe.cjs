@@ -46,7 +46,7 @@ function requestJson(net, ses, url, timeoutMs, maxBytes = 64 * 1024) {
   });
 }
 
-function createProxyChecker({ session, net }, { setupProxy = createRuntimeProxy, endpoints = ENDPOINTS, timeoutMs = 15000 } = {}) {
+function createProxyChecker({ session, net }, { setupProxy = createRuntimeProxy, endpoints = ENDPOINTS, timeoutMs = 9000 } = {}) {
   return async function checkProxy(proxy) {
     const started = Date.now();
     const ses = session.fromPartition(`proxy-check-${randomUUID()}`, { cache: false });

@@ -15,6 +15,7 @@ function renderer() {
   const manager = byId("bookmark-manager");
   const findbar = byId("findbar");
   const findInput = byId("find-input");
+  const managerSearch = byId("manager-search");
   const newTab = byId("new");
   let current;
   let latestState = {};
@@ -33,7 +34,9 @@ function renderer() {
     if (result?.error) showError(result.error);
   }).catch(() => showError("Не удалось выполнить действие"));
   const closePopovers = (except) => {
+    const closesManager = manager !== except && !manager.hidden;
     for (const popover of [bookmarkPopover, extensionsPopover, menu, manager]) if (popover !== except) popover.hidden = true;
+    if (closesManager) void run({ action: "hide-bookmarks" });
   };
   const togglePopover = (popover, anchor) => {
     const show = popover.hidden;
@@ -84,6 +87,15 @@ function renderer() {
   });
   byId("extensions").addEventListener("click", () => togglePopover(extensionsPopover, byId("extensions")));
   byId("menu-button").addEventListener("click", () => togglePopover(menu, byId("menu-button")));
+  function openManager() {
+    closePopovers(manager);
+    manager.hidden = false;
+    renderManager();
+    managerSearch.focus();
+    void run({ action: "show-bookmarks" });
+  }
+  byId("bookmarks-button").addEventListener("click", openManager);
+  byId("manager-close").addEventListener("click", () => { manager.hidden = true; void run({ action: "hide-bookmarks" }); });
   function openFind() {
     closePopovers();
     findbar.hidden = false;
@@ -97,19 +109,36 @@ function renderer() {
   }
   function renderManager() {
     const list = byId("manager-list");
-    list.replaceChildren(...(latestState.bookmarks || []).map((bookmark) => {
-      const row = document.createElement("div"); row.className = "manager-row";
+    const query = managerSearch.value.trim().toLocaleLowerCase("ru");
+    const visible = (latestState.bookmarks || []).filter((bookmark) => !query || `${bookmark.title} ${bookmark.url}`.toLocaleLowerCase("ru").includes(query));
+    list.replaceChildren(...visible.map((bookmark) => {
+      const row = document.createElement("div"); row.className = "manager-row"; row.draggable = !query; row.dataset.id = bookmark.id;
+      const favicon = document.createElement(bookmark.favicon ? "img" : "span"); favicon.className = "manager-favicon";
+      if (bookmark.favicon) { favicon.src = bookmark.favicon; favicon.alt = ""; } else favicon.innerHTML = icon("globe");
+      const fields = document.createElement("div"); fields.className = "manager-fields";
       const title = document.createElement("input"); title.value = bookmark.title || ""; title.maxLength = 120;
       title.setAttribute("aria-label", "Название закладки");
       const url = document.createElement("input"); url.value = bookmark.url || ""; url.maxLength = 2048;
       url.setAttribute("aria-label", "Адрес закладки");
       const actions = document.createElement("div"); actions.className = "row-actions";
+      const open = document.createElement("button"); open.type = "button"; open.className = "text-button"; open.textContent = "Открыть";
+      open.onclick = () => { manager.hidden = true; void run({ action: "open-bookmark", id: bookmark.id }); };
       const remove = document.createElement("button"); remove.type = "button"; remove.className = "text-button danger"; remove.textContent = "Удалить";
       remove.onclick = () => void run({ action: "remove-bookmark", id: bookmark.id });
       const save = document.createElement("button"); save.type = "button"; save.className = "text-button primary"; save.textContent = "Сохранить";
       save.onclick = () => void run({ action: "update-bookmark", id: bookmark.id, title: title.value, url: url.value });
-      actions.append(remove, save); row.append(title, url, actions); return row;
+      actions.append(open, remove, save); fields.append(title, url); row.append(favicon, fields, actions);
+      row.addEventListener("dragstart", () => { draggedBookmark = bookmark.id; row.classList.add("dragging"); });
+      row.addEventListener("dragend", () => row.classList.remove("dragging"));
+      row.addEventListener("dragover", (event) => { if (!query) event.preventDefault(); });
+      row.addEventListener("drop", (event) => {
+        event.preventDefault(); if (query || !draggedBookmark || draggedBookmark === bookmark.id) return;
+        const ids = latestState.bookmarks.map((item) => item.id); const from = ids.indexOf(draggedBookmark); const to = ids.indexOf(bookmark.id);
+        ids.splice(to, 0, ids.splice(from, 1)[0]); void run({ action: "reorder-bookmarks", ids });
+      });
+      return row;
     }));
+    byId("manager-empty").hidden = visible.length > 0;
   }
   menu.addEventListener("click", (event) => {
     const button = event.target.closest("button");
@@ -118,7 +147,7 @@ function renderer() {
     if (local) {
       menu.hidden = true;
       if (local === "find") openFind();
-      else { renderManager(); togglePopover(manager, byId("menu-button")); }
+      else openManager();
       return;
     }
     const action = button.dataset.action;
@@ -130,6 +159,7 @@ function renderer() {
     void run({ action: "add-bookmark", title: byId("manager-new-title").value, url: byId("manager-new-url").value })
       .then(() => { byId("manager-new-title").value = ""; byId("manager-new-url").value = ""; });
   });
+  managerSearch.addEventListener("input", renderManager);
   findInput.addEventListener("input", () => void run({ action: "find", value: findInput.value }));
   findInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") { event.preventDefault(); void run({ action: "find", value: findInput.value, next: true, forward: !event.shiftKey }); }
@@ -143,7 +173,7 @@ function renderer() {
     if (event.key === "Escape" && current) { address.value = current.url === "about:blank" ? "" : current.url; address.blur(); }
   });
   document.addEventListener("pointerdown", (event) => {
-    if (!event.target.closest(".popover,.toolbar-button")) closePopovers();
+    if (!event.target.closest(".popover,.toolbar-button,#bookmark-manager")) closePopovers();
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") closePopovers();
@@ -152,15 +182,16 @@ function renderer() {
     if (state.focusAddress) { address.focus(); address.select(); return; }
     if (state.focusFind) { openFind(); return; }
     latestState = state;
+    manager.hidden = !state.bookmarksOpen;
     const signature = (state.bookmarks || []).map((item) => item.id + ":" + item.url).join("|");
-    if (!manager.hidden && signature !== managerSignature) renderManager();
+    if (state.bookmarksOpen && signature !== managerSignature) renderManager();
     managerSignature = signature;
     byId("find-count").textContent = state.find && findInput.value ? `${state.find.active}/${state.find.total}` : "";
     current = state.tabs.find((tab) => tab.id === state.activeId);
     byId("home").hidden = !state.home;
     renderHome(state.info);
-    document.title = state.name + " — Umbra";
-    if (document.activeElement !== address) address.value = current?.url === "about:blank" ? "" : current?.url || "";
+    document.title = state.bookmarksOpen ? "Закладки — Umbra" : state.name + " — Umbra";
+    if (document.activeElement !== address) address.value = state.bookmarksOpen ? "umbra://bookmarks" : current?.url === "about:blank" ? "" : current?.url || "";
     showError(state.error || current?.error || "");
     byId("back").disabled = !current?.canGoBack;
     byId("forward").disabled = !current?.canGoForward;
@@ -170,6 +201,7 @@ function renderer() {
     reload.setAttribute("aria-label", reload.title);
     byId("star").classList.toggle("on", !!state.bookmarked);
     byId("restore-menu").disabled = !state.canRestoreTab;
+    byId("zoom-value").textContent = `${state.zoomPercent || 100}%`;
     const focused = document.activeElement?.dataset?.focusKey;
     tabs.replaceChildren(...state.tabs.map((tab) => {
       const item = document.createElement("div");
@@ -237,6 +269,7 @@ function renderer() {
       text.append(title, meta); row.append(image, text); return row;
     }));
     byId("extensions-empty").hidden = extensions.length > 0;
+    manager.style.top = byId("chrome").offsetHeight + "px";
     syncHeight();
   });
   void run({ action: "state" });
@@ -252,21 +285,23 @@ function browserUrl() {
   const home = svg('<path d="m3 11 9-8 9 8M5 10v10h14V10M9 20v-6h6v6"/>');
   const star = svg('<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9z"/>');
   const puzzle = svg('<path d="M8 3h3a2 2 0 1 1 4 0h3v5h3a2 2 0 1 1 0 4h-3v6h-5v3a2 2 0 1 1-4 0v-3H3v-5h3a2 2 0 1 0 0-4H3V3z"/>');
+  const bookmarksIcon = svg('<path d="M5 4h14v16l-7-4-7 4V4z"/>');
+  const search = svg('<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>');
   const menuIcon = svg('<circle cx="12" cy="5" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="19" r="1.5" fill="currentColor"/>');
   const html = `<!doctype html><html lang="ru"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; script-src 'sha256-${hash}'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-src 'none'">
 <title>Umbra</title><style>${tokens}${homeStyle}
-*{box-sizing:border-box;letter-spacing:0}html{--chrome-height:90px}body{margin:0;background:var(--background);color:var(--foreground);font:13px system-ui,sans-serif;overflow:hidden}button,input{font:inherit;color:inherit}button{border:0;background:transparent;cursor:pointer}button:disabled{opacity:.35;cursor:default}button:focus-visible,input:focus-visible{outline:2px solid var(--ring);outline-offset:1px}svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}#chrome{position:relative;z-index:5;background:var(--sidebar);box-shadow:0 1px 0 var(--border)}
-#tab-strip{display:flex;align-items:end;height:40px;padding:7px 6px 0;gap:2px;background:var(--sidebar)}#tabs{display:flex;flex:0 1 auto;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;gap:2px}#tabs::-webkit-scrollbar{display:none}#tab-spacer{flex:1 1 auto;min-width:0}.tab{display:flex;position:relative;flex:0 1 240px;min-width:58px;max-width:250px;height:34px;border-radius:10px 10px 0 0;color:var(--muted-foreground)}.tab:hover{background:color-mix(in oklab,var(--secondary) 72%,transparent)}.tab:has([aria-selected=true]){background:var(--secondary);color:var(--foreground)}.tab.dragging{opacity:.5}.tab-title{display:flex;align-items:center;gap:8px;min-width:0;flex:1;padding:0 4px 0 11px;text-align:left}.tab-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.favicon,.extension-icon{display:grid;place-items:center;width:16px;height:16px;flex:none}.favicon svg,.extension-icon svg{width:15px;height:15px}.tab-close{display:grid;place-items:center;width:28px;height:28px;margin:2px 3px 0 0;border-radius:50%;flex:none}.tab-close:hover,.toolbar-button:hover{background:var(--accent)}.tab-close svg{width:14px;height:14px}#new{margin:0 4px 3px;width:30px;height:30px;font-size:24px;border-radius:50%}
-#navigate{display:flex;align-items:center;gap:5px;height:50px;margin:0;padding:7px 9px;background:var(--secondary)}.toolbar-button{position:relative;display:grid;place-items:center;width:34px;height:34px;border-radius:50%;flex:none}.address-wrap{display:flex;align-items:center;min-width:120px;flex:1;height:36px;padding:0 5px 0 13px;border:1px solid transparent;border-radius:18px;background:var(--background)}.address-wrap:focus-within{border-color:var(--ring);box-shadow:0 0 0 1px var(--ring)}#address{min-width:0;flex:1;height:32px;border:0;outline:0;background:transparent}.reload-path{display:block}.stop-path{display:none}.loading .reload-path{display:none}.loading .stop-path{display:block}#star.on svg{fill:var(--primary);stroke:var(--primary)}#extensions-count{position:absolute;right:1px;bottom:1px;min-width:14px;height:14px;padding:0 3px;border-radius:7px;background:var(--primary);color:var(--primary-foreground);font-size:9px;line-height:14px}#extensions-count:empty{display:none}
-#bookmarks-bar{display:flex;align-items:center;gap:4px;height:34px;padding:4px 10px;background:var(--secondary);border-top:1px solid var(--border);overflow-x:auto;scrollbar-width:thin}#bookmarks-bar[hidden]{display:none}.bookmark{display:flex;align-items:center;gap:7px;flex:none;max-width:190px;height:26px;padding:0 8px;border-radius:5px}.bookmark:hover{background:var(--accent)}.bookmark-favicon{display:grid;place-items:center;width:16px;height:16px;flex:none;object-fit:contain}.bookmark-favicon svg{width:15px;height:15px}.bookmark span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.popover{position:fixed;top:88px;z-index:20;width:310px;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--popover);color:var(--popover-foreground);box-shadow:0 14px 38px color-mix(in oklab,var(--background) 80%,transparent)}.popover[hidden]{display:none}.popover h2{margin:3px 4px 10px;font-size:14px}.popover input{width:100%;height:36px;border:1px solid var(--border);border-radius:7px;background:var(--background);padding:0 10px}.popover-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:10px}.text-button{height:32px;padding:0 10px;border-radius:6px}.text-button:hover,.menu-item:hover{background:var(--accent)}.primary{background:var(--primary);color:var(--primary-foreground)}.danger{margin-right:auto;color:var(--destructive)}#browser-menu{width:270px;padding:6px}.menu-item{display:flex;width:100%;height:34px;align-items:center;padding:0 10px;border-radius:5px;text-align:left}.menu-separator{height:1px;margin:5px;background:var(--border)}.extension-row{display:flex;align-items:center;gap:10px;padding:8px 5px}.extension-row img{object-fit:contain}.extension-row div{display:flex;min-width:0;flex-direction:column}.extension-row strong,.extension-row small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.extension-row small,#extensions-empty{color:var(--muted-foreground);font-size:11px}#extensions-list{max-height:260px;overflow:auto}#error{position:fixed;z-index:30;right:16px;top:calc(var(--chrome-height) + 12px);max-width:min(460px,calc(100vw - 32px));padding:10px 13px;border:1px solid var(--destructive);border-radius:8px;background:var(--popover);color:var(--destructive);box-shadow:0 8px 28px color-mix(in oklab,var(--background) 80%,transparent)}#error[hidden]{display:none}#findbar{position:fixed;z-index:25;right:18px;top:calc(var(--chrome-height) + 10px);display:flex;align-items:center;gap:6px;padding:6px 8px;border:1px solid var(--border);border-radius:9px;background:var(--popover);box-shadow:0 10px 30px color-mix(in oklab,var(--background) 80%,transparent)}#findbar[hidden]{display:none}#find-input{width:190px;height:30px;border:1px solid var(--border);border-radius:6px;background:var(--background);padding:0 9px}#find-count{min-width:54px;color:var(--muted-foreground);font-size:11px;text-align:center}#bookmark-manager{width:390px}#manager-list{max-height:300px;overflow:auto}.manager-row{display:flex;flex-direction:column;gap:5px;padding:8px 4px;border-bottom:1px solid var(--border)}.manager-row .row-actions{display:flex;justify-content:flex-end;gap:6px}.manager-row input{height:32px}#manager-add-form{display:flex;flex-direction:column;gap:6px;margin-top:10px}@media(max-width:720px){.tab{flex-basis:150px}.toolbar-button{width:31px}.address-wrap{min-width:80px}}
+ *{box-sizing:border-box;letter-spacing:0}html{--chrome-height:90px}body{margin:0;background:var(--background);color:var(--foreground);font:13px "Segoe UI Variable","Segoe UI",system-ui,sans-serif;overflow:hidden}button,input{font:inherit;color:inherit}button{border:0;background:transparent;cursor:pointer}button:disabled{opacity:.35;cursor:default}button:focus-visible,input:focus-visible{outline:2px solid var(--ring);outline-offset:1px}svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}#chrome{position:relative;z-index:5;background:var(--sidebar);box-shadow:0 1px 0 var(--border)}
+ #tab-strip{display:flex;align-items:end;height:42px;padding:8px 7px 0;gap:1px;background:var(--sidebar)}#tabs{display:flex;flex:0 1 auto;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;gap:1px}#tabs::-webkit-scrollbar{display:none}#tab-spacer{flex:1 1 auto;min-width:0}.tab{display:flex;position:relative;flex:0 1 240px;min-width:62px;max-width:250px;height:34px;border-radius:9px 9px 0 0;color:var(--muted-foreground)}.tab:hover{background:color-mix(in oklab,var(--secondary) 72%,transparent)}.tab:has([aria-selected=true]){background:var(--secondary);color:var(--foreground)}.tab.dragging,.manager-row.dragging{opacity:.5}.tab-title{display:flex;align-items:center;gap:8px;min-width:0;flex:1;padding:0 4px 0 11px;text-align:left}.tab-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.favicon,.extension-icon{display:grid;place-items:center;width:16px;height:16px;flex:none;object-fit:contain}.favicon svg,.extension-icon svg{width:15px;height:15px}.tab-close{display:grid;place-items:center;width:28px;height:28px;margin:2px 3px 0 0;border-radius:50%;flex:none}.tab-close:hover,.toolbar-button:hover{background:var(--accent)}.tab-close svg{width:14px;height:14px}#new{margin:0 4px 3px;width:30px;height:30px;font-size:24px;border-radius:50%}
+ #navigate{display:flex;align-items:center;gap:5px;height:48px;margin:0;padding:6px 9px;background:var(--secondary);border-bottom:1px solid var(--border)}.toolbar-button{position:relative;display:grid;place-items:center;width:34px;height:34px;border-radius:50%;flex:none}.address-wrap{display:flex;align-items:center;min-width:120px;flex:1;height:34px;padding:0 4px 0 13px;border:1px solid transparent;border-radius:18px;background:var(--background)}.address-wrap:focus-within{border-color:var(--ring);box-shadow:0 0 0 1px var(--ring)}#address{min-width:0;flex:1;height:31px;border:0;outline:0;background:transparent}.reload-path{display:block}.stop-path{display:none}.loading .reload-path{display:none}.loading .stop-path{display:block}#star.on svg{fill:var(--primary);stroke:var(--primary)}#extensions-count{position:absolute;right:1px;bottom:1px;min-width:14px;height:14px;padding:0 3px;border-radius:7px;background:var(--primary);color:var(--primary-foreground);font-size:9px;line-height:14px}#extensions-count:empty{display:none}
+ #bookmarks-bar{display:flex;align-items:center;gap:3px;height:32px;padding:3px 10px;background:var(--secondary);overflow-x:auto;scrollbar-width:thin}#bookmarks-bar[hidden]{display:none}.bookmark{display:flex;align-items:center;gap:7px;flex:none;max-width:190px;height:26px;padding:0 8px;border-radius:5px}.bookmark:hover{background:var(--accent)}.bookmark-favicon{display:grid;place-items:center;width:16px;height:16px;flex:none;object-fit:contain}.bookmark-favicon svg{width:15px;height:15px}.bookmark span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.popover{position:fixed;top:88px;z-index:20;width:310px;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--popover);color:var(--popover-foreground);box-shadow:0 12px 30px color-mix(in oklab,var(--background) 72%,transparent)}.popover[hidden]{display:none}.popover h2{margin:3px 4px 10px;font-size:14px}.popover input{width:100%;height:36px;border:1px solid var(--border);border-radius:6px;background:var(--background);padding:0 10px}.popover-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:10px}.text-button{height:32px;padding:0 10px;border-radius:6px}.text-button:hover,.menu-item:hover{background:var(--accent)}.primary{background:var(--primary);color:var(--primary-foreground)}.danger{color:var(--destructive)}#browser-menu{width:292px;padding:6px}.menu-item{display:flex;width:100%;height:34px;align-items:center;padding:0 10px;border-radius:5px;text-align:left}.menu-separator{height:1px;margin:5px;background:var(--border)}.zoom-row{display:flex;align-items:center;gap:6px;padding:4px 8px}.zoom-row>span:first-child{margin-right:auto}.zoom-button{width:30px;height:30px;border-radius:50%;font-size:19px}.zoom-button:hover{background:var(--accent)}#zoom-value{width:48px;text-align:center}.extension-row{display:flex;align-items:center;gap:10px;padding:8px 5px}.extension-row img{object-fit:contain}.extension-row div{display:flex;min-width:0;flex-direction:column}.extension-row strong,.extension-row small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.extension-row small,#extensions-empty{color:var(--muted-foreground);font-size:11px}#extensions-list{max-height:260px;overflow:auto}#error{position:fixed;z-index:30;right:16px;top:calc(var(--chrome-height) + 12px);max-width:min(460px,calc(100vw - 32px));padding:10px 13px;border:1px solid var(--destructive);border-radius:8px;background:var(--popover);color:var(--destructive);box-shadow:0 8px 28px color-mix(in oklab,var(--background) 80%,transparent)}#error[hidden]{display:none}#findbar{position:fixed;z-index:25;right:18px;top:calc(var(--chrome-height) + 10px);display:flex;align-items:center;gap:5px;padding:7px 8px;border:1px solid var(--border);border-radius:8px;background:var(--popover);box-shadow:0 10px 30px color-mix(in oklab,var(--background) 75%,transparent)}#findbar[hidden]{display:none}#findbar>svg{width:16px;color:var(--muted-foreground)}#find-input{width:210px;height:30px;border:0;background:transparent;padding:0 4px;outline:0}#find-count{min-width:54px;color:var(--muted-foreground);font-size:11px;text-align:center}#findbar .text-button{display:grid;place-items:center;width:30px;padding:0}#bookmark-manager{position:fixed;z-index:4;inset:var(--chrome-height) 0 0;width:auto;background:var(--background);color:var(--foreground)}#bookmark-manager[hidden]{display:none}.manager-shell{display:flex;height:100%}.manager-sidebar{width:230px;padding:22px 12px;border-right:1px solid var(--border);background:var(--sidebar)}.manager-sidebar h1{margin:0 12px 22px;font-size:20px;font-weight:500}.manager-nav{padding:10px 14px;border-left:3px solid var(--primary);background:var(--accent);color:var(--primary)}.manager-main{display:flex;min-width:0;flex:1;flex-direction:column}.manager-header{display:flex;align-items:center;gap:12px;padding:18px 24px;border-bottom:1px solid var(--border);background:var(--sidebar)}.manager-search-wrap{display:flex;align-items:center;gap:9px;max-width:600px;min-width:220px;flex:1;height:38px;padding:0 12px;border-radius:6px;background:var(--accent)}.manager-search-wrap svg{color:var(--muted-foreground)}#manager-search{width:100%;border:0;outline:0;background:transparent}.manager-close{margin-left:auto}#manager-list{flex:1;overflow:auto;padding:12px 20px}.manager-row{display:grid;grid-template-columns:22px minmax(220px,1fr) auto;align-items:center;gap:12px;min-height:62px;padding:8px 12px;border-bottom:1px solid color-mix(in oklab,var(--border) 55%,transparent);border-radius:6px}.manager-row:hover{background:var(--accent)}.manager-favicon{display:grid;place-items:center;width:18px;height:18px;object-fit:contain}.manager-fields{display:grid;min-width:0;grid-template-columns:minmax(150px,.7fr) minmax(220px,1fr);gap:8px}.manager-row input,#manager-add-form input{height:34px;border:1px solid transparent;border-radius:5px;background:transparent;padding:0 8px}.manager-row input:hover,.manager-row input:focus{border-color:var(--border);background:var(--background);outline:0}.manager-row .row-actions{display:flex;justify-content:flex-end;gap:4px}.manager-add{display:grid;grid-template-columns:minmax(150px,.7fr) minmax(220px,1fr) auto;gap:8px;padding:12px 24px;border-top:1px solid var(--border);background:var(--sidebar)}#manager-empty{padding:50px;text-align:center;color:var(--muted-foreground)}#manager-empty[hidden]{display:none}@media(max-width:760px){.tab{flex-basis:150px}.toolbar-button{width:31px}.address-wrap{min-width:80px}#home-button{display:none}.manager-sidebar{display:none}.manager-fields,.manager-add{grid-template-columns:1fr}.manager-row{grid-template-columns:22px 1fr}.manager-row .row-actions{grid-column:2}.manager-add{padding:10px}}
 </style></head><body><div id="chrome"><div id="tab-strip"><div id="tabs" role="tablist" aria-label="Вкладки"></div><button id="new" class="toolbar-button" title="Новая вкладка (Ctrl+T)" aria-label="Новая вкладка">+</button><div id="tab-spacer"></div></div>
-<form id="navigate"><button id="back" type="button" class="toolbar-button" title="Назад (Alt+Left)" aria-label="Назад">${back}</button><button id="forward" type="button" class="toolbar-button" title="Вперёд (Alt+Right)" aria-label="Вперёд">${forward}</button><button id="reload" type="button" class="toolbar-button" title="Обновить страницу" aria-label="Обновить страницу">${reload}</button><button id="home-button" type="button" class="toolbar-button" title="Домой" aria-label="Домой">${home}</button><div class="address-wrap"><input id="address" type="text" aria-label="Адрес и поиск" placeholder="Введите запрос или URL" autocomplete="off" spellcheck="false"><button id="star" type="button" class="toolbar-button" title="Добавить в закладки (Ctrl+D)" aria-label="Закладка">${star}</button></div><button id="extensions" type="button" class="toolbar-button" title="Расширения" aria-label="Расширения">${puzzle}<span id="extensions-count"></span></button><button id="menu-button" type="button" class="toolbar-button" title="Настройка и управление" aria-label="Настройка и управление">${menuIcon}</button></form><div id="bookmarks-bar" aria-label="Панель закладок"></div></div>
+ <form id="navigate"><button id="back" type="button" class="toolbar-button" title="Назад (Alt+Left)" aria-label="Назад">${back}</button><button id="forward" type="button" class="toolbar-button" title="Вперёд (Alt+Right)" aria-label="Вперёд">${forward}</button><button id="reload" type="button" class="toolbar-button" title="Обновить страницу" aria-label="Обновить страницу">${reload}</button><button id="home-button" type="button" class="toolbar-button" title="Домой" aria-label="Домой">${home}</button><div class="address-wrap"><input id="address" type="text" aria-label="Адрес и поиск" placeholder="Введите запрос или адрес" autocomplete="off" spellcheck="false"><button id="star" type="button" class="toolbar-button" title="Добавить в закладки (Ctrl+D)" aria-label="Закладка">${star}</button></div><button id="bookmarks-button" type="button" class="toolbar-button" title="Закладки" aria-label="Открыть закладки">${bookmarksIcon}</button><button id="extensions" type="button" class="toolbar-button" title="Расширения" aria-label="Расширения">${puzzle}<span id="extensions-count"></span></button><button id="menu-button" type="button" class="toolbar-button" title="Настройка и управление" aria-label="Настройка и управление">${menuIcon}</button></form><div id="bookmarks-bar" aria-label="Панель закладок"></div></div>
 <div id="bookmark-popover" class="popover" hidden><h2>Закладка</h2><input id="bookmark-title" aria-label="Название закладки" maxlength="120"><div class="popover-actions"><button id="bookmark-remove" type="button" class="text-button danger">Удалить</button><button id="bookmark-save" type="button" class="text-button primary">Готово</button></div></div>
 <div id="extensions-popover" class="popover" hidden><h2>Расширения</h2><div id="extensions-list"></div><p id="extensions-empty">В этом профиле нет расширений.</p><div class="popover-actions"><button id="manage-extensions" type="button" class="text-button">Управление расширениями</button></div></div>
-<div id="browser-menu" class="popover" hidden><button class="menu-item" data-action="new">Новая вкладка</button><button class="menu-item" data-action="duplicate">Дублировать вкладку</button><button id="restore-menu" class="menu-item" data-action="reopen-closed">Открыть закрытую вкладку</button><div class="menu-separator"></div><button class="menu-item" data-local="find">Найти на странице (Ctrl+F)</button><button class="menu-item" data-action="zoom-in">Увеличить масштаб (Ctrl +)</button><button class="menu-item" data-action="zoom-out">Уменьшить масштаб (Ctrl −)</button><button class="menu-item" data-action="zoom-reset">Обычный масштаб (Ctrl 0)</button><div class="menu-separator"></div><button class="menu-item" data-action="toggle-bookmark-bar">Показать или скрыть панель закладок</button><button class="menu-item" data-local="bookmark-manager">Диспетчер закладок</button><button class="menu-item" data-action="manage-extensions">Управление расширениями</button><div class="menu-separator"></div><button class="menu-item" data-action="close-profile">Закрыть профиль</button></div>
-<div id="bookmark-manager" class="popover" hidden><h2>Диспетчер закладок</h2><div id="manager-list"></div><div id="manager-add-form"><input id="manager-new-title" aria-label="Название новой закладки" placeholder="Название" maxlength="120"><input id="manager-new-url" aria-label="Адрес новой закладки" placeholder="https://example.com" maxlength="2048"><div class="popover-actions"><button id="manager-add" type="button" class="text-button primary">Добавить закладку</button></div></div></div>
-<div id="findbar" hidden><input id="find-input" type="text" aria-label="Поиск на странице" placeholder="Найти на странице" autocomplete="off"><span id="find-count"></span><button id="find-prev" type="button" class="text-button" title="Предыдущее совпадение" aria-label="Предыдущее совпадение">↑</button><button id="find-next" type="button" class="text-button" title="Следующее совпадение" aria-label="Следующее совпадение">↓</button><button id="find-close" type="button" class="text-button" title="Закрыть поиск" aria-label="Закрыть поиск">✕</button></div>
+ <div id="browser-menu" class="popover" hidden><button class="menu-item" data-action="new">Новая вкладка</button><button class="menu-item" data-action="duplicate">Дублировать вкладку</button><button id="restore-menu" class="menu-item" data-action="reopen-closed">Открыть закрытую вкладку</button><div class="menu-separator"></div><div class="zoom-row"><span>Масштаб</span><button type="button" class="zoom-button" data-action="zoom-out" aria-label="Уменьшить масштаб">−</button><button type="button" id="zoom-value" data-action="zoom-reset" title="Сбросить масштаб">100%</button><button type="button" class="zoom-button" data-action="zoom-in" aria-label="Увеличить масштаб">+</button></div><div class="menu-separator"></div><button class="menu-item" data-local="find">Найти на странице</button><button class="menu-item" data-action="toggle-bookmark-bar">Показать или скрыть панель закладок</button><button class="menu-item" data-local="bookmark-manager">Закладки</button><button class="menu-item" data-action="manage-extensions">Управление расширениями</button><div class="menu-separator"></div><button class="menu-item" data-action="close-profile">Закрыть профиль</button></div>
+ <section id="bookmark-manager" hidden aria-label="Закладки"><div class="manager-shell"><aside class="manager-sidebar"><h1>Закладки</h1><div class="manager-nav">Все закладки</div></aside><main class="manager-main"><header class="manager-header"><label class="manager-search-wrap">${search}<input id="manager-search" type="search" aria-label="Поиск закладок" placeholder="Поиск закладок" autocomplete="off"></label><button id="manager-close" type="button" class="toolbar-button manager-close" title="Закрыть закладки" aria-label="Закрыть закладки">${svg('<path d="m7 7 10 10M17 7 7 17"/>')}</button></header><div id="manager-list"></div><p id="manager-empty" hidden>Закладки не найдены</p><div id="manager-add-form" class="manager-add"><input id="manager-new-title" aria-label="Название новой закладки" placeholder="Название" maxlength="120"><input id="manager-new-url" aria-label="Адрес новой закладки" placeholder="https://example.com" maxlength="2048"><button id="manager-add" type="button" class="text-button primary">Добавить закладку</button></div></main></div></section>
+ <div id="findbar" hidden>${search}<input id="find-input" type="text" aria-label="Поиск на странице" placeholder="Найти на странице" autocomplete="off"><span id="find-count"></span><button id="find-prev" type="button" class="text-button" title="Предыдущее совпадение" aria-label="Предыдущее совпадение">↑</button><button id="find-next" type="button" class="text-button" title="Следующее совпадение" aria-label="Следующее совпадение">↓</button><button id="find-close" type="button" class="text-button" title="Закрыть поиск" aria-label="Закрыть поиск">✕</button></div>
 <div id="error" role="alert" hidden></div>${homeMarkup}<script>${script}</script></body></html>`;
   return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }

@@ -30,7 +30,7 @@ async function createProfileBrowser(electron, {
     registry = new Map(); handlers.set(ipcMain, registry);
     ipcMain.handle("umbra-runtime:browser", (event, command) => {
       const handler = registry.get(event.sender);
-      if (!handler || event.senderFrame !== event.sender.mainFrame) throw new Error("Untrusted browser sender");
+       if (!handler || event.senderFrame !== event.sender.mainFrame) throw new Error("Недоверенный отправитель команды браузера");
       return handler(command);
     });
   }
@@ -55,6 +55,7 @@ async function createProfileBrowser(electron, {
   let chromeHeight = CHROME_HEIGHT;
   let ready = false;
   let error = "";
+  let bookmarksOpen = false;
   let destroyed = false;
   let commandQueue = Promise.resolve();
   const active = () => tabs.get(activeId);
@@ -65,8 +66,9 @@ async function createProfileBrowser(electron, {
     const currentUrl = active()?.webContents.getURL() || active()?.url || "";
     const bookmarks = getBookmarks();
     shell.webContents.send("umbra-runtime:state", { name, activeId, error, home: isHome(active()), info: getInfo(),
-      bookmarks, bookmarkBarVisible: getBookmarkBarVisible(), extensions: getExtensions(), bookmarked: bookmarks.some((item) => item.url === currentUrl),
-      canRestoreTab: recentlyClosed.length > 0, find: active()?.find || null,
+       bookmarks, bookmarksOpen, bookmarkBarVisible: getBookmarkBarVisible(), extensions: getExtensions(), bookmarked: bookmarks.some((item) => item.url === currentUrl),
+       canRestoreTab: recentlyClosed.length > 0, find: active()?.find || null,
+       zoomPercent: active() ? Math.round(100 * Math.pow(1.2, active().webContents.getZoomLevel())) : 100,
       tabs: tabOrder.map((id) => tabs.get(id)).filter((tab) => tab && !tab.isDestroyed()).map((tab) => ({
       id: tab.id, url: tab.webContents.getURL() || tab.url, title: tab.webContents.getTitle(), favicon: tab.favicon || "", error: tab.error,
       loading: tab.webContents.isLoading(), canGoBack: tab.webContents.navigationHistory.canGoBack(), canGoForward: tab.webContents.navigationHistory.canGoForward(),
@@ -77,7 +79,7 @@ async function createProfileBrowser(electron, {
     const { width, height } = shell.getContentBounds();
     for (const tab of tabs.values()) {
       tab.view.setBounds({ x: 0, y: chromeHeight, width: Math.max(1, width), height: Math.max(1, height - chromeHeight) });
-      tab.view.setVisible(tab.id === activeId && !isHome(tab));
+       tab.view.setVisible(tab.id === activeId && !isHome(tab) && !bookmarksOpen);
     }
   }
   function select(tab) {
@@ -106,10 +108,12 @@ async function createProfileBrowser(electron, {
     const tab = active();
     switch (message.action) {
       case "state": break;
-      case "new": await openTab("about:blank"); focusAddress(); break;
-      case "home": if (tab) await tab.loadURL("about:blank"); break;
+      case "new": bookmarksOpen = false; await openTab("about:blank"); focusAddress(); break;
+      case "home": bookmarksOpen = false; if (tab) await tab.loadURL("about:blank"); break;
+      case "show-bookmarks": bookmarksOpen = true; layout(); break;
+      case "hide-bookmarks": bookmarksOpen = false; layout(); break;
       case "check-connection": await checkConnection(); break;
-      case "select": select(tabs.get(message.id)); break;
+      case "select": bookmarksOpen = false; select(tabs.get(message.id)); break;
       case "close-tab": {
         const target = tabs.get(message.id || activeId);
         if (target) {
@@ -124,7 +128,7 @@ async function createProfileBrowser(electron, {
         break;
       }
       case "reorder-tabs": {
-        if (!Array.isArray(message.ids) || message.ids.length !== tabOrder.length || new Set(message.ids).size !== tabOrder.length || message.ids.some((id) => !tabs.has(id))) throw new Error("Invalid tab order");
+         if (!Array.isArray(message.ids) || message.ids.length !== tabOrder.length || new Set(message.ids).size !== tabOrder.length || message.ids.some((id) => !tabs.has(id))) throw new Error("Некорректный порядок вкладок");
         tabOrder = [...message.ids]; if (ready) onTabsChanged(); break;
       }
       case "close-profile": await closeProfile(); break;
@@ -153,6 +157,7 @@ async function createProfileBrowser(electron, {
       case "open-bookmark": {
         const saved = getBookmarks().find((item) => item.id === message.id);
         if (!saved) break;
+        bookmarksOpen = false;
         if (message.newTab || !tab) await openTab(saved.url);
         else { tab.error = ""; void tab.loadURL(saved.url).catch(() => {}); }
         break;
@@ -198,11 +203,11 @@ async function createProfileBrowser(electron, {
         if (Number.isFinite(next) && rounded >= 80 && rounded <= 180 && rounded !== chromeHeight) { chromeHeight = rounded; layout(); }
         return;
       }
-      case "navigate": if (tab) { tab.error = ""; void tab.loadURL(addressUrl(message.value)).catch(() => {}); } break;
+      case "navigate": if (tab) { bookmarksOpen = false; tab.error = ""; void tab.loadURL(addressUrl(message.value)).catch(() => {}); } break;
       case "back": if (tab?.webContents.navigationHistory.canGoBack()) tab.webContents.navigationHistory.goBack(); break;
       case "forward": if (tab?.webContents.navigationHistory.canGoForward()) tab.webContents.navigationHistory.goForward(); break;
       case "reload": if (tab) { tab.error = ""; if (tab.webContents.isLoading()) tab.webContents.stop(); else tab.webContents.reload(); } break;
-      default: throw new Error("Unknown browser command");
+       default: throw new Error("Неизвестная команда браузера");
     }
     publish();
   }

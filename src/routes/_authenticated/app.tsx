@@ -102,7 +102,7 @@ function AppShell() {
     } catch { toast.error("Выход не выполнен. Проверьте синхронизацию профилей и подключение."); }
     finally { setSigningOut(false); }
   }
-  return <div className="flex min-h-screen bg-background">
+  return <div className="flex h-screen overflow-hidden bg-background">
     <aside className={"flex shrink-0 flex-col border-r border-sidebar-border bg-sidebar transition-[width] " + (collapsed ? "w-14" : "w-56")}>
       <div className={"flex h-14 items-center gap-2 border-b border-sidebar-border " + (collapsed ? "justify-center" : "px-3")}>
         <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground">U</span>
@@ -110,7 +110,7 @@ function AppShell() {
           <Button variant="ghost" size="icon" className="ml-auto size-7" title="Свернуть меню" aria-label="Свернуть меню" onClick={() => toggleCollapsed()}><PanelLeftClose className="size-4" /></Button></>}
       </div>
       {collapsed && <Button variant="ghost" size="icon" className="mx-auto mt-2 size-8" title="Развернуть меню" aria-label="Развернуть меню" onClick={() => toggleCollapsed()}><PanelLeftOpen className="size-4" /></Button>}
-      <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-2">{NAV.map((item) => {
+      <nav className="scroll-thin flex flex-1 flex-col gap-1 overflow-y-auto p-2">{NAV.map((item) => {
         const active = item.exact ? pathname === item.to || pathname === "/app/" : pathname.startsWith(item.to);
         const Icon = item.icon;
         return <Link key={item.to} to={item.to} title={item.label} aria-label={item.label} aria-current={active ? "page" : undefined}
@@ -133,10 +133,10 @@ function AppShell() {
         <Button variant="ghost" size="sm" title="Выйти" aria-label="Выйти" disabled={signingOut || !runtime.ready} className={"mt-2 w-full " + (collapsed ? "px-0" : "justify-start px-2")} onClick={signOut}><LogOut className="size-4" />{!collapsed && <span>{signingOut ? "Сохранение…" : "Выйти"}</span>}</Button>
       </div>
     </aside>
-    <div className="flex min-w-0 flex-1 flex-col">
+    <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
       <UpdateBar /><LifecycleBar />
       <div className="border-b border-border p-2 md:hidden"><Select value={ws?.teamId ?? ""} disabled={signingOut} onValueChange={selection.select}><SelectTrigger aria-label="Рабочая команда"><SelectValue placeholder="Команда" /></SelectTrigger><SelectContent>{(selection.workspaces.data?.length ? selection.workspaces.data : ws ? [ws] : []).map((team) => <SelectItem key={team.teamId} value={team.teamId}>{team.teamName}</SelectItem>)}</SelectContent></Select></div>
-      <main className="min-w-0 flex-1 px-3 py-5 lg:px-6"><Outlet key={ws?.teamId ?? "loading"} /></main>
+      <main className="scroll-thin min-w-0 flex-1 overflow-y-auto px-3 py-4 lg:px-5"><Outlet key={ws?.teamId ?? "loading"} /></main>
     </div>
   </div>;
 }

@@ -27,7 +27,8 @@ export async function confirmRotation({
   // Проверяем часто, чтобы подтверждение нового IP занимало секунды, а не минуту.
   let candidateIp: string | null = null;
   for (let attempt = 0; attempt < attempts; attempt++) {
-    await wait(attempt === 0 ? 600 : 1200);
+    // Короткие паузы: подтверждение занимает секунды, а не минуту.
+    await wait(attempt === 0 ? 300 : 700);
     const result = await probe();
     const final = attempt === attempts - 1;
     const changedIp = result.ok && result.ip && result.ip !== previousIp ? result.ip : null;

@@ -75,6 +75,21 @@ function applyDocumentFingerprint(fp) {
       }
     }
   }
+  // Windows passkey prompts open a native dialog over the page and expose the
+  // real device, so the profile reports no authenticator at all.
+  define(globalThis, "PublicKeyCredential", undefined);
+  if (navigator.credentials) {
+    for (const method of ["get", "create"]) {
+      const original = navigator.credentials[method];
+      if (typeof original !== "function") continue;
+      navigator.credentials[method] = function (options) {
+        if (options && options.publicKey) {
+          return Promise.reject(new DOMException("The operation either timed out or was not allowed.", "NotAllowedError"));
+        }
+        return original.call(this, options);
+      };
+    }
+  }
   // This document-level switch supplements the native non-proxied UDP policy.
   if (fp.webrtc === "disabled") {
     define(globalThis, "RTCPeerConnection", undefined);

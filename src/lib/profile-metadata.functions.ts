@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { requireTeamAccess, requireTeamOwner } from "./server-db";
+import { requireTeamAccess, requireTeamManager } from "./server-db";
 
 const teamId = z.string().uuid();
 const color = z.enum(["primary", "success", "warning", "destructive", "muted"]);
@@ -24,7 +24,7 @@ export const createProfileStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data) => z.object({ teamId, name: z.string().trim().min(1).max(80), color }).strict().parse(data))
   .handler(async ({ data, context }) => {
-    await requireTeamOwner(context, data.teamId);
+    await requireTeamManager(context, data.teamId);
     const { data: row, error } = await context.supabase.from("profile_statuses")
       .insert({ team_id: data.teamId, name: data.name, color: data.color }).select("id, name, color, position").single();
     if (error) throw new Error(error.code === "23505" ? "Такой статус уже существует" : "Не удалось добавить статус");
@@ -35,7 +35,7 @@ export const createProfileField = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data) => z.object({ teamId, name: z.string().trim().min(1).max(80), fieldType }).strict().parse(data))
   .handler(async ({ data, context }) => {
-    await requireTeamOwner(context, data.teamId);
+    await requireTeamManager(context, data.teamId);
     const { data: row, error } = await context.supabase.from("profile_field_definitions")
       .insert({ team_id: data.teamId, name: data.name, field_type: data.fieldType }).select("id, name, field_type, position").single();
     if (error) throw new Error(error.code === "23505" ? "Такая колонка уже существует" : "Не удалось добавить колонку");

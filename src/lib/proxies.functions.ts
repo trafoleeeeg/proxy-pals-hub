@@ -38,16 +38,16 @@ export type ProxyListRow = {
   rotationLastError: string | null;
 };
 
-async function requireTeam(context: Context, teamId: string, owner = true) {
-  const denied = owner ? "Доступ только для владельца команды" : "Нет доступа к команде";
+async function requireTeam(context: Context, teamId: string, manage = true) {
+  const denied = manage ? "Недостаточно прав: нужен уровень администратора" : "Нет доступа к команде";
   const { data: team, error: teamError } = await context.supabase.from("teams").select("owner_id")
     .eq("id", teamId).maybeSingle();
   if (teamError || !team) throw new Error(denied);
   if (team.owner_id === context.userId) return;
-  if (owner) throw new Error(denied);
-  const { data, error } = await context.supabase.from("team_members").select("role")
+  const { data, error } = await context.supabase.from("team_members").select("scope")
     .eq("team_id", teamId).eq("user_id", context.userId).maybeSingle();
   if (error || !data) throw new Error(denied);
+  if (manage && (data as { scope?: string }).scope !== "manager") throw new Error(denied);
 }
 
 async function requireProxy(context: Context, target: Target) {

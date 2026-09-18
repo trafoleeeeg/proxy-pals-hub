@@ -1,12 +1,15 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { acceptInviteSchema, accessSchema, bulkAccessSchema, inviteIdSchema, inviteSchema, memberSchema, teamSchema, workspaceSchema } from "./server-validation";
-import { callServerRpc, requireProfile, requireTeamOwner, type ServerContext } from "./server-db";
+import { callServerRpc, requireProfile, requireTeamManager, requireTeamOwner, type ServerContext, type TeamScope } from "./server-db";
+import { z } from "zod";
 
 export type Workspace = {
   teamId: string;
   teamName: string;
   role: "owner" | "member";
+  scope: TeamScope;
+  canManage: boolean;
   userId: string;
   email: string;
 };
@@ -17,10 +20,16 @@ async function readWorkspaces(context: ServerContext): Promise<Workspace[]> {
   if (personError) throw new Error(personError.message);
   const { data: teams, error } = await context.supabase.from("teams").select("id, name, owner_id").order("created_at").order("id");
   if (error) throw new Error(error.message);
-  return (teams ?? []).map((team) => ({
-    teamId: team.id, teamName: team.name, role: team.owner_id === context.userId ? "owner" : "member",
-    userId: context.userId, email: me.email ?? "",
-  }));
+  const { data: memberships } = await context.supabase.from("team_members").select("team_id, scope").eq("user_id", context.userId);
+  const scopeByTeam = new Map((memberships ?? []).map((row) => [row.team_id, (row as { scope?: string }).scope === "manager" ? "manager" : "member"] as const));
+  return (teams ?? []).map((team) => {
+    const owner = team.owner_id === context.userId;
+    const scope: TeamScope = owner ? "owner" : (scopeByTeam.get(team.id) ?? "member");
+    return {
+      teamId: team.id, teamName: team.name, role: owner ? "owner" as const : "member" as const,
+      scope, canManage: scope !== "member", userId: context.userId, email: me.email ?? "",
+    };
+  });
 }
 
 export const listWorkspaces = createServerFn({ method: "POST" })
@@ -42,7 +51,7 @@ export const listMembers = createServerFn({ method: "POST" })
     await requireTeamOwner(context, data.teamId);
     const { supabase } = context;
     const { data: members, error: memberError } = await supabase.from("team_members")
-      .select("id, user_id, role, created_at").eq("team_id", data.teamId).order("created_at");
+      .select("id, user_id, role, scope, created_at").eq("team_id", data.teamId).order("created_at");
     if (memberError) throw new Error(memberError.message);
     const userIds = (members ?? []).map((member) => member.user_id);
     const { data: people, error: peopleError } = userIds.length
@@ -64,6 +73,7 @@ export const listMembers = createServerFn({ method: "POST" })
     return {
       members: (members ?? []).map((member) => ({
         id: member.id, userId: member.user_id, role: member.role,
+        scope: (member as { scope?: string }).scope === "manager" ? "manager" as const : "member" as const,
         email: byId.get(member.user_id)?.email ?? "", name: byId.get(member.user_id)?.display_name ?? "",
         createdAt: member.created_at,
       })),
@@ -122,10 +132,19 @@ export const setProfilesAccess = createServerFn({ method: "POST" })
     }),
   }));
 
+export const setMemberScope = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) => z.object({ teamId: z.string().uuid(), userId: z.string().uuid(), scope: z.enum(["member", "manager"]) }).strict().parse(input))
+  .handler(async ({ data, context }) => {
+    await requireTeamOwner(context, data.teamId);
+    await callServerRpc(context.supabase, "set_member_scope", { _team_id: data.teamId, _user_id: data.userId, _scope: data.scope });
+    return { ok: true };
+  });
+
 export const listAudit = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth]).inputValidator(teamSchema)
   .handler(async ({ data, context }) => {
-    await requireTeamOwner(context, data.teamId);
+    await requireTeamManager(context, data.teamId);
     const { data: rows, error } = await context.supabase.from("audit_log")
       .select("id, action, target_type, target_id, meta, created_at, user_id").eq("team_id", data.teamId)
       .order("created_at", { ascending: false }).limit(200);

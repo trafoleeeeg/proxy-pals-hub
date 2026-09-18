@@ -11,6 +11,7 @@ type MigrationFunctions = {
   bulk_mutate_profiles: Rpc<{ _team_id: string; _profile_ids: string[]; _operation: "update" | "delete"; _changes: Json }, number>;
   set_profiles_access: Rpc<{ _team_id: string; _profile_ids: string[]; _user_id: string; _granted: boolean }, number>;
   remove_team_member: Rpc<{ _team_id: string; _user_id: string }, boolean>;
+  set_member_scope: Rpc<{ _team_id: string; _user_id: string; _scope: "member" | "manager" }, boolean>;
   accept_team_invite: Rpc<{ _token: string }, string>;
   ensure_workspace: Rpc<Record<string, never>, string>;
 };
@@ -45,16 +46,34 @@ export async function requireTeamOwner(context: ServerContext, teamId: string) {
   if (!data || data.owner_id !== context.userId) throw new Error("Доступ только для владельца команды");
   return data;
 }
+export type TeamScope = "owner" | "manager" | "member";
+// Владелец управляет командой и секретами, администратор — профилями и прокси,
+// участник работает только с назначенными профилями.
+export async function teamScope(context: ServerContext, teamId: string): Promise<TeamScope | null> {
+  const { data: team } = await context.supabase.from("teams").select("owner_id").eq("id", teamId).maybeSingle();
+  if (!team) return null;
+  if (team.owner_id === context.userId) return "owner";
+  const { data: member } = await context.supabase.from("team_members").select("scope")
+    .eq("team_id", teamId).eq("user_id", context.userId).maybeSingle();
+  if (!member) return null;
+  return (member as { scope?: string }).scope === "manager" ? "manager" : "member";
+}
+export async function requireTeamManager(context: ServerContext, teamId: string) {
+  const scope = await teamScope(context, teamId);
+  if (scope !== "owner" && scope !== "manager") throw new Error("Недостаточно прав: нужен уровень администратора");
+  return scope;
+}
 export async function requireTeamAccess(context: ServerContext, teamId: string) {
   const { data, error } = await context.supabase.from("teams").select("id").eq("id", teamId).maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) throw new Error("Нет доступа к команде");
 }
-export async function requireProfile(context: ServerContext, profileId: string, owner = false) {
+export async function requireProfile(context: ServerContext, profileId: string, access: boolean | "owner" = false) {
   const { data, error } = await context.supabase.from("browser_profiles").select("id, team_id").eq("id", profileId).maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) throw new Error("Нет доступа к профилю");
-  if (owner) await requireTeamOwner(context, data.team_id);
+  if (access === "owner") await requireTeamOwner(context, data.team_id);
+  else if (access) await requireTeamManager(context, data.team_id);
   return data;
 }
 export async function requireTeamProxy(context: ServerContext, teamId: string, proxyId: string | null | undefined) {
@@ -63,7 +82,7 @@ export async function requireTeamProxy(context: ServerContext, teamId: string, p
   if (error) throw new Error(error.message);
   if (!data) throw new Error("Прокси недоступен или принадлежит другой команде");
 }
-export async function writeAudit(context: ServerContext, teamId: string, action: string, targetId: string) {
-  const { error } = await context.supabase.from("audit_log").insert({ team_id: teamId, user_id: context.userId, action, target_type: "profile", target_id: targetId });
+export async function writeAudit(context: ServerContext, teamId: string, action: string, targetId: string, targetType = "profile", meta?: Json) {
+  const { error } = await context.supabase.from("audit_log").insert({ team_id: teamId, user_id: context.userId, action, target_type: targetType, target_id: targetId, ...(meta === undefined ? {} : { meta }) });
   if (error) throw new Error(error.message);
 }

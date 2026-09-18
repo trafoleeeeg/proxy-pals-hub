@@ -1,0 +1,1 @@
+ALTER FUNCTION public.save_profile_browser_settings(uuid, jsonb, boolean, numeric, jsonb, bigint) SECURITY INVOKER;

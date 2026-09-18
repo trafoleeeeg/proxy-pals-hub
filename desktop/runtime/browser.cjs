@@ -124,7 +124,7 @@ async function createProfileBrowser(electron, {
     if (show && shell.isVisible()) {
       if (isHome(tab)) shell.webContents.focus(); else tab.webContents.focus();
     }
-    publish();
+    flushPublish();
     if (ready) onTabsChanged();
   }
   function closeTab(target) {

@@ -369,6 +369,7 @@ async function createProfileBrowser(electron, {
   shell.on("closed", () => {
     destroyed = true;
     clearTimeout(publishTimer); publishTimer = null;
+    extensionPopup = null; extensionPopupId = "";
     registry.delete(shellContents);
     for (const tab of [...tabs.values()]) tab.destroy();
     if (!registry.size) { ipcMain.removeHandler("umbra-runtime:browser"); handlers.delete(ipcMain); }

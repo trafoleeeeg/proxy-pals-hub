@@ -234,10 +234,15 @@ export const recordProxyCheck = createServerFn({ method: "POST" })
       data.rotationFinal || rotationExpired(current["rotation_requested_at"]),
       data.rotationConfirmed,
     ) : null;
+    // Publish the fresh exit IP as soon as it is seen, even before the second
+    // confirming probe: the panel then shows the new address immediately
+    // instead of sitting on "меняем IP…" with stale data.
+    const changedIp = confirmsRotation && data.ok && data.ip && data.ip !== current["rotation_previous_ip"] ? data.ip : null;
     const rotation = outcome ? {
       rotation_status: outcome,
       rotation_last_error: outcome === "error" ? "not_confirmed" : null,
-      ...(outcome === "success" ? { rotation_new_ip: data.ip, rotation_changed_at: now } : {}),
+      ...(changedIp ? { rotation_new_ip: changedIp } : {}),
+      ...(outcome === "success" ? { rotation_changed_at: now } : {}),
     } : {};
     let update = db.from("proxies").update({
       last_checked_at: now, last_check_ok: data.ok,

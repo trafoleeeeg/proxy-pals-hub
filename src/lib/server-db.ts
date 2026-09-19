@@ -10,8 +10,8 @@ type MigrationFunctions = {
   import_profile_cookies: Rpc<{ _profile_id: string; _cookies_enc: string }, string>;
   bulk_mutate_profiles: Rpc<{ _team_id: string; _profile_ids: string[]; _operation: "update" | "delete"; _changes: Json }, number>;
   set_folder_access: Rpc<{ _team_id: string; _folder: string; _user_id: string; _granted: boolean }, boolean>;
-  transfer_profiles: Rpc<{ _team_id: string; _profile_ids: string[]; _folder: string | null; _user_id: string | null }, number>;
-  set_profiles_access: Rpc<{ _team_id: string; _profile_ids: string[]; _user_id: string; _granted: boolean }, number>;
+  transfer_profiles: Rpc<{ _team_id: string; _profile_ids: string[]; _folder: string; _user_id: null }, number>;
+  set_member_permissions: Rpc<{ _team_id: string; _user_id: string; _create: boolean; _edit: boolean; _delete: boolean; _proxy: boolean; _folders: boolean; _proxies: boolean; _bookmarks: boolean }, boolean>;
   remove_team_member: Rpc<{ _team_id: string; _user_id: string }, boolean>;
   set_member_scope: Rpc<{ _team_id: string; _user_id: string; _scope: "member" | "manager" }, boolean>;
   accept_team_invite: Rpc<{ _token: string }, string>;

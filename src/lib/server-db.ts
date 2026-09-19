@@ -44,10 +44,21 @@ export async function callServerRpc<K extends keyof MigrationFunctions>(client: 
 }
 
 export type ServerContext = { supabase: SupabaseClient<Database>; userId: string };
+// Суперадминистратор приравнивается к владельцу в любой команде.
+export async function isSuperadmin(context: ServerContext): Promise<boolean> {
+  const rpc = context.supabase.rpc.bind(context.supabase) as unknown as (name: string) => PromiseLike<{ data: boolean | null; error: { message: string } | null }>;
+  try {
+    const { data } = await rpc("is_superadmin");
+    return data === true;
+  } catch {
+    return false;
+  }
+}
 export async function requireTeamOwner(context: ServerContext, teamId: string) {
   const { data, error } = await context.supabase.from("teams").select("id, owner_id").eq("id", teamId).maybeSingle();
   if (error) throw new Error(error.message);
-  if (!data || data.owner_id !== context.userId) throw new Error("Доступ только для владельца команды");
+  if (!data) throw new Error("Доступ только для владельца команды");
+  if (data.owner_id !== context.userId && !(await isSuperadmin(context))) throw new Error("Доступ только для владельца команды");
   return data;
 }
 export type TeamScope = "owner" | "manager" | "member";
@@ -57,6 +68,7 @@ export async function teamScope(context: ServerContext, teamId: string): Promise
   const { data: team } = await context.supabase.from("teams").select("owner_id").eq("id", teamId).maybeSingle();
   if (!team) return null;
   if (team.owner_id === context.userId) return "owner";
+  if (await isSuperadmin(context)) return "owner";
   const { data: member } = await context.supabase.from("team_members").select("scope")
     .eq("team_id", teamId).eq("user_id", context.userId).maybeSingle();
   if (!member) return null;

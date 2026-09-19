@@ -62,6 +62,62 @@ export async function teamScope(context: ServerContext, teamId: string): Promise
   if (!member) return null;
   return (member as { scope?: string }).scope === "manager" ? "manager" : "member";
 }
+export const PERMISSION_KEYS = [
+  "profile.create", "profile.edit", "profile.delete", "profile.proxy",
+  "folder.manage", "proxy.manage", "bookmarks.manage",
+] as const;
+export type Permission = (typeof PERMISSION_KEYS)[number];
+export type PermissionMap = Record<Permission, boolean>;
+export const NO_PERMISSIONS: PermissionMap = {
+  "profile.create": false, "profile.edit": false, "profile.delete": false, "profile.proxy": false,
+  "folder.manage": false, "proxy.manage": false, "bookmarks.manage": false,
+};
+const PERMISSION_COLUMNS: Record<Permission, string> = {
+  "profile.create": "can_create_profile", "profile.edit": "can_edit_profile",
+  "profile.delete": "can_delete_profile", "profile.proxy": "can_change_profile_proxy",
+  "folder.manage": "can_manage_folders", "proxy.manage": "can_manage_proxies",
+  "bookmarks.manage": "can_manage_bookmarks",
+};
+
+// Владелец и администратор команды обладают всеми правами; остальным права
+// выдаёт владелец точечно в разделе «Команда».
+export async function memberPermissions(context: ServerContext, teamId: string): Promise<PermissionMap & { scope: TeamScope | null }> {
+  const scope = await teamScope(context, teamId);
+  if (!scope) return { ...NO_PERMISSIONS, scope: null };
+  if (scope !== "member") {
+    return { ...NO_PERMISSIONS, scope, ...Object.fromEntries(PERMISSION_KEYS.map((key) => [key, true])) } as PermissionMap & { scope: TeamScope };
+  }
+  const table = context.supabase.from("member_permissions" as never);
+  const { data } = await table.select("*").eq("team_id", teamId).eq("user_id", context.userId).maybeSingle();
+  const row = (data ?? {}) as Record<string, boolean | undefined>;
+  const map = Object.fromEntries(PERMISSION_KEYS.map((key) => [key, row[PERMISSION_COLUMNS[key]] === true])) as PermissionMap;
+  return { ...map, scope };
+}
+
+export async function requirePermission(context: ServerContext, teamId: string, permission: Permission) {
+  const permissions = await memberPermissions(context, teamId);
+  if (!permissions.scope) throw new Error("Нет доступа к команде");
+  if (!permissions[permission]) throw new Error("Недостаточно прав для этого действия");
+  return permissions.scope;
+}
+
+export async function requireFolderAccess(context: ServerContext, teamId: string, folder: string) {
+  const scope = await teamScope(context, teamId);
+  if (!scope) throw new Error("Нет доступа к команде");
+  if (scope !== "member") return;
+  const { data } = await context.supabase.from("folder_access").select("folder")
+    .eq("team_id", teamId).eq("folder", folder).eq("user_id", context.userId).maybeSingle();
+  if (!data) throw new Error("Эта папка вам недоступна");
+}
+
+export async function accessibleFolders(context: ServerContext, teamId: string): Promise<string[] | null> {
+  const scope = await teamScope(context, teamId);
+  if (scope !== "member") return null;
+  const { data } = await context.supabase.from("folder_access").select("folder")
+    .eq("team_id", teamId).eq("user_id", context.userId);
+  return [...new Set((data ?? []).map((row) => row.folder as string))];
+}
+
 export async function requireTeamManager(context: ServerContext, teamId: string) {
   const scope = await teamScope(context, teamId);
   if (scope !== "owner" && scope !== "manager") throw new Error("Недостаточно прав: нужен уровень администратора");

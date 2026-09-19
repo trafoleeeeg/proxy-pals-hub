@@ -5,10 +5,10 @@ import { touchPresence } from "@/lib/presence.functions";
 const HEARTBEAT_MS = 45_000;
 
 // Отмечает, что сотрудник в сети и в каком профиле он сейчас работает.
-export function usePresenceHeartbeat(teamId: string | undefined, running: string[]) {
+export function usePresenceHeartbeat(teamId: string | undefined, running: { profileId: string }[]) {
   const touch = useServerFn(touchPresence);
   const activeRef = useRef<string | null>(null);
-  activeRef.current = running[0] ?? null;
+  activeRef.current = running[0]?.profileId ?? null;
 
   useEffect(() => {
     if (!teamId) return;
@@ -23,5 +23,5 @@ export function usePresenceHeartbeat(teamId: string | undefined, running: string
     send();
     const timer = window.setInterval(send, HEARTBEAT_MS);
     return () => { stopped = true; window.clearInterval(timer); };
-  }, [teamId, touch, running.join(",")]);
+  }, [teamId, touch, running.map((item) => item.profileId).join(",")]);
 }

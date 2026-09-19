@@ -205,9 +205,12 @@ async function createProfileBrowser(electron, {
     }
     target.emit("close", { preventDefault() {} });
   }
+  const KEEPS_EXTENSION_POPUP = new Set(["open-extension", "state", "chrome-height", "chrome-overlay-height"]);
   async function command(message) {
     if (destroyed || !message || typeof message !== "object") return;
     error = "";
+    // Любое другое действие закрывает окно расширения, как клик мимо popup в Chrome.
+    if (!KEEPS_EXTENSION_POPUP.has(message.action)) closeExtensionPopup();
     const tab = active();
     switch (message.action) {
       case "state": break;

@@ -13,9 +13,11 @@ import {
   listAudit,
   setProfileAccess,
   setMemberScope,
+  createEmployee,
 } from "@/lib/team.functions";
 import { listProfiles } from "@/lib/profiles.functions";
-import { listFolderAccess, setFolderAccess } from "@/lib/folders.functions";
+import { listFolderAccess, setFolderAccess, listFolders, createFolder, renameFolder, deleteFolder } from "@/lib/folders.functions";
+import { listPresence } from "@/lib/presence.functions";
 import { ProfileBulkDialog } from "@/components/profile-bulk";
 import { toggleVisibleSelection } from "@/components/profile-model";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -45,6 +47,14 @@ export function TeamPage() {
   const scopeFn = useServerFn(setMemberScope);
   const folderAccessListFn = useServerFn(listFolderAccess);
   const folderAccessFn = useServerFn(setFolderAccess);
+  const foldersFn = useServerFn(listFolders);
+  const createFolderFn = useServerFn(createFolder);
+  const renameFolderFn = useServerFn(renameFolder);
+  const deleteFolderFn = useServerFn(deleteFolder);
+  const presenceFn = useServerFn(listPresence);
+  const createEmployeeFn = useServerFn(createEmployee);
+  const [newFolder, setNewFolder] = useState("");
+  const [employee, setEmployee] = useState({ email: "", password: "", displayName: "" });
   const [email, setEmail] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [bulkAccess, setBulkAccess] = useState<string[] | null>(null);
@@ -73,6 +83,19 @@ export function TeamPage() {
     enabled: !!ws?.teamId && canManage,
   });
 
+  const folderList = useQuery({
+    queryKey: ["folders", ws?.teamId],
+    queryFn: () => foldersFn({ data: { teamId: ws!.teamId } }),
+    enabled: !!ws?.teamId && canManage,
+  });
+
+  const presence = useQuery({
+    queryKey: ["presence", ws?.teamId],
+    queryFn: () => presenceFn({ data: { teamId: ws!.teamId } }),
+    enabled: !!ws?.teamId && canManage,
+    refetchInterval: 30_000,
+  });
+
   const log = useQuery({
     queryKey: ["audit", ws?.teamId],
     queryFn: () => audit({ data: { teamId: ws!.teamId } }),
@@ -85,7 +108,7 @@ export function TeamPage() {
   }, [profiles.data]);
 
   const refresh = async () => {
-    await Promise.all([qc.invalidateQueries({ queryKey: ["team"] }), qc.invalidateQueries({ queryKey: ["audit"] }), qc.invalidateQueries({ queryKey: ["profiles"] }), qc.invalidateQueries({ queryKey: ["folder-access"] })]);
+    await Promise.all([qc.invalidateQueries({ queryKey: ["team"] }), qc.invalidateQueries({ queryKey: ["audit"] }), qc.invalidateQueries({ queryKey: ["profiles"] }), qc.invalidateQueries({ queryKey: ["folder-access"] }), qc.invalidateQueries({ queryKey: ["folders"] }), qc.invalidateQueries({ queryKey: ["presence"] })]);
   };
 
   const inviteMut = useMutation({
@@ -112,6 +135,35 @@ export function TeamPage() {
       folderAccessFn({ data: { teamId: ws!.teamId, folder: v.folder, userId: v.userId, granted: v.granted } }),
     onSuccess: refresh,
     onError: () => toast.error("Не удалось изменить доступ к папке. Обновите страницу и повторите попытку."),
+  });
+
+  const createFolderMut = useMutation({
+    mutationFn: () => createFolderFn({ data: { teamId: ws!.teamId, name: newFolder.trim() } }),
+    onSuccess: async () => { setNewFolder(""); toast.success("Папка создана"); await refresh(); },
+    onError: (error: Error) => toast.error(error.message || "Не удалось создать папку"),
+  });
+
+  const renameFolderMut = useMutation({
+    mutationFn: (v: { id: string; name: string }) => renameFolderFn({ data: { teamId: ws!.teamId, id: v.id, name: v.name } }),
+    onSuccess: async () => { toast.success("Папка переименована"); await refresh(); },
+    onError: (error: Error) => toast.error(error.message || "Не удалось переименовать папку"),
+  });
+
+  const deleteFolderMut = useMutation({
+    mutationFn: (id: string) => deleteFolderFn({ data: { teamId: ws!.teamId, id } }),
+    onSuccess: async () => { toast.success("Папка удалена, профили перенесены в основную"); await refresh(); },
+    onError: (error: Error) => toast.error(error.message || "Не удалось удалить папку"),
+  });
+
+  const employeeMut = useMutation({
+    mutationFn: () => createEmployeeFn({ data: {
+      teamId: ws!.teamId,
+      email: employee.email.trim(),
+      password: employee.password,
+      ...(employee.displayName.trim() ? { displayName: employee.displayName.trim() } : {}),
+    } }),
+    onSuccess: async () => { setEmployee({ email: "", password: "", displayName: "" }); toast.success("Учётная запись сотрудника создана"); await refresh(); },
+    onError: (error: Error) => toast.error(error.message || "Не удалось создать учётную запись"),
   });
 
   const accessMut = useMutation({
@@ -168,7 +220,8 @@ export function TeamPage() {
     (team.data?.access ?? []).map((a) => `${a.profile_id}:${a.user_id}`),
   );
   const staff = (team.data?.members ?? []).filter((m) => m.role === "member");
-  const folders = [...new Set((profiles.data ?? []).map((p) => p.folder).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ru"));
+  const folderRows = folderList.data ?? [];
+  const folders = folderRows.map((row) => row.name);
   const folderAccessSet = new Set((folderAccess.data ?? []).map((row) => `${row.folder}:${row.userId}`));
 
   return (
@@ -182,6 +235,7 @@ export function TeamPage() {
           <TabsTrigger value="members">Участники</TabsTrigger>
           <TabsTrigger value="access">Доступы</TabsTrigger>
           <TabsTrigger value="folders">Папки</TabsTrigger>
+          <TabsTrigger value="staff">Сотрудники</TabsTrigger>
           <TabsTrigger value="log">Журнал</TabsTrigger>
         </TabsList>
 

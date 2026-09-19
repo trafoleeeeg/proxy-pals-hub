@@ -216,7 +216,11 @@ export const createEmployee = createServerFn({ method: "POST" })
     });
     if (created.error || !created.data.user) {
       const message = created.error?.message ?? "";
-      throw new Error(/already/i.test(message) ? "Такая почта уже зарегистрирована" : "Не удалось создать учётную запись");
+      if (/already/i.test(message)) throw new Error("Такая почта уже зарегистрирована");
+      if (/weak|guess|pwned|password/i.test(message)) {
+        throw new Error("Пароль слишком простой или встречался в утечках. Придумайте уникальный пароль из 12 и более символов с буквами, цифрами и знаками");
+      }
+      throw new Error("Не удалось создать учётную запись. Повторите попытку");
     }
     const userId = created.data.user.id;
     await supabaseAdmin.from("profiles").upsert({
@@ -254,7 +258,13 @@ export const updateEmployee = createServerFn({ method: "POST" })
       ...(data.password ? { password: data.password } : {}),
     };
     const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(data.userId, authUpdate);
-    if (authError) throw new Error(/already/i.test(authError.message) ? "Такая почта уже зарегистрирована" : "Не удалось изменить учётную запись");
+    if (authError) {
+      if (/already/i.test(authError.message)) throw new Error("Такая почта уже зарегистрирована");
+      if (/weak|guess|pwned|password/i.test(authError.message)) {
+        throw new Error("Новый пароль слишком простой или встречался в утечках. Используйте уникальный пароль из 12 и более символов");
+      }
+      throw new Error("Не удалось изменить учётную запись");
+    }
     const { error: profileError } = await supabaseAdmin.from("profiles").upsert({
       id: data.userId, email: data.email, display_name: data.displayName,
     });

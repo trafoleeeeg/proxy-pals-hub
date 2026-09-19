@@ -91,13 +91,13 @@ export const presenceSchema = z.object({
 export const employeeSchema = z.object({
   teamId: uuidSchema,
   email: z.string().trim().toLowerCase().email().max(254),
-  password: z.string().min(8, "Пароль не короче 8 символов").max(72),
+  password: z.string().min(12, "Пароль должен содержать не менее 12 символов").max(72),
   displayName: text(120).optional(),
 }).strict();
 export const updateEmployeeSchema = z.object({
   teamId: uuidSchema,
   userId: uuidSchema,
   email: z.string().trim().toLowerCase().email().max(254),
-  password: z.string().min(8, "Пароль не короче 8 символов").max(72).optional(),
+  password: z.string().min(12, "Пароль должен содержать не менее 12 символов").max(72).optional(),
   displayName: text(120),
 }).strict();

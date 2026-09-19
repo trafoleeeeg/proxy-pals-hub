@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
-import { Pencil, ShieldOff, UserPlus, Trash2 } from "lucide-react";
+import { Pencil, Settings2, ShieldOff, UserPlus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "@/lib/useWorkspace";
 import {
@@ -63,6 +63,7 @@ export function TeamPage() {
   const [email, setEmail] = useState("");
   const [removing, setRemoving] = useState<{ userId: string; email: string } | null>(null);
   const [editing, setEditing] = useState<{ userId: string; email: string; displayName: string; password: string } | null>(null);
+  const [activeTab, setActiveTab] = useState("members");
   const [busy, setBusy] = useState(false);
   useEffect(() => { setRemoving(null); }, [ws?.teamId]);
 
@@ -259,7 +260,7 @@ export function TeamPage() {
       {team.isPending && <p role="status" className="mt-3 text-sm text-muted-foreground">Загрузка участников…</p>}
       {team.isError && <p role="alert" className="mt-3 text-sm text-destructive">Не удалось загрузить команду. <Button variant="outline" onClick={() => team.refetch()}>Повторить</Button></p>}
 
-      <Tabs defaultValue="members" className="mt-6">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-6">
         <TabsList>
           <TabsTrigger value="members">Участники</TabsTrigger>
           <TabsTrigger value="rights">Права</TabsTrigger>
@@ -511,20 +512,20 @@ export function TeamPage() {
               <h2 className="mb-3 text-sm font-semibold">Создать учётную запись сотрудника</h2>
               <div className="flex flex-wrap gap-2">
                 <Input className="max-w-xs" type="text" placeholder="логин или почта" aria-label="Логин или почта сотрудника для учётной записи" value={employee.email} onChange={(e) => setEmployee((v) => ({ ...v, email: e.target.value }))} />
-                <Input className="max-w-xs" type="password" placeholder="пароль (от 8 символов)" aria-label="Пароль сотрудника" value={employee.password} onChange={(e) => setEmployee((v) => ({ ...v, password: e.target.value }))} />
+                <Input className="max-w-xs" type="password" placeholder="надёжный пароль (от 12 символов)" aria-label="Пароль сотрудника" value={employee.password} onChange={(e) => setEmployee((v) => ({ ...v, password: e.target.value }))} />
                 <Input className="max-w-xs" placeholder="имя (необязательно)" aria-label="Имя сотрудника" value={employee.displayName} onChange={(e) => setEmployee((v) => ({ ...v, displayName: e.target.value }))} />
-                <Button onClick={() => employeeMut.mutate()} disabled={!employee.email.trim() || employee.password.length < 8 || employeeMut.isPending}>
+                <Button onClick={() => employeeMut.mutate()} disabled={!employee.email.trim() || employee.password.length < 12 || employeeMut.isPending}>
                   <UserPlus className="size-4" /> Создать
                 </Button>
               </div>
-              <p className="mt-2 text-xs text-muted-foreground">Сотрудник сразу сможет войти в Umbra с этой почтой и паролем.</p>
+              <p className="mt-2 text-xs text-muted-foreground">Используйте уникальный пароль от 12 символов с буквами, цифрами и знаками. Сотрудник сразу сможет войти с ним в Umbra.</p>
             </div>
           )}
 
           {presence.isError && <p role="alert" className="text-sm text-destructive">Не удалось загрузить активность. <Button variant="outline" onClick={() => presence.refetch()}>Повторить</Button></p>}
           <div className="overflow-x-auto rounded-lg border border-border bg-card">
             <Table>
-              <TableHeader><TableRow><TableHead>Сотрудник</TableHead><TableHead>Статус</TableHead><TableHead>Последняя активность</TableHead><TableHead>Сейчас в профиле</TableHead></TableRow></TableHeader>
+              <TableHeader><TableRow><TableHead>Сотрудник</TableHead><TableHead>Статус</TableHead><TableHead>Последняя активность</TableHead><TableHead>Сейчас в профиле</TableHead><TableHead className="text-right">Управление</TableHead></TableRow></TableHeader>
               <TableBody>
                 {(presence.data ?? []).map((row) => {
                   const seen = row.lastSeenAt ? new Date(row.lastSeenAt) : null;
@@ -540,6 +541,14 @@ export function TeamPage() {
                       </TableCell>
                       <TableCell className="text-xs">{seen ? seen.toLocaleString("ru-RU") : "ещё не входил"}</TableCell>
                       <TableCell className="text-xs">{row.activeProfileId ? `занят: ${row.activeProfileName}` : "—"}</TableCell>
+                      <TableCell>
+                        <div className="flex justify-end gap-1">
+                          <Button variant="ghost" size="icon" title="Настроить права" aria-label={`Настроить права ${row.email}`} onClick={() => setActiveTab("rights")}><Settings2 className="size-4" /></Button>
+                          <Button variant="ghost" size="icon" title="Изменить сотрудника" aria-label={`Изменить ${row.email}`} onClick={() => setEditing({ userId: row.userId, email: row.email, displayName: row.name, password: "" })}><Pencil className="size-4" /></Button>
+                          <Button variant="ghost" size="icon" title="Забрать все доступы" aria-label={`Забрать все доступы у ${row.email}`} disabled={revokeAccessMut.isPending} onClick={() => revokeAccessMut.mutate(row.userId)}><ShieldOff className="size-4" /></Button>
+                          <Button variant="ghost" size="icon" title="Удалить учётную запись" aria-label={`Удалить ${row.email}`} disabled={busy} onClick={() => setRemoving({ userId: row.userId, email: row.email })}><Trash2 className="size-4" /></Button>
+                        </div>
+                      </TableCell>
                     </TableRow>
                   );
                 })}
@@ -582,9 +591,9 @@ export function TeamPage() {
           {editing && <div className="space-y-3">
             <Input aria-label="Новый логин или почта сотрудника" value={editing.email} onChange={(e) => setEditing({ ...editing, email: e.target.value })} />
             <Input aria-label="Новое имя сотрудника" placeholder="Имя" value={editing.displayName} onChange={(e) => setEditing({ ...editing, displayName: e.target.value })} />
-            <Input aria-label="Новый пароль сотрудника" type="password" placeholder="Новый пароль (необязательно)" value={editing.password} onChange={(e) => setEditing({ ...editing, password: e.target.value })} />
+            <Input aria-label="Новый пароль сотрудника" type="password" placeholder="Новый пароль от 12 символов (необязательно)" value={editing.password} onChange={(e) => setEditing({ ...editing, password: e.target.value })} />
           </div>}
-          <DialogFooter><Button variant="outline" disabled={updateEmployeeMut.isPending} onClick={() => setEditing(null)}>Отмена</Button><Button disabled={!editing?.email.trim() || (!!editing?.password && editing.password.length < 8) || updateEmployeeMut.isPending} onClick={() => updateEmployeeMut.mutate()}>{updateEmployeeMut.isPending ? "Сохранение…" : "Сохранить"}</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" disabled={updateEmployeeMut.isPending} onClick={() => setEditing(null)}>Отмена</Button><Button disabled={!editing?.email.trim() || (!!editing?.password && editing.password.length < 12) || updateEmployeeMut.isPending} onClick={() => updateEmployeeMut.mutate()}>{updateEmployeeMut.isPending ? "Сохранение…" : "Сохранить"}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
       <Dialog open={!!removing} onOpenChange={(open) => { if (!open && !busy) setRemoving(null); }}><DialogContent role="alertdialog" className="w-[calc(100%-2rem)]"><DialogHeader><DialogTitle>Удалить учётную запись?</DialogTitle><DialogDescription className="break-words">{removing?.email} больше не сможет войти в Umbra. Это действие необратимо.</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" disabled={busy} onClick={() => setRemoving(null)}>Отмена</Button><Button variant="destructive" disabled={busy} onClick={removeSelectedMember}>{busy ? "Удаление…" : "Удалить учётную запись"}</Button></DialogFooter></DialogContent></Dialog>

@@ -57,7 +57,7 @@ export function ProfileBulkDialog({ action, ids, teamId, isOwner, blocked, proxi
     } catch { setError("Операция не выполнена. Проверьте права, блокировки профилей и подключение; затем обновите список."); }
     finally { setBusy(false); }
   }
-  const titles = { edit: "Изменить выбранные профили", move: "Перенести в папку", access: "Доступ сотрудника", transfer: "Передать профили", delete: "Удалить выбранные профили?" };
+  const titles = { edit: "Изменить выбранные профили", move: "Перенести в папку", transfer: "Передать профили в папку", delete: "Удалить выбранные профили?" };
   return <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose(); }}><DialogContent role={action === "delete" ? "alertdialog" : "dialog"} className="max-h-[90dvh] w-[calc(100%-2rem)] overflow-y-auto sm:max-w-xl">
     <DialogHeader className="min-w-0 pr-5"><DialogTitle className="break-words leading-snug tracking-normal">{titles[action]}</DialogTitle><DialogDescription>{action === "delete" ? `Будут удалены профили (${ids.length}), их облачные cookies и доступы сотрудников. Отменить удаление нельзя.` : `Выбрано профилей: ${ids.length}`}</DialogDescription></DialogHeader>
     {ids.length > 200 && <p role="alert" className="text-sm text-destructive">За одну операцию можно изменить до 200 профилей. Уменьшите выбор.</p>}

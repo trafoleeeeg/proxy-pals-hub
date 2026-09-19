@@ -19,11 +19,12 @@ export const touchPresence = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(presenceSchema)
   .handler(async ({ data, context }) => {
-    const { error } = await context.supabase.rpc("touch_presence", {
+    const args = {
       _team_id: data.teamId,
-      _profile_id: data.profileId ?? undefined,
-      _device_label: data.deviceLabel ?? undefined,
-    });
+      ...(data.profileId ? { _profile_id: data.profileId } : {}),
+      ...(data.deviceLabel ? { _device_label: data.deviceLabel } : {}),
+    };
+    const { error } = await context.supabase.rpc("touch_presence", args);
     if (error) throw new Error("Не удалось отметить активность");
     return { ok: true };
   });

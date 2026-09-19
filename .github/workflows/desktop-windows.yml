@@ -156,6 +156,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" \
+              --title "Umbra ${GITHUB_REF_NAME#v}" \
+              --notes "Автоматическая сборка Umbra ${GITHUB_REF_NAME#v}." \
+              --target "$GITHUB_SHA"
+          fi
+
           files=(desktop/dist/latest.yml desktop/dist/*.blockmap desktop/dist/*.exe)
 
           for file in "${files[@]}"; do

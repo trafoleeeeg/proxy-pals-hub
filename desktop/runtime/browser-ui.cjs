@@ -359,26 +359,36 @@ function renderer() {
     }));
     }
     const extensions = state.extensions || [];
-    const extensionKey = extensions.map((item) => item.id + ":" + item.pinned + ":" + item.enabled + ":" + (item.popup || "")).join("|");
+    const extensionKey = extensions.map((item) => item.id + ":" + item.pinned + ":" + item.enabled + ":" + item.failed + ":" + (item.popup || "") + ":" + (item.options || "")).join("|");
     if (extensionKey !== extensionSignature) {
     extensionSignature = extensionKey;
     byId("extensions-count").textContent = extensions.length ? String(extensions.length) : "";
     const list = byId("extensions-list");
-    const openExtension = (extension) => {
+    const openExtension = (extension, anchor) => {
       extensionsPopover.hidden = true;
-      void run({ action: "open-extension", id: extension.id });
+      syncPopoverLayer();
+      const rect = anchor?.getBoundingClientRect?.();
+      void run({ action: "open-extension", id: extension.id, anchor: rect ? Math.round(rect.right) : 0 });
     };
+    const openable = (extension) => !extension.failed && (extension.popup || extension.options);
+    const hint = (extension) => extension.failed
+      ? `${extension.name}: не удалось загрузить`
+      : extension.popup ? `Открыть ${extension.name}`
+      : extension.options ? `${extension.name}: настройки`
+      : `${extension.name}: своего окна нет`;
     list.replaceChildren(...extensions.map((extension) => {
       const row = document.createElement("div"); row.className = "extension-row";
       const open = document.createElement("button"); open.type = "button"; open.className = "extension-open";
-      open.title = extension.popup ? `Открыть ${extension.name}` : `${extension.name}: своего окна нет`;
+      open.title = hint(extension);
       open.setAttribute("aria-label", open.title);
+      open.disabled = !openable(extension);
       const image = document.createElement(extension.icon ? "img" : "span"); image.className = "extension-icon";
       if (extension.icon) { image.src = extension.icon; image.alt = ""; } else image.innerHTML = icon("globe");
       const text = document.createElement("div"); const title = document.createElement("strong"); title.textContent = extension.name;
-      const meta = document.createElement("small"); meta.textContent = `Версия ${extension.version} · ${extension.enabled === false ? "отключено" : "включено"}`;
+      const meta = document.createElement("small");
+      meta.textContent = `Версия ${extension.version} · ${extension.failed ? "не загрузилось" : extension.popup ? "готово" : extension.options ? "только настройки" : "без окна"}`;
       text.append(title, meta); open.append(image, text);
-      open.onclick = () => openExtension(extension);
+      open.onclick = () => openExtension(extension, open);
       const pin = document.createElement("button"); pin.type = "button"; pin.className = "pin-extension";
       pin.title = extension.pinned ? "Открепить от панели" : "Закрепить на панели";
       pin.setAttribute("aria-label", pin.title); pin.textContent = extension.pinned ? "●" : "○";
@@ -386,13 +396,15 @@ function renderer() {
       row.append(open, pin); return row;
     }));
     byId("extensions-empty").hidden = extensions.length > 0;
-    pinnedExtensions.replaceChildren(...extensions.filter((extension) => extension.pinned).map((extension) => {
+    // Панель вмещает ограниченное число значков, остальные остаются в списке расширений.
+    const pinned = extensions.filter((extension) => extension.pinned).slice(0, 6);
+    pinnedExtensions.replaceChildren(...pinned.map((extension) => {
       const button = document.createElement("button"); button.type = "button"; button.className = "toolbar-button pinned-extension";
-      button.title = extension.name; button.setAttribute("aria-label", `Расширение: ${extension.name}`);
+      button.title = hint(extension); button.setAttribute("aria-label", `Расширение: ${extension.name}`);
       if (extension.icon) { const image = document.createElement("img"); image.src = extension.icon; image.alt = ""; button.append(image); }
       else button.innerHTML = icon("globe");
       // Клик по значку открывает само расширение, как в Chrome.
-      button.onclick = () => extension.popup ? openExtension(extension) : togglePopover(extensionsPopover, button);
+      button.onclick = () => openable(extension) ? openExtension(extension, button) : togglePopover(extensionsPopover, button);
       return button;
     }));
     }

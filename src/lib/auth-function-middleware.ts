@@ -28,7 +28,9 @@ export const attachFreshSupabaseAuth = createMiddleware({ type: "function" }).cl
       if (response.status !== 401) return response;
       try {
         const refreshed = await forceRefreshSession();
-        return fetch(requestWithAuthorization(retryRequest, undefined, refreshed.access_token));
+        const retryResponse = await fetch(requestWithAuthorization(retryRequest, undefined, refreshed.access_token));
+        if (retryResponse.status === 401) await expireLocalSession();
+        return retryResponse;
       } catch (error) {
         await expireLocalSession();
         throw error;

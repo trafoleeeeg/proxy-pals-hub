@@ -1,12 +1,14 @@
 import { createStart, createCsrfMiddleware, createMiddleware } from "@tanstack/react-start";
 
 import { renderErrorPage } from "./lib/error-page";
-import { attachFreshSupabaseAuth } from "@/integrations/supabase/fresh-auth-middleware";
+import { attachFreshSupabaseAuth } from "./lib/auth-function-middleware";
+import { isUnauthorizedServerError, unauthorizedResponse } from "./lib/auth-response";
 
 const errorMiddleware = createMiddleware().server(async ({ next }) => {
   try {
     return await next();
   } catch (error) {
+    if (isUnauthorizedServerError(error)) return unauthorizedResponse();
     if (error != null && typeof error === "object" && "statusCode" in error) {
       throw error;
     }

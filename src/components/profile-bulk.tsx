@@ -1,8 +1,6 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { bulkUpdateProfiles, bulkDeleteProfiles } from "@/lib/profiles.functions";
-import { listMembers, setProfilesAccess } from "@/lib/team.functions";
 import { transferProfiles } from "@/lib/folders.functions";
 import { generateFingerprint } from "@/lib/fingerprint";
 import { Button } from "@/components/ui/button";

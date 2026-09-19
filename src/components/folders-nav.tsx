@@ -3,6 +3,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { Archive, BriefcaseBusiness, Folder, FolderOpen, Globe2, ShoppingBag, UsersRound } from "lucide-react";
 import { useMemo } from "react";
 import { listProfiles } from "@/lib/profiles.functions";
+import { listFolders } from "@/lib/folders.functions";
 import { useWorkspace } from "@/lib/useWorkspace";
 import { ALL_FOLDERS, useProfileFolder } from "@/lib/useProfileFolder";
 import { Button } from "@/components/ui/button";
@@ -12,13 +13,24 @@ const icons = [Folder, BriefcaseBusiness, ShoppingBag, UsersRound, Globe2];
 export function FoldersNav({ collapsed = false }: { collapsed?: boolean }) {
   const { data: ws } = useWorkspace();
   const listFn = useServerFn(listProfiles);
+  const foldersFn = useServerFn(listFolders);
   const { folder, setFolder } = useProfileFolder();
   const profiles = useQuery({
     queryKey: ["profiles", ws?.teamId],
     queryFn: () => { if (!ws) throw new Error("Команда не загружена"); return listFn({ data: { teamId: ws.teamId } }); },
     enabled: !!ws,
   });
-  const items = useMemo(() => [...new Set((profiles.data ?? []).map((p) => p.folder).filter(Boolean))].sort(), [profiles.data]);
+  const folders = useQuery({
+    queryKey: ["folders", ws?.teamId],
+    queryFn: () => { if (!ws) throw new Error("Команда не загружена"); return foldersFn({ data: { teamId: ws.teamId } }); },
+    enabled: !!ws,
+  });
+  const items = useMemo(() => {
+    const known = (folders.data ?? []);
+    const names = [...new Set([...known.map((row) => row.name), ...(profiles.data ?? []).map((p) => p.folder).filter(Boolean)])];
+    const isDefault = (name: string) => known.some((row) => row.name === name && row.isDefault);
+    return names.sort((a, b) => Number(isDefault(b)) - Number(isDefault(a)) || a.localeCompare(b, "ru"));
+  }, [folders.data, profiles.data]);
   const count = (name: string) => (profiles.data ?? []).filter((profile) => profile.folder === name).length;
   const row = (active: boolean) => "h-8 w-full gap-3 px-2 text-xs " + (collapsed ? "justify-center " : "justify-start ") + (active ? "" : "text-muted-foreground");
   const label = (text: string, value: number) => collapsed ? null : <><span className="truncate">{text}</span><span className="ml-auto tabular-nums text-muted-foreground">{value}</span></>;

@@ -49,17 +49,29 @@ export const listProfiles = createServerFn({ method: "POST" })
         .map((l) => [l.profile_id, l]),
     );
 
-    return (rows ?? []).map((r) => ({
-      ...r,
-      fingerprint: (r.fingerprint ?? {}) as Fingerprint,
-      custom_fields: (r.custom_fields ?? {}) as Record<string, string>,
-      lock: lockMap.get(r.id)
-        ? {
-            userId: lockMap.get(r.id)!.user_id,
-            expiresAt: lockMap.get(r.id)!.expires_at,
-          }
-        : null,
-    }));
+    const lockUserIds = [...new Set([...lockMap.values()].map((lock) => lock.user_id))];
+    const { data: lockPeople } = lockUserIds.length
+      ? await context.supabase.from("profiles").select("id, email, display_name").in("id", lockUserIds)
+      : { data: [] };
+    const personById = new Map((lockPeople ?? []).map((person) => [person.id, person]));
+
+    return (rows ?? []).map((r) => {
+      const lock = lockMap.get(r.id);
+      const person = lock ? personById.get(lock.user_id) : undefined;
+      return {
+        ...r,
+        fingerprint: (r.fingerprint ?? {}) as Fingerprint,
+        custom_fields: (r.custom_fields ?? {}) as Record<string, string>,
+        lock: lock
+          ? {
+              userId: lock.user_id,
+              expiresAt: lock.expires_at,
+              email: person?.email ?? "",
+              name: person?.display_name ?? "",
+            }
+          : null,
+      };
+    });
   });
 
 export const saveProfile = createServerFn({ method: "POST" })

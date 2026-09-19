@@ -41,8 +41,8 @@ export function TeamPage() {
   const revoke = useServerFn(revokeInvite);
   const kick = useServerFn(removeMember);
   const audit = useServerFn(listAudit);
-  const profilesFn = useServerFn(listProfiles);
-  const accessFn = useServerFn(setProfileAccess);
+  const permissionsListFn = useServerFn(listMemberPermissions);
+  const permissionsSaveFn = useServerFn(setMemberPermissions);
   const scopeFn = useServerFn(setMemberScope);
   const folderAccessListFn = useServerFn(listFolderAccess);
   const folderAccessFn = useServerFn(setFolderAccess);

@@ -81,7 +81,10 @@ export function requireLeaseToken(token: string | undefined): string {
 /** A terminal close cannot commit its cookie snapshot; the caller must stop retrying it. */
 export function classifyTerminalClose(error: unknown): "access_revoked" | "lease_lost" | null {
   if (!(error instanceof Error)) return null;
-  if (error.message === "No profile access") return "access_revoked";
-  if (error.message === "Session lease lost; reopen the profile") return "lease_lost";
+  const message = error.message.toLowerCase();
+  // Database clients may add a code or context around the RPC message. Match
+  // only the two definitive failures that can never succeed on a later retry.
+  if (message.includes("no profile access")) return "access_revoked";
+  if (message.includes("session lease lost")) return "lease_lost";
   return null;
 }

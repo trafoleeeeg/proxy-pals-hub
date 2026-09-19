@@ -81,6 +81,6 @@ export function ProfileBulkDialog({ action, ids, teamId, isOwner, blocked, proxi
       })}
     </fieldset>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-    <DialogFooter><Button variant="outline" disabled={busy} onClick={onClose}>Отмена</Button><Button variant={action === "delete" ? "destructive" : "default"} disabled={!enabled || (action === "access" && (!userId || members.isError)) || (action === "transfer" && !folder.trim() && !userId) || ((action === "edit" || action === "move") && (!fields.length || (fields.includes("fingerprint") && !!fingerprintError(fingerprint))))} onClick={submit}>{busy ? "Выполняется…" : action === "delete" ? `Удалить ${ids.length}` : "Применить"}</Button></DialogFooter>
+    <DialogFooter><Button variant="outline" disabled={busy} onClick={onClose}>Отмена</Button><Button variant={action === "delete" ? "destructive" : "default"} disabled={!enabled || (action === "transfer" && !folder.trim()) || ((action === "edit" || action === "move") && (!fields.length || (fields.includes("fingerprint") && !!fingerprintError(fingerprint))))} onClick={submit}>{busy ? "Выполняется…" : action === "delete" ? `Удалить ${ids.length}` : "Применить"}</Button></DialogFooter>
   </DialogContent></Dialog>;
 }

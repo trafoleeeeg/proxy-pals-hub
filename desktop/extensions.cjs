@@ -73,8 +73,12 @@ function createExtensionStore(getUserData, deps = {}) {
           // Страница настроек — запасной путь для расширений без popup.
           const options = safePage(manifest.options_ui?.page || manifest.options_page);
           if (options) item.options = options;
-          const icons = manifest.icons && typeof manifest.icons === "object" ? Object.values(manifest.icons) : [];
-          const icon = icons.map(String).at(-1);
+          const icons = manifest.icons && typeof manifest.icons === "object"
+            ? Object.entries(manifest.icons).map(([size, file]) => ({ size: Number(size), file: String(file) }))
+              .filter(({ size, file }) => Number.isFinite(size) && size > 0 && file)
+              .sort((left, right) => Math.abs(left.size - 32) - Math.abs(right.size - 32) || right.size - left.size)
+            : [];
+          const icon = icons[0]?.file;
           if (icon && !path.isAbsolute(icon) && !icon.split(/[\\/]/).includes("..")) {
             try {
               const iconFile = await fs.readFile(path.join(entry.path, icon));

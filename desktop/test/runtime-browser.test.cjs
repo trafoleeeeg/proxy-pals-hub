@@ -173,3 +173,10 @@ test("browser UI contains a dedicated bookmark manager, search and compact zoom 
   assert.match(source, /action: "chrome-overlay-height"/);
   assert.match(source, /action: "pin-extension"/);
 });
+
+test("browser keeps quick tab actions outside the slow command queue", () => {
+  const source = require("node:fs").readFileSync(require.resolve("../runtime/browser.cjs"), "utf8");
+  assert.match(source, /\["close-tab", "navigate", "back", "forward", "reload"\]/);
+  assert.match(source, /popup\.show\(\);\s*popup\.focus\(\);/);
+  assert.match(source, /refitExtensionPopup\(popup\)/);
+});

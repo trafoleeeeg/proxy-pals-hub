@@ -194,7 +194,6 @@ function ProfilesWorkspace() {
       <Button variant="ghost" size="icon" title="Снять выбор" aria-label="Снять выбор" onClick={() => setSelected([])}><X className="size-4" /></Button>
       <Button variant="outline" size="sm" disabled={!!busy} onClick={() => setAction({ mode: "edit", ids: [...selected] })}><Pencil className="size-4" />Изменить</Button>
       <Button variant="outline" size="sm" disabled={!!busy} onClick={() => setAction({ mode: "move", ids: [...selected] })}><FolderInput className="size-4" />В папку</Button>
-      <Button variant="outline" size="sm" disabled={!!busy} onClick={() => setAction({ mode: "transfer", ids: [...selected] })}><FolderInput className="size-4" />Передать</Button>
       <Button variant="outline" size="icon" title="Удалить выбранные профили" aria-label="Удалить выбранные профили" disabled={!!busy} onClick={() => setAction({ mode: "delete", ids: [...selected] })}><Trash2 className="size-4 text-destructive" /></Button>
     </div>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}

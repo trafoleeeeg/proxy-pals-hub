@@ -115,37 +115,44 @@ async function createProfileBrowser(electron, {
       tab.view.setBounds({ x: 0, y: top, width: Math.max(1, width), height: Math.max(1, height - top) });
        tab.view.setVisible(tab.id === activeId && !isHome(tab) && !bookmarksOpen && !proxiesOpen);
     }
-    if (extensionPopup) {
-      const popupWidth = Math.round(Math.min(extensionPopupSize.width, Math.max(200, width - 16)));
-      const popupHeight = Math.round(Math.min(extensionPopupSize.height, Math.max(120, height - chromeHeight - 12)));
-      // Окно прижимается к своему значку на панели, как в Chrome.
-      const right = extensionPopupAnchor > 0 ? Math.min(width - 8, extensionPopupAnchor) : width - 10;
-      extensionPopup.setBounds({ x: Math.max(8, Math.round(right - popupWidth)), y: chromeHeight, width: popupWidth, height: popupHeight });
-    }
+    positionExtensionPopup();
   }
-  // Окно расширения открывается поверх страницы, как всплывающее окно в Chrome.
+  // Окно расширения открывается отдельным безрамочным окном поверх страницы —
+  // как popup в Chrome: оно получает клики и закрывается при потере фокуса.
   const POPUP_SIZE = { width: 380, height: 520 };
   const OPTIONS_SIZE = { width: 900, height: 640 };
   let extensionPopup = null;
   let extensionPopupId = "";
   let extensionPopupAnchor = 0;
   let extensionPopupSize = { ...POPUP_SIZE };
-  function closeExtensionPopup() {
-    const view = extensionPopup;
-    extensionPopup = null; extensionPopupId = ""; extensionPopupAnchor = 0; extensionPopupSize = { ...POPUP_SIZE };
-    if (!view) return;
-    try { shell.contentView.removeChildView(view); } catch { /* окно уже закрыто */ }
-    try { view.webContents.close(); } catch { /* уже уничтожено */ }
+  function positionExtensionPopup() {
+    if (!extensionPopup || extensionPopup.isDestroyed() || shell.isDestroyed()) return;
+    const area = shell.getContentBounds();
+    const width = Math.round(Math.min(extensionPopupSize.width, Math.max(240, area.width - 16)));
+    const height = Math.round(Math.min(extensionPopupSize.height, Math.max(140, area.height - chromeHeight - 12)));
+    // Окно прижимается к своему значку на панели, как в Chrome.
+    const right = extensionPopupAnchor > 0 ? Math.min(area.width - 8, extensionPopupAnchor) : area.width - 10;
+    extensionPopup.setBounds({
+      x: area.x + Math.max(8, Math.round(right - width)),
+      y: area.y + chromeHeight,
+      width, height,
+    });
   }
-  async function fitExtensionPopup(view) {
+  function closeExtensionPopup() {
+    const popup = extensionPopup;
+    extensionPopup = null; extensionPopupId = ""; extensionPopupAnchor = 0; extensionPopupSize = { ...POPUP_SIZE };
+    if (!popup) return;
+    try { if (!popup.isDestroyed()) popup.destroy(); } catch { /* окно уже закрыто */ }
+  }
+  async function fitExtensionPopup(popup) {
     try {
-      const size = await view.webContents.executeJavaScript(
+      const size = await popup.webContents.executeJavaScript(
         "({w:Math.ceil(Math.max(document.documentElement.scrollWidth,document.body?document.body.scrollWidth:0)),h:Math.ceil(Math.max(document.documentElement.scrollHeight,document.body?document.body.scrollHeight:0))})",
         true);
-      if (view !== extensionPopup || view.webContents.isDestroyed()) return;
+      if (popup !== extensionPopup || popup.isDestroyed()) return;
       if (size && size.w > 40 && size.h > 40) {
         extensionPopupSize = { width: Math.min(800, Math.max(240, size.w + 2)), height: Math.min(640, Math.max(140, size.h + 2)) };
-        layout();
+        positionExtensionPopup();
       }
     } catch { /* расширение не отдало размер — остаётся размер по умолчанию */ }
   }
@@ -153,28 +160,34 @@ async function createProfileBrowser(electron, {
     const page = extension?.popup || extension?.options || "";
     if (!extension?.runtimeId || !page) { error = "У этого расширения нет ни своего окна, ни страницы настроек"; return; }
     closeExtensionPopup();
-    const view = new WebContentsView({
-      webPreferences: { session: session.fromPartition(partition), sandbox: true, contextIsolation: true, nodeIntegration: false, devTools: false },
+    const popup = new BrowserWindow({
+      parent: shell, frame: false, resizable: false, movable: false, minimizable: false, maximizable: false,
+      fullscreenable: false, skipTaskbar: true, show: false, backgroundColor: "#ffffff", autoHideMenuBar: true,
+      webPreferences: { session: session.fromPartition(partition), sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, devTools: false },
     });
-    extensionPopup = view; extensionPopupId = extension.id;
+    extensionPopup = popup; extensionPopupId = extension.id;
     extensionPopupAnchor = Number.isFinite(anchor) && anchor > 0 ? Math.round(anchor) : 0;
     extensionPopupSize = extension.popup ? { ...POPUP_SIZE } : { ...OPTIONS_SIZE };
-    view.setBackgroundColor("#ffffff");
-    shell.contentView.addChildView(view);
-    layout();
-    view.webContents.setWindowOpenHandler(({ url }) => {
+    positionExtensionPopup();
+    popup.webContents.setWindowOpenHandler(({ url }) => {
       closeExtensionPopup();
       try { void openTab(startUrl(url)); } catch { /* неподдерживаемый адрес */ }
       return { action: "deny" };
     });
-    view.webContents.loadURL(`chrome-extension://${extension.runtimeId}/${page}`).then(async () => {
-      if (view !== extensionPopup || view.webContents.isDestroyed()) return;
+    popup.webContents.on("before-input-event", (event, input) => {
+      if (input.type === "keyDown" && input.key === "Escape") { event.preventDefault(); closeExtensionPopup(); }
+    });
+    popup.on("blur", () => { if (popup === extensionPopup) closeExtensionPopup(); });
+    popup.on("closed", () => { if (popup === extensionPopup) { extensionPopup = null; extensionPopupId = ""; } });
+    popup.webContents.loadURL(`chrome-extension://${extension.runtimeId}/${page}`).then(async () => {
+      if (popup !== extensionPopup || popup.isDestroyed()) return;
       // Содержимое, которое не поместилось, должно прокручиваться, а не обрезаться.
-      await view.webContents.insertCSS("html,body{overflow:auto!important}").catch(() => {});
-      view.webContents.focus();
-      // Слушаем потерю фокуса только после того, как окно его получило.
-      view.webContents.on("blur", () => { if (view === extensionPopup) closeExtensionPopup(); });
-      if (extension.popup) await fitExtensionPopup(view);
+      await popup.webContents.insertCSS("html,body{overflow:auto!important}").catch(() => {});
+      if (extension.popup) await fitExtensionPopup(popup);
+      if (popup !== extensionPopup || popup.isDestroyed()) return;
+      positionExtensionPopup();
+      popup.show();
+      popup.focus();
       flushPublish();
     }).catch((failure) => {
       closeExtensionPopup();
@@ -399,11 +412,12 @@ async function createProfileBrowser(electron, {
   shell.webContents.on("before-input-event", shortcuts);
   shell.webContents.on("render-process-gone", () => { if (!destroyed) void closeProfile().catch(() => {}); });
   shell.on("resize", layout);
+  shell.on("move", positionExtensionPopup);
   shell.on("close", (event) => { event.preventDefault(); void closeProfile().catch(() => { error = "Не удалось сохранить профиль. Повторите закрытие."; publish(); }); });
   shell.on("closed", () => {
     destroyed = true;
     clearTimeout(publishTimer); publishTimer = null;
-    extensionPopup = null; extensionPopupId = "";
+    closeExtensionPopup();
     registry.delete(shellContents);
     for (const tab of [...tabs.values()]) tab.destroy();
     if (!registry.size) { ipcMain.removeHandler("umbra-runtime:browser"); handlers.delete(ipcMain); }

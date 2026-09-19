@@ -386,13 +386,16 @@ function createProfileRuntime(electron, options = {}) {
   async function reloadExtensionList(entry) {
     if (!extensionStore) return;
     const all = await extensionStore.list().catch(() => []);
-    entry.extensionList = all
-      .filter((item) => !entry.extensionsLoaded || entry.extensionsLoaded.has(item.id))
-      .map((item) => ({
-        id: item.id, name: item.name, version: item.version, enabled: item.enabled !== false, icon: item.icon || "",
-        pinned: item.pinned === true, popup: item.popup || "", runtimeId: entry.extensionsLoaded?.get(item.id) || "",
+    // Незагруженные расширения остаются в списке с пометкой, иначе они молча исчезают.
+    entry.extensionList = all.map((item) => {
+      const runtimeId = entry.extensionsLoaded?.get(item.id) || "";
+      const failed = !!entry.extensionsLoaded && !entry.extensionsLoaded.has(item.id);
+      return {
+        id: item.id, name: item.name, version: item.version, enabled: !failed, failed, icon: item.icon || "",
+        pinned: item.pinned === true, popup: item.popup || "", options: item.options || "", runtimeId,
         ...(item.url ? { url: item.url } : {}),
-      }));
+      };
+    });
   }
   function checkConnection(entry) {
     if (entry.checkJob) return entry.checkJob;

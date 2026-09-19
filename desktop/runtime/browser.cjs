@@ -116,42 +116,71 @@ async function createProfileBrowser(electron, {
        tab.view.setVisible(tab.id === activeId && !isHome(tab) && !bookmarksOpen && !proxiesOpen);
     }
     if (extensionPopup) {
-      const popupWidth = Math.min(420, Math.max(240, width - 20));
-      const popupHeight = Math.min(600, Math.max(180, height - chromeHeight - 16));
-      extensionPopup.setBounds({ x: Math.max(0, width - popupWidth - 10), y: chromeHeight, width: popupWidth, height: popupHeight });
+      const popupWidth = Math.round(Math.min(extensionPopupSize.width, Math.max(200, width - 16)));
+      const popupHeight = Math.round(Math.min(extensionPopupSize.height, Math.max(120, height - chromeHeight - 12)));
+      // Окно прижимается к своему значку на панели, как в Chrome.
+      const right = extensionPopupAnchor > 0 ? Math.min(width - 8, extensionPopupAnchor) : width - 10;
+      extensionPopup.setBounds({ x: Math.max(8, Math.round(right - popupWidth)), y: chromeHeight, width: popupWidth, height: popupHeight });
     }
   }
   // Окно расширения открывается поверх страницы, как всплывающее окно в Chrome.
+  const POPUP_SIZE = { width: 380, height: 520 };
+  const OPTIONS_SIZE = { width: 900, height: 640 };
   let extensionPopup = null;
   let extensionPopupId = "";
+  let extensionPopupAnchor = 0;
+  let extensionPopupSize = { ...POPUP_SIZE };
   function closeExtensionPopup() {
     const view = extensionPopup;
-    extensionPopup = null; extensionPopupId = "";
+    extensionPopup = null; extensionPopupId = ""; extensionPopupAnchor = 0; extensionPopupSize = { ...POPUP_SIZE };
     if (!view) return;
     try { shell.contentView.removeChildView(view); } catch { /* окно уже закрыто */ }
     try { view.webContents.close(); } catch { /* уже уничтожено */ }
   }
-  function openExtensionPopup(extension) {
-    if (!extension?.runtimeId || !extension.popup) { error = "У этого расширения нет собственного окна"; return; }
+  async function fitExtensionPopup(view) {
+    try {
+      const size = await view.webContents.executeJavaScript(
+        "({w:Math.ceil(Math.max(document.documentElement.scrollWidth,document.body?document.body.scrollWidth:0)),h:Math.ceil(Math.max(document.documentElement.scrollHeight,document.body?document.body.scrollHeight:0))})",
+        true);
+      if (view !== extensionPopup || view.webContents.isDestroyed()) return;
+      if (size && size.w > 40 && size.h > 40) {
+        extensionPopupSize = { width: Math.min(800, Math.max(240, size.w + 2)), height: Math.min(640, Math.max(140, size.h + 2)) };
+        layout();
+      }
+    } catch { /* расширение не отдало размер — остаётся размер по умолчанию */ }
+  }
+  function openExtensionPopup(extension, anchor) {
+    const page = extension?.popup || extension?.options || "";
+    if (!extension?.runtimeId || !page) { error = "У этого расширения нет ни своего окна, ни страницы настроек"; return; }
     closeExtensionPopup();
     const view = new WebContentsView({
       webPreferences: { session: session.fromPartition(partition), sandbox: true, contextIsolation: true, nodeIntegration: false, devTools: false },
     });
     extensionPopup = view; extensionPopupId = extension.id;
+    extensionPopupAnchor = Number.isFinite(anchor) && anchor > 0 ? Math.round(anchor) : 0;
+    extensionPopupSize = extension.popup ? { ...POPUP_SIZE } : { ...OPTIONS_SIZE };
     view.setBackgroundColor("#ffffff");
     shell.contentView.addChildView(view);
     layout();
-    view.webContents.on("blur", () => closeExtensionPopup());
     view.webContents.setWindowOpenHandler(({ url }) => {
       closeExtensionPopup();
       try { void openTab(startUrl(url)); } catch { /* неподдерживаемый адрес */ }
       return { action: "deny" };
     });
-    view.webContents.loadURL(`chrome-extension://${extension.runtimeId}/${extension.popup}`).then(() => {
+    view.webContents.loadURL(`chrome-extension://${extension.runtimeId}/${page}`).then(async () => {
+      if (view !== extensionPopup || view.webContents.isDestroyed()) return;
+      // Содержимое, которое не поместилось, должно прокручиваться, а не обрезаться.
+      await view.webContents.insertCSS("html,body{overflow:auto!important}").catch(() => {});
       view.webContents.focus();
-    }).catch(() => {
+      // Слушаем потерю фокуса только после того, как окно его получило.
+      view.webContents.on("blur", () => { if (view === extensionPopup) closeExtensionPopup(); });
+      if (extension.popup) await fitExtensionPopup(view);
+      flushPublish();
+    }).catch((failure) => {
       closeExtensionPopup();
-      error = "Не удалось открыть окно расширения";
+      error = String(failure?.code || "") === "ERR_FILE_NOT_FOUND"
+        ? "Страница расширения не найдена — переустановите расширение"
+        : "Не удалось открыть окно расширения";
       flushPublish();
     });
   }
@@ -176,9 +205,12 @@ async function createProfileBrowser(electron, {
     }
     target.emit("close", { preventDefault() {} });
   }
+  const KEEPS_EXTENSION_POPUP = new Set(["open-extension", "state", "chrome-height", "chrome-overlay-height"]);
   async function command(message) {
     if (destroyed || !message || typeof message !== "object") return;
     error = "";
+    // Любое другое действие закрывает окно расширения, как клик мимо popup в Chrome.
+    if (!KEEPS_EXTENSION_POPUP.has(message.action)) closeExtensionPopup();
     const tab = active();
     switch (message.action) {
       case "state": break;
@@ -289,11 +321,13 @@ async function createProfileBrowser(electron, {
       case "toggle-bookmark-bar": await setBookmarkBarVisible(!getBookmarkBarVisible()); break;
       case "manage-extensions": openExtensionManager(); break;
       case "pin-extension": await setExtensionPinned(message.id, message.pinned === true); break;
+      case "close-extension": break;
       case "open-extension": {
         if (extensionPopupId === message.id) { closeExtensionPopup(); break; }
         const extension = (getExtensions() || []).find((item) => item.id === message.id);
         if (!extension) { error = "Расширение не найдено"; break; }
-        openExtensionPopup(extension);
+        if (extension.failed) { error = `Расширение «${extension.name}» не загрузилось. Обновите или переустановите его.`; break; }
+        openExtensionPopup(extension, Number(message.anchor));
         break;
       }
       case "chrome-overlay-height": {

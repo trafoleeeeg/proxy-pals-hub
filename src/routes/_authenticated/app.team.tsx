@@ -11,15 +11,14 @@ import {
   revokeInvite,
   removeMember,
   listAudit,
-  setProfileAccess,
+  listMemberPermissions,
+  setMemberPermissions,
   setMemberScope,
   createEmployee,
 } from "@/lib/team.functions";
-import { listProfiles } from "@/lib/profiles.functions";
+import { PERMISSION_LABELS, PERMISSION_ORDER, EMPTY_PERMISSIONS, type PermissionKey } from "@/lib/usePermissions";
 import { listFolderAccess, setFolderAccess, listFolders, createFolder, renameFolder, deleteFolder } from "@/lib/folders.functions";
 import { listPresence } from "@/lib/presence.functions";
-import { ProfileBulkDialog } from "@/components/profile-bulk";
-import { toggleVisibleSelection } from "@/components/profile-model";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

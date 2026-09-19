@@ -23,7 +23,7 @@ import { ProfileBulkDialog, type BulkAction } from "@/components/profile-bulk";
 import { ProfileProxyCell, useProxyOps } from "@/components/profile-proxy";
 import { ColumnSettings, InlineText, MetadataManager, NotesCell, ResizableHead, StatusCell, useColumnWidths, type FixedColumn } from "@/components/profile-table-tools";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { createProfileField, createProfileStatus, listProfileMetadata } from "@/lib/profile-metadata.functions";
+import { createProfileField, createProfileStatus, deleteProfileStatus, listProfileMetadata, updateProfileStatus } from "@/lib/profile-metadata.functions";
 import { fingerprintError, profileFingerprintPayload, splitTags, toggleVisibleSelection } from "@/components/profile-model";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

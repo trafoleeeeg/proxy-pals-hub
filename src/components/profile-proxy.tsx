@@ -35,6 +35,7 @@ export function useProxyOps(teamId: string | undefined) {
   const record = useServerFn(recordProxyCheck);
   const rotate = useServerFn(rotateProxyIp);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [completedRotations, setCompletedRotations] = useState<Record<string, { previousIp: string; newIp: string; changedAt: string }>>({});
   const invalidate = () => { void qc.invalidateQueries({ queryKey: ["proxies"] }); };
 
   const checkMut = useMutation({
@@ -66,6 +67,11 @@ export function useProxyOps(teamId: string | undefined) {
       const bridge = desktop();
       if (!teamId) throw new Error("Команда не загружена");
       if (!bridge?.checkProxy) throw new Error("Смена IP с проверкой доступна в приложении Umbra для Windows");
+      setCompletedRotations((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
       const target = await forCheck({ data: { id, teamId } });
       const probe = async () => {
         const response = await bridge.checkProxy!(target);
@@ -92,6 +98,12 @@ export function useProxyOps(teamId: string | undefined) {
       // сохранён, поэтому сразу завершаем плашку «меняем IP» в текущей панели.
       if (teamId && result.rotationConfirmed && result.ip) {
         const changedAt = new Date().toISOString();
+        const rows = qc.getQueryData<ProxyRow[]>(["proxies", teamId]);
+        const previousIp = rows?.find((proxy) => proxy.id === id)?.rotationPreviousIp;
+        if (previousIp) setCompletedRotations((current) => ({
+          ...current,
+          [id]: { previousIp, newIp: result.ip ?? previousIp, changedAt },
+        }));
         qc.setQueryData<ProxyRow[]>(["proxies", teamId], (rows) => rows?.map((proxy) => proxy.id === id ? {
           ...proxy,
           last_check_ok: true,
@@ -109,10 +121,12 @@ export function useProxyOps(teamId: string | undefined) {
       toast.info("IP обновлён. Смена уже завершена в другом окне");
     },
     onError: (error: Error) => toast.error(error.message),
-    onSettled: invalidate,
+    // После успеха кэш уже обновлён выше. Немедленная повторная загрузка могла
+    // вернуть запаздывающий статус «changing» и снова включить индикатор.
+    onSettled: (_result, error) => { if (error) invalidate(); },
   });
 
-  return { checkMut, rotateMut, errors, busy: checkMut.isPending || rotateMut.isPending };
+  return { checkMut, rotateMut, errors, completedRotations, busy: checkMut.isPending || rotateMut.isPending };
 }
 
 type Ops = ReturnType<typeof useProxyOps>;
@@ -120,16 +134,20 @@ type Ops = ReturnType<typeof useProxyOps>;
 /** Блок прокси в строке профиля: адрес, проверка, смена IP и история «был → стал». */
 export function ProfileProxyCell({ proxy, ops, compact = false }: { proxy: ProxyRow | undefined; ops: Ops; compact?: boolean }) {
   if (!proxy) return <span className="text-xs text-muted-foreground">Без прокси</span>;
+  const completed = ops.completedRotations[proxy.id];
   const checking = ops.checkMut.isPending && ops.checkMut.variables === proxy.id;
-  const rotating = (ops.rotateMut.isPending && ops.rotateMut.variables === proxy.id) || proxy.rotationStatus === "changing";
+  const rotating = !completed && ((ops.rotateMut.isPending && ops.rotateMut.variables === proxy.id) || proxy.rotationStatus === "changing");
   const error = ops.errors[proxy.id] ?? proxy.last_check_error;
-  const dot = checking || rotating ? "bg-primary animate-pulse" : proxy.last_check_ok === true ? "bg-success" : proxy.last_check_ok === false || error ? "bg-destructive" : "bg-primary";
+  const shownIp = completed?.newIp ?? proxy.last_check_ip;
+  const previousIp = completed?.previousIp ?? proxy.rotationPreviousIp;
+  const newIp = completed?.newIp ?? proxy.rotationNewIp;
+  const dot = checking || rotating ? "bg-primary animate-pulse" : completed || proxy.last_check_ok === true ? "bg-success" : proxy.last_check_ok === false || error ? "bg-destructive" : "bg-primary";
   const hint = [
     `${proxy.label} · ${proxy.protocol.toUpperCase()}${proxy.country ? " · " + proxy.country : ""}`,
     proxyAddress(proxy.host, proxy.port),
-    proxy.last_check_ip ? `IP ${proxy.last_check_ip}${proxy.last_check_latency_ms != null ? ` · ${proxy.last_check_latency_ms} мс` : ""}` : "IP не проверялся",
+    shownIp ? `IP ${shownIp}${proxy.last_check_latency_ms != null ? ` · ${proxy.last_check_latency_ms} мс` : ""}` : "IP не проверялся",
     proxy.last_checked_at ? `проверено ${relativeTime(proxy.last_checked_at)}` : "",
-    proxy.rotationPreviousIp ? `был ${proxy.rotationPreviousIp}${proxy.rotationNewIp ? " → стал " + proxy.rotationNewIp : ""}` : "",
+    previousIp ? `был ${previousIp}${newIp ? " → стал " + newIp : ""}` : "",
     proxy.rotationChangedAt ? `смена IP ${relativeTime(proxy.rotationChangedAt)}` : "",
     rotating ? "меняем IP, ждём подтверждения" : "",
     error ?? "",
@@ -140,7 +158,7 @@ export function ProfileProxyCell({ proxy, ops, compact = false }: { proxy: Proxy
       <span className={`size-2 shrink-0 rounded-full ${dot}`} aria-hidden />
       <span className="min-w-0 flex-1 truncate">
         <span className="font-medium">{proxy.label}</span>
-        <span className="mono ml-1 text-muted-foreground">{proxy.last_check_ip ?? proxyAddress(proxy.host, proxy.port)}</span>
+        <span className="mono ml-1 text-muted-foreground">{shownIp ?? proxyAddress(proxy.host, proxy.port)}</span>
       </span>
       <Button variant="ghost" size="icon" className="size-6 shrink-0" title="Проверить соединение" aria-label={"Проверить прокси " + proxy.label}
         disabled={ops.busy} onClick={() => ops.checkMut.mutate(proxy.id)}>
@@ -156,8 +174,8 @@ export function ProfileProxyCell({ proxy, ops, compact = false }: { proxy: Proxy
         ? proxy.rotationNewIp
           ? <>новый IP <span className="text-foreground/70">{proxy.rotationNewIp}</span>, подтверждаю…</>
           : <>меняем IP{proxy.rotationPreviousIp ? <> · был <span className="text-foreground/70">{proxy.rotationPreviousIp}</span></> : ""}…</>
-        : proxy.rotationPreviousIp
-        ? <>был <span className="text-foreground/70">{proxy.rotationPreviousIp}</span> → стал <span className="text-success">{proxy.rotationNewIp ?? proxy.last_check_ip ?? "—"}</span></>
+        : previousIp
+        ? <>был <span className="text-foreground/70">{previousIp}</span> → стал <span className="text-success">{newIp ?? shownIp ?? "—"}</span></>
         : "смены IP не было"}
     </div>
   </div>;

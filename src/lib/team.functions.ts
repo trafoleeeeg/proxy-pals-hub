@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { acceptInviteSchema, inviteIdSchema, inviteSchema, employeeSchema, memberSchema, teamSchema, workspaceSchema } from "./server-validation";
+import { acceptInviteSchema, inviteIdSchema, inviteSchema, employeeSchema, memberSchema, teamSchema, updateEmployeeSchema, workspaceSchema } from "./server-validation";
 import { callServerRpc, isSuperadmin, memberPermissions, requireTeamManager, PERMISSION_KEYS, type Permission, type PermissionMap, type ServerContext, type TeamScope } from "./server-db";
 import { z } from "zod";
 
@@ -233,4 +233,68 @@ export const createEmployee = createServerFn({ method: "POST" })
       target_type: "user", target_id: userId,
     });
     return { userId, email: data.email };
+  });
+
+async function requireManagedEmployee(context: ServerContext, teamId: string, userId: string) {
+  if (!(await isSuperadmin(context))) throw new Error("Доступ только для владельца Umbra");
+  if (userId === context.userId) throw new Error("Учётную запись владельца изменить нельзя");
+  const { data, error } = await context.supabase.from("team_members")
+    .select("user_id, role").eq("team_id", teamId).eq("user_id", userId).maybeSingle();
+  if (error || !data || data.role === "owner") throw new Error("Сотрудник не найден");
+}
+
+export const updateEmployee = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth]).inputValidator(updateEmployeeSchema)
+  .handler(async ({ data, context }) => {
+    await requireManagedEmployee(context, data.teamId, data.userId);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const authUpdate: { email: string; password?: string; user_metadata: { display_name: string } } = {
+      email: data.email,
+      user_metadata: { display_name: data.displayName },
+      ...(data.password ? { password: data.password } : {}),
+    };
+    const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(data.userId, authUpdate);
+    if (authError) throw new Error(/already/i.test(authError.message) ? "Такая почта уже зарегистрирована" : "Не удалось изменить учётную запись");
+    const { error: profileError } = await supabaseAdmin.from("profiles").upsert({
+      id: data.userId, email: data.email, display_name: data.displayName,
+    });
+    if (profileError) throw new Error("Данные входа изменены, но имя не удалось обновить");
+    await context.supabase.from("audit_log").insert({
+      team_id: data.teamId, user_id: context.userId, action: "employee.updated",
+      target_type: "user", target_id: data.userId,
+    });
+    return { ok: true };
+  });
+
+export const revokeEmployeeAccess = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth]).inputValidator(memberSchema)
+  .handler(async ({ data, context }) => {
+    await requireManagedEmployee(context, data.teamId, data.userId);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const results = await Promise.all([
+      supabaseAdmin.from("member_permissions").delete().eq("team_id", data.teamId).eq("user_id", data.userId),
+      supabaseAdmin.from("folder_access").delete().eq("team_id", data.teamId).eq("user_id", data.userId),
+      supabaseAdmin.from("profile_access").delete().eq("user_id", data.userId),
+      supabaseAdmin.from("team_members").update({ scope: "member" }).eq("team_id", data.teamId).eq("user_id", data.userId),
+    ]);
+    if (results.some((result) => result.error)) throw new Error("Не удалось полностью забрать доступы");
+    await context.supabase.from("audit_log").insert({
+      team_id: data.teamId, user_id: context.userId, action: "employee.access_revoked",
+      target_type: "user", target_id: data.userId,
+    });
+    return { ok: true };
+  });
+
+export const deleteEmployeeAccount = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth]).inputValidator(memberSchema)
+  .handler(async ({ data, context }) => {
+    await requireManagedEmployee(context, data.teamId, data.userId);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { error } = await supabaseAdmin.auth.admin.deleteUser(data.userId);
+    if (error) throw new Error("Не удалось удалить учётную запись сотрудника");
+    await context.supabase.from("audit_log").insert({
+      team_id: data.teamId, user_id: context.userId, action: "employee.deleted",
+      target_type: "user", target_id: data.userId,
+    });
+    return { ok: true };
   });

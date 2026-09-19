@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
-import { UserPlus, Trash2 } from "lucide-react";
+import { Pencil, ShieldOff, UserPlus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "@/lib/useWorkspace";
 import {
@@ -15,6 +15,9 @@ import {
   setMemberPermissions,
   setMemberScope,
   createEmployee,
+  updateEmployee,
+  revokeEmployeeAccess,
+  deleteEmployeeAccount,
 } from "@/lib/team.functions";
 import { PERMISSION_LABELS, PERMISSION_ORDER, EMPTY_PERMISSIONS, type PermissionKey } from "@/lib/usePermissions";
 import { listFolderAccess, setFolderAccess, listFolders, createFolder, renameFolder, deleteFolder } from "@/lib/folders.functions";
@@ -52,10 +55,14 @@ export function TeamPage() {
   const deleteFolderFn = useServerFn(deleteFolder);
   const presenceFn = useServerFn(listPresence);
   const createEmployeeFn = useServerFn(createEmployee);
+  const updateEmployeeFn = useServerFn(updateEmployee);
+  const revokeEmployeeAccessFn = useServerFn(revokeEmployeeAccess);
+  const deleteEmployeeAccountFn = useServerFn(deleteEmployeeAccount);
   const [newFolder, setNewFolder] = useState("");
   const [employee, setEmployee] = useState({ email: "", password: "", displayName: "" });
   const [email, setEmail] = useState("");
   const [removing, setRemoving] = useState<{ userId: string; email: string } | null>(null);
+  const [editing, setEditing] = useState<{ userId: string; email: string; displayName: string; password: string } | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => { setRemoving(null); }, [ws?.teamId]);
 
@@ -164,6 +171,24 @@ export function TeamPage() {
     onError: (error: Error) => toast.error(error.message || "Не удалось создать учётную запись"),
   });
 
+  const updateEmployeeMut = useMutation({
+    mutationFn: () => updateEmployeeFn({ data: {
+      teamId: ws!.teamId,
+      userId: editing!.userId,
+      email: loginToEmail(editing!.email),
+      displayName: editing!.displayName.trim(),
+      ...(editing!.password ? { password: editing!.password } : {}),
+    } }),
+    onSuccess: async () => { setEditing(null); toast.success("Данные сотрудника изменены"); await refresh(); },
+    onError: (error: Error) => toast.error(error.message || "Не удалось изменить учётную запись"),
+  });
+
+  const revokeAccessMut = useMutation({
+    mutationFn: (userId: string) => revokeEmployeeAccessFn({ data: { teamId: ws!.teamId, userId } }),
+    onSuccess: async () => { toast.success("Все доступы сотрудника отозваны"); await refresh(); },
+    onError: (error: Error) => toast.error(error.message || "Не удалось забрать доступы"),
+  });
+
   const rightsMut = useMutation({
     mutationFn: (v: { userId: string; permissions: Record<PermissionKey, boolean> }) =>
       permissionsSaveFn({ data: { teamId: ws!.teamId, userId: v.userId, permissions: v.permissions } }),
@@ -174,7 +199,11 @@ export function TeamPage() {
   async function removeSelectedMember() {
     if (!removing || !ws || busy) return;
     setBusy(true);
-    try { await kick({ data: { teamId: ws.teamId, userId: removing.userId } }); setRemoving(null); await refresh(); }
+    try {
+      if (ws.isSuperadmin) await deleteEmployeeAccountFn({ data: { teamId: ws.teamId, userId: removing.userId } });
+      else await kick({ data: { teamId: ws.teamId, userId: removing.userId } });
+      setRemoving(null); await refresh();
+    }
     catch { toast.error("Не удалось удалить сотрудника. Проверьте подключение и права владельца."); }
     finally { setBusy(false); }
   }
@@ -288,14 +317,11 @@ export function TeamPage() {
                     </TableCell>
                     <TableCell className="text-right">
                       {m.role === "member" && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={busy}
-                          onClick={() => setRemoving({ userId: m.userId, email: m.email })}
-                        >
-                          <Trash2 className="size-4" /> Убрать
-                        </Button>
+                        <div className="flex justify-end gap-1">
+                          {ws?.isSuperadmin && <Button variant="ghost" size="icon" title="Изменить сотрудника" aria-label={`Изменить ${m.email}`} onClick={() => setEditing({ userId: m.userId, email: m.email, displayName: m.name, password: "" })}><Pencil className="size-4" /></Button>}
+                          <Button variant="ghost" size="icon" title="Забрать все доступы" aria-label={`Забрать все доступы у ${m.email}`} disabled={revokeAccessMut.isPending} onClick={() => revokeAccessMut.mutate(m.userId)}><ShieldOff className="size-4" /></Button>
+                          <Button variant="ghost" size="icon" title="Удалить учётную запись" aria-label={`Удалить ${m.email}`} disabled={busy} onClick={() => setRemoving({ userId: m.userId, email: m.email })}><Trash2 className="size-4" /></Button>
+                        </div>
                       )}
                     </TableCell>
                   </TableRow>
@@ -550,7 +576,18 @@ export function TeamPage() {
           </div>
         </TabsContent>
       </Tabs>
-      <Dialog open={!!removing} onOpenChange={(open) => { if (!open && !busy) setRemoving(null); }}><DialogContent role="alertdialog" className="w-[calc(100%-2rem)]"><DialogHeader><DialogTitle>Удалить сотрудника?</DialogTitle><DialogDescription className="break-words">{removing?.email} потеряет доступ к профилям команды.</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" disabled={busy} onClick={() => setRemoving(null)}>Отмена</Button><Button variant="destructive" disabled={busy} onClick={removeSelectedMember}>{busy ? "Удаление…" : "Удалить сотрудника"}</Button></DialogFooter></DialogContent></Dialog>
+      <Dialog open={!!editing} onOpenChange={(open) => { if (!open && !updateEmployeeMut.isPending) setEditing(null); }}>
+        <DialogContent className="w-[calc(100%-2rem)]">
+          <DialogHeader><DialogTitle>Изменить сотрудника</DialogTitle><DialogDescription>Можно изменить логин, имя и установить новый пароль.</DialogDescription></DialogHeader>
+          {editing && <div className="space-y-3">
+            <Input aria-label="Новый логин или почта сотрудника" value={editing.email} onChange={(e) => setEditing({ ...editing, email: e.target.value })} />
+            <Input aria-label="Новое имя сотрудника" placeholder="Имя" value={editing.displayName} onChange={(e) => setEditing({ ...editing, displayName: e.target.value })} />
+            <Input aria-label="Новый пароль сотрудника" type="password" placeholder="Новый пароль (необязательно)" value={editing.password} onChange={(e) => setEditing({ ...editing, password: e.target.value })} />
+          </div>}
+          <DialogFooter><Button variant="outline" disabled={updateEmployeeMut.isPending} onClick={() => setEditing(null)}>Отмена</Button><Button disabled={!editing?.email.trim() || (!!editing?.password && editing.password.length < 8) || updateEmployeeMut.isPending} onClick={() => updateEmployeeMut.mutate()}>{updateEmployeeMut.isPending ? "Сохранение…" : "Сохранить"}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={!!removing} onOpenChange={(open) => { if (!open && !busy) setRemoving(null); }}><DialogContent role="alertdialog" className="w-[calc(100%-2rem)]"><DialogHeader><DialogTitle>Удалить учётную запись?</DialogTitle><DialogDescription className="break-words">{removing?.email} больше не сможет войти в Umbra. Это действие необратимо.</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" disabled={busy} onClick={() => setRemoving(null)}>Отмена</Button><Button variant="destructive" disabled={busy} onClick={removeSelectedMember}>{busy ? "Удаление…" : "Удалить учётную запись"}</Button></DialogFooter></DialogContent></Dialog>
     </div>
   );
 }

@@ -229,6 +229,56 @@ export type Database = {
           },
         ]
       }
+      member_permissions: {
+        Row: {
+          can_change_profile_proxy: boolean
+          can_create_profile: boolean
+          can_delete_profile: boolean
+          can_edit_profile: boolean
+          can_manage_bookmarks: boolean
+          can_manage_folders: boolean
+          can_manage_proxies: boolean
+          team_id: string
+          updated_at: string
+          updated_by: string | null
+          user_id: string
+        }
+        Insert: {
+          can_change_profile_proxy?: boolean
+          can_create_profile?: boolean
+          can_delete_profile?: boolean
+          can_edit_profile?: boolean
+          can_manage_bookmarks?: boolean
+          can_manage_folders?: boolean
+          can_manage_proxies?: boolean
+          team_id: string
+          updated_at?: string
+          updated_by?: string | null
+          user_id: string
+        }
+        Update: {
+          can_change_profile_proxy?: boolean
+          can_create_profile?: boolean
+          can_delete_profile?: boolean
+          can_edit_profile?: boolean
+          can_manage_bookmarks?: boolean
+          can_manage_folders?: boolean
+          can_manage_proxies?: boolean
+          team_id?: string
+          updated_at?: string
+          updated_by?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "member_permissions_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profile_access: {
         Row: {
           created_at: string
@@ -894,6 +944,20 @@ export type Database = {
         Args: {
           _folder: string
           _granted: boolean
+          _team_id: string
+          _user_id: string
+        }
+        Returns: boolean
+      }
+      set_member_permissions: {
+        Args: {
+          _bookmarks: boolean
+          _create: boolean
+          _delete: boolean
+          _edit: boolean
+          _folders: boolean
+          _proxies: boolean
+          _proxy: boolean
           _team_id: string
           _user_id: string
         }

@@ -55,11 +55,9 @@ export function TeamPage() {
   const [newFolder, setNewFolder] = useState("");
   const [employee, setEmployee] = useState({ email: "", password: "", displayName: "" });
   const [email, setEmail] = useState("");
-  const [selected, setSelected] = useState<string[]>([]);
-  const [bulkAccess, setBulkAccess] = useState<string[] | null>(null);
   const [removing, setRemoving] = useState<{ userId: string; email: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { setSelected([]); setBulkAccess(null); setRemoving(null); }, [ws?.teamId]);
+  useEffect(() => { setRemoving(null); }, [ws?.teamId]);
 
   const isOwner = ws?.role === "owner";
   const canManage = !!ws?.canManage;
@@ -550,7 +548,6 @@ export function TeamPage() {
           </div>
         </TabsContent>
       </Tabs>
-      {bulkAccess && ws && <ProfileBulkDialog action="access" ids={bulkAccess} teamId={ws.teamId} isOwner={isOwner} blocked={false} proxies={[]} onClose={() => setBulkAccess(null)} onSaved={() => { setSelected([]); void refresh(); }} />}
       <Dialog open={!!removing} onOpenChange={(open) => { if (!open && !busy) setRemoving(null); }}><DialogContent role="alertdialog" className="w-[calc(100%-2rem)]"><DialogHeader><DialogTitle>Удалить сотрудника?</DialogTitle><DialogDescription className="break-words">{removing?.email} потеряет доступ к профилям команды.</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" disabled={busy} onClick={() => setRemoving(null)}>Отмена</Button><Button variant="destructive" disabled={busy} onClick={removeSelectedMember}>{busy ? "Удаление…" : "Удалить сотрудника"}</Button></DialogFooter></DialogContent></Dialog>
     </div>
   );

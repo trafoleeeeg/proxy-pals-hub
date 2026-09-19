@@ -13,7 +13,7 @@ export function rotationOutcome(previousIp: string | null, result: ProxyCheckRes
 }
 
 export async function confirmRotation({
-  previousIp, probe, record, wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), attempts = 16,
+  previousIp, probe, record, wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), attempts = 24,
 }: {
   previousIp: string;
   probe: () => Promise<ProxyCheckResult>;
@@ -24,9 +24,11 @@ export async function confirmRotation({
   // Mobile providers can expose one or more short-lived exit addresses while
   // the modem reconnects. Do not publish the first different IP as final:
   // require the same new address in two consecutive fresh connections.
+  // Проверяем часто, чтобы подтверждение нового IP занимало секунды, а не минуту.
   let candidateIp: string | null = null;
   for (let attempt = 0; attempt < attempts; attempt++) {
-    await wait(attempt === 0 ? 1500 : 3000);
+    // Короткие паузы: подтверждение занимает секунды, а не минуту.
+    await wait(attempt === 0 ? 300 : 700);
     const result = await probe();
     const final = attempt === attempts - 1;
     const changedIp = result.ok && result.ip && result.ip !== previousIp ? result.ip : null;

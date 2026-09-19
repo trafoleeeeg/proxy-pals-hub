@@ -97,6 +97,21 @@ test("host-only and session attributes survive restore, expiration is omitted", 
   assert.equal(ses.writes[1].domain, ".example.test");
 });
 
+test("one Chromium-incompatible cookie does not block the whole profile", async () => {
+  const ses = session();
+  const originalSet = ses.cookies.set;
+  ses.cookies.set = async (details) => {
+    if (details.name === "obsolete") throw new Error("Failed to set cookie");
+    return originalSet(details);
+  };
+  const result = await restoreCookies(ses, [
+    { ...cookie("old"), name: "obsolete" },
+    { ...cookie("working"), name: "working" },
+  ]);
+  assert.deepEqual(result, { restored: 1, skipped: 1 });
+  assert.equal((await ses.cookies.get({}))[0].name, "working");
+});
+
 test("encryption unavailable/basic_text fails closed", async () => {
   for (const safeStorage of [{ isEncryptionAvailable: () => false }, { isEncryptionAvailable: () => true, getSelectedStorageBackend: () => "basic_text" }]) {
     const store = createCookieStore({ safeStorage, userData: os.tmpdir() });

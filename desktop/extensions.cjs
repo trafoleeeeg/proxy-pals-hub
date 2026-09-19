@@ -64,6 +64,11 @@ function createExtensionStore(getUserData, deps = {}) {
         if (manifest && typeof manifest.name === "string" && typeof manifest.version === "string") {
           const item = { id: entry.id, name: manifest.name, version: manifest.version };
           if (entry.pinned) item.pinned = true;
+          // Собственное окно расширения (popup) — как в Chrome по клику на значок.
+          const popup = manifest.action?.default_popup || manifest.browser_action?.default_popup;
+          if (typeof popup === "string" && popup && !path.isAbsolute(popup) && !popup.split(/[\\/]/).includes("..") && !/^[a-z][a-z\d+.-]*:/i.test(popup)) {
+            item.popup = popup.replace(/^\/+/, "");
+          }
           const icons = manifest.icons && typeof manifest.icons === "object" ? Object.values(manifest.icons) : [];
           const icon = icons.map(String).at(-1);
           if (icon && !path.isAbsolute(icon) && !icon.split(/[\\/]/).includes("..")) {

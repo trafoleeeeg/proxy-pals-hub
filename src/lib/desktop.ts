@@ -95,9 +95,26 @@ export function desktop(): UmbraBridge | null {
 
 type SessionKey = { profileId: string; lockToken: string; deviceId?: string };
 type TerminalClose = "access_revoked" | "lease_lost";
+const DESKTOP_OPERATION_TIMEOUT_MS = 15_000;
+async function withDesktopTimeout<T>(operation: Promise<T>, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), DESKTOP_OPERATION_TIMEOUT_MS);
+  });
+  try { return await Promise.race([operation, timeout]); }
+  finally { if (timer) clearTimeout(timer); }
+}
 function terminalClose(response: unknown): TerminalClose | null {
   if (!response || typeof response !== "object" || !("ok" in response) || response.ok !== false || !("terminal" in response)) return null;
   return response.terminal === "access_revoked" || response.terminal === "lease_lost" ? response.terminal : null;
+}
+function safeLaunchError(error: unknown): string {
+  const message = error instanceof Error ? error.message.trim() : "";
+  // The desktop process translates expected launch failures. Do not surface
+  // arbitrary library text because it can contain proxy credentials or URLs.
+  return message && message.length <= 300 && /[А-Яа-яЁё]/.test(message)
+    ? message
+    : "Не удалось запустить профиль. Проверьте доступ, блокировку и параметры подключения.";
 }
 export type ProfileSessionApi = {
   launch: (profileId: string, device: string) => Promise<LaunchPayload>;
@@ -182,8 +199,12 @@ export class DesktopProfileLifecycle {
     this.emit();
     const job = (async () => {
       try {
-        await this.loadOutbox();
-        const result = await this.bridge.listRunningProfiles();
+        const outbox = await withDesktopTimeout(this.bridge.pendingProfileClosures(), "Очередь сохранения не ответила вовремя");
+        if (!outbox.ok) throw new Error("Не удалось прочитать ожидающие сессии.");
+        // Mark only affected profiles as unavailable immediately. Uploading
+        // their durable snapshots continues in sync() and must not hold the UI.
+        this.outboxFailures = new Set(outbox.profiles.map((profile) => profile.profileId));
+        const result = await withDesktopTimeout(this.bridge.listRunningProfiles(), "Приложение не ответило вовремя");
         if (!result.ok) throw new Error();
         for (const profile of result.profiles) {
           if (!this.jobs.has(profile.profileId) && (!profile.lockToken || !this.closedTokens.has(profile.lockToken))) this.sessions.set(profile.profileId, profile);
@@ -211,16 +232,16 @@ export class DesktopProfileLifecycle {
       let payload: LaunchPayload | undefined;
       try {
         payload = await this.api.launch(profileId, this.bridge.platform);
-        if (!payload.lockToken) throw new Error();
+        if (!payload.lockToken) throw new Error("Сервер не выдал токен сессии профиля.");
         this.sessions.set(profileId, {
           profileId, name: payload.name, lockToken: payload.lockToken, cookiesUpdatedAt: payload.cookiesUpdatedAt,
           ...(payload.deviceId ? { deviceId: payload.deviceId } : {}),
         });
         const result = await this.bridge.launchProfile(payload);
-        if (!result.ok) throw new Error();
+        if (!result.ok) throw new Error(result.error || "Приложение не смогло открыть окно профиля.");
         delete this.errors[profileId];
         delete this.notices[profileId];
-      } catch {
+      } catch (error) {
         this.sessions.delete(profileId);
         if (payload?.lockToken) {
           this.pending.set(payload.lockToken, { profileId, lockToken: payload.lockToken, ...(payload.deviceId ? { deviceId: payload.deviceId } : {}) });
@@ -228,7 +249,7 @@ export class DesktopProfileLifecycle {
         }
         this.errors[profileId] = payload && this.pending.has(payload.lockToken)
           ? "Запуск не выполнен. Снятие блокировки ожидает связи с сервером."
-          : "Не удалось запустить профиль. Проверьте доступ, блокировку и параметры подключения.";
+          : safeLaunchError(error);
         throw new Error(this.errors[profileId]);
       }
     });

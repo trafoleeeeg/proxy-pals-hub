@@ -7,6 +7,31 @@ const { createBookmarkStore, defaultBookmarks, sanitizeBookmarks } = require("./
 const { normalizeFingerprint, applyFingerprint } = require("./fingerprint.cjs");
 const { sanitizeBrowserSettings } = require("./browser-settings.cjs");
 const { SAFE_WEBRTC } = require("./leak-check.cjs");
+const { createFaviconLoader } = require("./favicons.cjs");
+
+// Сообщения об ошибках запуска показываются пользователю, поэтому они переводятся
+// на русский язык на границе клиента, без утечки URL и значений cookies.
+const LAUNCH_ERROR_TEXT = [
+  [/^Unable to (?:restore|read encrypted|decrypt) cookie/i, "Не удалось восстановить cookies профиля"],
+  [/^Unable to save encrypted/i, "Не удалось сохранить cookies профиля"],
+  [/^Unable to flush encrypted/i, "Не удалось сохранить cookies профиля"],
+  [/^Unable to apply fingerprint/i, "Не удалось применить отпечаток браузера"],
+  [/^OS cookie encryption/i, "Шифрование Windows недоступно, профиль не запущен"],
+  [/^Proxy setup/i, "Не удалось поднять прокси, трафик заблокирован"],
+  [/^Profile is closing/i, "Профиль закрывается, повторите запуск"],
+  [/^Profile navigation/i, "Не удалось открыть стартовую страницу профиля"],
+  [/^Only HTTP/i, "Допустимы только адреса http(s) без логина и пароля"],
+  [/^Invalid cookie/i, "Сохранённые cookies повреждены"],
+  [/^Invalid fingerprint|^Invalid user agent/i, "Некорректные настройки отпечатка профиля"],
+  [/^Invalid proxy|^Unsupported proxy|^SOCKS5/i, "Некорректные параметры прокси"],
+  [/^Invalid start URL/i, "Некорректный стартовый адрес"],
+  [/^Invalid/i, "Некорректные данные профиля"],
+];
+
+function launchErrorText(message) {
+  for (const [pattern, text] of LAUNCH_ERROR_TEXT) if (pattern.test(message || "")) return text;
+  return "Не удалось запустить профиль";
+}
 
 function createProfileRuntime(electron, options = {}) {
   const { session, app, safeStorage } = electron;
@@ -22,6 +47,7 @@ function createProfileRuntime(electron, options = {}) {
   const tabStore = () => tabStoreRef ||= options.tabStore || createTabStore({ safeStorage, userData: app.getPath("userData") });
   const bookmarkStore = () => bookmarkStoreRef ||= options.bookmarkStore || createBookmarkStore({ safeStorage, userData: app.getPath("userData") });
   const extensionStore = options.extensionStore;
+  const favicons = options.faviconLoader || (electron.net ? createFaviconLoader({ net: electron.net }) : null);
 
   function status(entry) {
     return {
@@ -320,6 +346,7 @@ function createProfileRuntime(electron, options = {}) {
       const state = await bookmarkStore().write(entry.profileId, { bookmarks: list, barVisible: entry.bookmarkBarVisible !== false });
       entry.bookmarks = state.bookmarks;
       notifyBrowserSettings(entry);
+      loadBookmarkIcons(entry);
       return entry.bookmarks;
     }).catch(() => { entry.lastError = "Bookmark save failed"; return entry.bookmarks || []; });
     return entry.bookmarkQueue;
@@ -328,7 +355,20 @@ function createProfileRuntime(electron, options = {}) {
   function allBookmarks(entry) {
     const presets = (entry.presetBookmarks || []).map((item) => ({ ...item, managed: true }));
     const presetUrls = new Set(presets.map((item) => item.url));
-    return [...presets, ...(entry.bookmarks || []).filter((item) => !presetUrls.has(item.url))];
+    const list = [...presets, ...(entry.bookmarks || []).filter((item) => !presetUrls.has(item.url))];
+    if (!favicons) return list;
+    return list.map((item) => item.favicon ? item : { ...item, favicon: favicons.get(item.url) || "" });
+  }
+
+  // Подгружаем настоящие значки сайтов для закладок без картинки — через
+  // сессию профиля, то есть через его прокси.
+  function loadBookmarkIcons(entry) {
+    if (!favicons || !entry.ses || entry.iconJob) return;
+    const missing = allBookmarks(entry).filter((item) => !item.favicon).map((item) => item.url);
+    if (!missing.length) return;
+    entry.iconJob = favicons.load(entry.ses, missing, () => entry.browser?.publish?.())
+      .catch(() => {})
+      .finally(() => { entry.iconJob = null; entry.browser?.publish?.(); });
   }
 
   function browserSettings(entry) {
@@ -348,7 +388,11 @@ function createProfileRuntime(electron, options = {}) {
     const all = await extensionStore.list().catch(() => []);
     entry.extensionList = all
       .filter((item) => !entry.extensionsLoaded || entry.extensionsLoaded.has(item.id))
-      .map((item) => ({ id: item.id, name: item.name, version: item.version, enabled: item.enabled !== false, icon: item.icon || "", pinned: item.pinned === true, ...(item.url ? { url: item.url } : {}) }));
+      .map((item) => ({
+        id: item.id, name: item.name, version: item.version, enabled: item.enabled !== false, icon: item.icon || "",
+        pinned: item.pinned === true, popup: item.popup || "", runtimeId: entry.extensionsLoaded?.get(item.id) || "",
+        ...(item.url ? { url: item.url } : {}),
+      }));
   }
   function checkConnection(entry) {
     if (entry.checkJob) return entry.checkJob;
@@ -364,7 +408,9 @@ function createProfileRuntime(electron, options = {}) {
     return job;
   }
 
-  async function makeWindow(entry, url, primary = false, loadOptions = {}) {
+  // Новая вкладка открывается сразу: загрузка страницы продолжается в фоне и
+  // больше не задерживает очередь команд окна профиля.
+  async function makeWindow(entry, url, primary = false, loadOptions = {}, defer = !primary) {
     if (entry.closingRequested) throw new Error("Профиль закрывается");
     entry.browserPromise ||= createBrowser(electron, browserOptions(entry));
     entry.browser = await entry.browserPromise;
@@ -417,18 +463,21 @@ function createProfileRuntime(electron, options = {}) {
       entry.fingerprintDiagnostics = await configureFingerprint(win.webContents, entry.fp);
       win.webContents.debugger.on("detach", () => {
         if (entry.closingRequested || win.closing || win.isDestroyed()) return;
-        entry.lastError = "Fingerprint debugger detached; profile stopped";
+        entry.lastError = "Отпечаток браузера отключился, профиль остановлен";
         blockSession(entry.ses);
         closeProfileWindow(entry.profileId).catch(() => {});
       });
       if (entry.closingRequested) throw new Error("Profile is closing");
       if (options.show !== false) win.show();
-      if (url !== "about:blank") await navigate(win, url, loadOptions);
+      if (url !== "about:blank") {
+        if (defer) void navigate(win, url, loadOptions).catch(() => { entry.lastError = "Не удалось открыть страницу"; });
+        else await navigate(win, url, loadOptions);
+      }
       if (entry.closingRequested) throw new Error("Profile is closing");
       if (options.show !== false) win.show();
       return win;
     } catch (error) {
-      if (!primary) entry.lastError = /^(Profile navigation failed|Unable to apply fingerprint before navigation)/.test(error.message) ? error.message : "Tab launch failed";
+      if (!primary) entry.lastError = launchErrorText(error.message);
       if (!win.isDestroyed()) win.destroy();
       throw error;
     }
@@ -533,6 +582,7 @@ function createProfileRuntime(electron, options = {}) {
         entry.browser?.publish?.();
         notifyBrowserSettings(entry);
         void checkConnection(entry);
+        loadBookmarkIcons(entry);
         return status(entry);
       } catch (error) {
         entry.state = "failed";
@@ -545,8 +595,7 @@ function createProfileRuntime(electron, options = {}) {
         if (entry.proxyRuntime) await entry.proxyRuntime.dispose().catch(() => {});
         if (!entry.closingRequested) profiles.delete(id);
         // Errors from Electron can include navigation URLs and cookie values.
-        const allowed = /^(Invalid|Only HTTP|Unable to (?:apply fingerprint|restore profile cookies|read encrypted|decrypt cookie|save encrypted)|OS cookie|Proxy setup|Profile (?:navigation|is closing))/;
-        throw new Error(allowed.test(error.message) ? error.message : "Profile launch failed");
+        throw new Error(launchErrorText(error.message));
       }
     });
     return entry.startPromise;
@@ -590,7 +639,7 @@ function createProfileRuntime(electron, options = {}) {
       return result;
     })().catch(() => {
       entry.state = "error";
-      entry.lastError = "Profile close failed; retry required";
+      entry.lastError = "Не удалось закрыть профиль, повторите попытку";
       entry.closePromise = null;
       throw new Error(entry.lastError);
     });

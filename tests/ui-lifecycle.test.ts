@@ -120,7 +120,7 @@ describe("desktop profile lifecycle", () => {
     const f = fixture(); f.state.outbox = [event("a")];
     const ack = f.bridge.acknowledgeProfileClosure;
     f.bridge.acknowledgeProfileClosure = async () => ({ ok: false });
-    await f.controller.restore();
+    await f.controller.restore(); await f.controller.sync();
     expect(f.state.closeCalls).toHaveLength(1); expect(f.state.outbox).toHaveLength(1);
     f.bridge.acknowledgeProfileClosure = ack;
     await f.controller.sync();
@@ -140,12 +140,12 @@ describe("desktop profile lifecycle", () => {
     };
     const ack = f.bridge.acknowledgeProfileClosure;
     f.bridge.acknowledgeProfileClosure = async () => ({ ok: false });
-    await f.controller.restore();
+    await f.controller.restore(); await f.controller.sync();
     expect(f.state.outbox).toHaveLength(1);
     expect(writes).toBe(1);
     f.bridge.acknowledgeProfileClosure = ack;
     const restarted = new DesktopProfileLifecycle(f.bridge, f.api);
-    await restarted.restore();
+    await restarted.restore(); await restarted.sync();
     expect(f.state.closeCalls).toHaveLength(2);
     expect(f.state.closeCalls[1]).toEqual(f.state.closeCalls[0]);
     expect(writes).toBe(1);
@@ -157,7 +157,7 @@ describe("desktop profile lifecycle", () => {
   test("terminal access revocation archives only the exact durable snapshot and allows sign-out", async () => {
     const f = fixture(); f.state.outbox = [event("a", "old-lease", "exact-snapshot")];
     f.api.close = async (data) => { f.state.closeCalls.push(data); return { ok: false, terminal: "access_revoked", cookiesUpdatedAt: null }; };
-    await f.controller.restore();
+    await f.controller.restore(); await f.controller.sync();
     expect(f.state.closeCalls).toEqual([{ profileId: "a", lockToken: "old-lease", cookies: "[]" }]);
     expect(f.state.archiveCalls).toEqual(["exact-snapshot"]);
     expect(f.state.ackCalls).toEqual([]);
@@ -190,11 +190,11 @@ describe("desktop profile lifecycle", () => {
     f.api.close = async (data) => { f.state.closeCalls.push(data); return { ok: false, terminal: "access_revoked", cookiesUpdatedAt: null }; };
     const archive = f.bridge.archiveProfileClosure;
     f.bridge.archiveProfileClosure = async () => ({ ok: false });
-    await f.controller.restore();
+    await f.controller.restore(); await f.controller.sync();
     expect(f.state.outbox).toHaveLength(1);
     f.bridge.archiveProfileClosure = archive;
     const restarted = new DesktopProfileLifecycle(f.bridge, f.api);
-    await restarted.restore();
+    await restarted.restore(); await restarted.sync();
     expect(f.state.closeCalls).toHaveLength(2);
     expect(f.state.closeCalls[1]).toEqual(f.state.closeCalls[0]);
     expect(f.state.archiveCalls).toEqual(["durable-id"]);
@@ -206,7 +206,7 @@ describe("desktop profile lifecycle", () => {
   test("transient server close failure never archives the snapshot", async () => {
     const f = fixture(); f.state.outbox = [event("a")];
     f.api.close = async (data) => { f.state.closeCalls.push(data); throw new Error("offline"); };
-    await f.controller.restore();
+    await f.controller.restore(); await f.controller.sync();
     expect(f.controller.getSnapshot().pending).toContain("a");
     expect(f.state.archiveCalls).toEqual([]);
     expect(f.state.ackCalls).toEqual([]);
@@ -216,7 +216,7 @@ describe("desktop profile lifecycle", () => {
   test("missing server close receipt cannot acknowledge or archive durable cookies", async () => {
     const f = fixture(); f.state.outbox = [event("a")];
     f.api.close = async (data) => { f.state.closeCalls.push(data); };
-    await f.controller.restore();
+    await f.controller.restore(); await f.controller.sync();
     expect(f.controller.getSnapshot().pending).toContain("a");
     expect(f.state.ackCalls).toEqual([]);
     expect(f.state.archiveCalls).toEqual([]);
@@ -225,7 +225,7 @@ describe("desktop profile lifecycle", () => {
 
   test("an empty native close reply cannot discard cookies from a prior window close", async () => {
     const f = fixture([{ profileId: "a", name: "A", lockToken: "lease-a" }]);
-    await f.controller.restore();
+    await f.controller.restore(); await f.controller.sync();
     f.state.running = [];
     f.state.outbox = [{ ...event("a"), cookies: '[{"name":"last","value":"cookie"}]' }];
     f.bridge.closeProfile = async () => ({ ok: true });
@@ -293,7 +293,7 @@ describe("desktop profile lifecycle", () => {
 
   test("outbox records without a token are archived locally and stop blocking the profile", async () => {
     const f = fixture(); f.state.outbox = [{ profileId: "a", cookies: "[]", snapshotId: "old-client" }];
-    await f.controller.restore();
+    await f.controller.restore(); await f.controller.sync();
     expect(f.state.closeCalls).toHaveLength(0); expect(f.state.ackCalls).toHaveLength(0);
     expect(f.state.archiveCalls).toContain("old-client");
     expect(Object.values(f.controller.getSnapshot().notices).join(" ")).toContain("архив");

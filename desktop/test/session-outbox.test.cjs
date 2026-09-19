@@ -46,3 +46,19 @@ test("terminal session archive atomically retires the active encrypted record an
   assert.throws(() => outbox.archive("23456789-1234-1234-1234-123456789012"), /not found/);
   assert.throws(() => outbox.archive("../outside"), /Invalid/);
 });
+test("one unreadable encrypted snapshot is quarantined without blocking valid sessions", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "umbra-outbox-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const protection = {
+    isEncryptionAvailable: () => true,
+    encryptString: (text) => Buffer.from(text),
+    decryptString: (bytes) => Buffer.from(bytes).toString(),
+  };
+  const outbox = createSessionOutbox(dir, protection);
+  const valid = outbox.enqueue({ profileId: "12345678-1234-1234-1234-123456789012", cookies: "valid" });
+  const damagedId = "23456789-1234-1234-1234-123456789012";
+  fs.writeFileSync(path.join(dir, damagedId + ".bin"), Buffer.from("not-json"));
+  assert.deepEqual(outbox.list().map((entry) => entry.snapshotId), [valid.snapshotId]);
+  assert.equal(fs.existsSync(path.join(dir, "unreadable", damagedId + ".bin")), true);
+  assert.equal(fs.existsSync(path.join(dir, damagedId + ".bin")), false);
+});

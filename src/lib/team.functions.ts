@@ -90,7 +90,8 @@ export const listMembers = createServerFn({ method: "POST" })
         role: superIds.has(member.user_id) ? "owner" as const : member.role,
         scope: superIds.has(member.user_id) ? "owner" as const
           : (member as { scope?: string }).scope === "manager" ? "manager" as const : "member" as const,
-        email: byId.get(member.user_id)?.email ?? "", name: byId.get(member.user_id)?.display_name ?? "",
+        email: byId.get(member.user_id)?.email ?? (superIds.has(member.user_id) ? "mafiatrafa@umbra.app" : ""),
+        name: byId.get(member.user_id)?.display_name ?? (superIds.has(member.user_id) ? "mafiatrafa" : ""),
         createdAt: member.created_at,
       })),
       invites: invites ?? [],

@@ -32,8 +32,9 @@ async function readWorkspaces(context: ServerContext): Promise<Workspace[]> {
     membershipError = null;
   }
   const scopeByTeam = new Map((memberships ?? []).map((row) => [row.team_id, (row as { scope?: string }).scope === "manager" ? "manager" : "member"] as const));
+  const superadmin = await isSuperadmin(context);
   return (teams ?? []).map((team) => {
-    const owner = team.owner_id === context.userId;
+    const owner = superadmin || team.owner_id === context.userId;
     const scope: TeamScope = owner ? "owner" : (scopeByTeam.get(team.id) ?? "member");
     return {
       teamId: team.id, teamName: team.name, role: owner ? "owner" as const : "member" as const,

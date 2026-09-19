@@ -86,8 +86,10 @@ export const listMembers = createServerFn({ method: "POST" })
     if (inviteError) throw new Error(inviteError.message);
     return {
       members: (members ?? []).map((member) => ({
-        id: member.id, userId: member.user_id, role: member.role,
-        scope: (member as { scope?: string }).scope === "manager" ? "manager" as const : "member" as const,
+        id: member.id, userId: member.user_id,
+        role: superIds.has(member.user_id) ? "owner" as const : member.role,
+        scope: superIds.has(member.user_id) ? "owner" as const
+          : (member as { scope?: string }).scope === "manager" ? "manager" as const : "member" as const,
         email: byId.get(member.user_id)?.email ?? "", name: byId.get(member.user_id)?.display_name ?? "",
         createdAt: member.created_at,
       })),

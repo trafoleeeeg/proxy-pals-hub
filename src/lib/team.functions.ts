@@ -12,6 +12,7 @@ export type Workspace = {
   canManage: boolean;
   userId: string;
   email: string;
+  isSuperadmin: boolean;
 };
 
 async function readWorkspaces(context: ServerContext): Promise<Workspace[]> {
@@ -38,7 +39,7 @@ async function readWorkspaces(context: ServerContext): Promise<Workspace[]> {
     const scope: TeamScope = owner ? "owner" : (scopeByTeam.get(team.id) ?? "member");
     return {
       teamId: team.id, teamName: team.name, role: owner ? "owner" as const : "member" as const,
-      scope, canManage: scope !== "member", userId: context.userId, email: me?.email ?? "",
+      scope, canManage: scope !== "member", userId: context.userId, email: me?.email ?? "", isSuperadmin: superadmin,
     };
   });
 }
@@ -90,7 +91,8 @@ export const listMembers = createServerFn({ method: "POST" })
         role: superIds.has(member.user_id) ? "owner" as const : member.role,
         scope: superIds.has(member.user_id) ? "owner" as const
           : (member as { scope?: string }).scope === "manager" ? "manager" as const : "member" as const,
-        email: byId.get(member.user_id)?.email ?? "", name: byId.get(member.user_id)?.display_name ?? "",
+        email: byId.get(member.user_id)?.email ?? (superIds.has(member.user_id) ? "mafiatrafa@umbra.app" : ""),
+        name: byId.get(member.user_id)?.display_name ?? (superIds.has(member.user_id) ? "mafiatrafa" : ""),
         createdAt: member.created_at,
       })),
       invites: invites ?? [],
@@ -203,6 +205,7 @@ export const listAudit = createServerFn({ method: "POST" })
 export const createEmployee = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth]).inputValidator(employeeSchema)
   .handler(async ({ data, context }) => {
+    if (!(await isSuperadmin(context))) throw new Error("Создавать учётные записи может только суперадминистратор");
     await requireTeamManager(context, data.teamId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const created = await supabaseAdmin.auth.admin.createUser({
@@ -221,7 +224,10 @@ export const createEmployee = createServerFn({ method: "POST" })
     });
     const { error } = await supabaseAdmin.from("team_members")
       .insert({ team_id: data.teamId, user_id: userId, role: "member", scope: "member" });
-    if (error) throw new Error("Учётная запись создана, но не удалось добавить её в команду");
+    if (error) {
+      await supabaseAdmin.auth.admin.deleteUser(userId);
+      throw new Error("Не удалось добавить учётную запись в команду");
+    }
     await context.supabase.from("audit_log").insert({
       team_id: data.teamId, user_id: context.userId, action: "employee.created",
       target_type: "user", target_id: userId,

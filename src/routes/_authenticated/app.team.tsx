@@ -480,18 +480,20 @@ export function TeamPage() {
         </TabsContent>
 
         <TabsContent value="staff" className="space-y-6">
-          <div className="rounded-lg border border-border bg-card p-4">
-            <h2 className="mb-3 text-sm font-semibold">Создать учётную запись сотрудника</h2>
-            <div className="flex flex-wrap gap-2">
-              <Input className="max-w-xs" type="text" placeholder="логин или почта" aria-label="Логин или почта сотрудника для учётной записи" value={employee.email} onChange={(e) => setEmployee((v) => ({ ...v, email: e.target.value }))} />
-              <Input className="max-w-xs" type="password" placeholder="пароль (от 8 символов)" aria-label="Пароль сотрудника" value={employee.password} onChange={(e) => setEmployee((v) => ({ ...v, password: e.target.value }))} />
-              <Input className="max-w-xs" placeholder="имя (необязательно)" aria-label="Имя сотрудника" value={employee.displayName} onChange={(e) => setEmployee((v) => ({ ...v, displayName: e.target.value }))} />
-              <Button onClick={() => employeeMut.mutate()} disabled={!employee.email.trim() || employee.password.length < 8 || employeeMut.isPending}>
-                <UserPlus className="size-4" /> Создать
-              </Button>
+          {ws?.isSuperadmin && (
+            <div className="rounded-lg border border-border bg-card p-4">
+              <h2 className="mb-3 text-sm font-semibold">Создать учётную запись сотрудника</h2>
+              <div className="flex flex-wrap gap-2">
+                <Input className="max-w-xs" type="text" placeholder="логин или почта" aria-label="Логин или почта сотрудника для учётной записи" value={employee.email} onChange={(e) => setEmployee((v) => ({ ...v, email: e.target.value }))} />
+                <Input className="max-w-xs" type="password" placeholder="пароль (от 8 символов)" aria-label="Пароль сотрудника" value={employee.password} onChange={(e) => setEmployee((v) => ({ ...v, password: e.target.value }))} />
+                <Input className="max-w-xs" placeholder="имя (необязательно)" aria-label="Имя сотрудника" value={employee.displayName} onChange={(e) => setEmployee((v) => ({ ...v, displayName: e.target.value }))} />
+                <Button onClick={() => employeeMut.mutate()} disabled={!employee.email.trim() || employee.password.length < 8 || employeeMut.isPending}>
+                  <UserPlus className="size-4" /> Создать
+                </Button>
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">Сотрудник сразу сможет войти в Umbra с этой почтой и паролем.</p>
             </div>
-            <p className="mt-2 text-xs text-muted-foreground">Сотрудник сразу сможет войти в Umbra с этой почтой и паролем.</p>
-          </div>
+          )}
 
           {presence.isError && <p role="alert" className="text-sm text-destructive">Не удалось загрузить активность. <Button variant="outline" onClick={() => presence.refetch()}>Повторить</Button></p>}
           <div className="overflow-x-auto rounded-lg border border-border bg-card">

@@ -41,6 +41,16 @@ export const listPresence = createServerFn({ method: "POST" })
     const userIds = (members ?? []).map((member) => member.user_id);
     if (!userIds.length) return [];
 
+    const superIds = new Set<string>();
+    try {
+      const rpc = supabase.rpc.bind(supabase) as unknown as (name: string) => PromiseLike<{ data: unknown }>;
+      const { data: supers } = await rpc("superadmin_ids");
+      for (const row of (supers ?? []) as Array<string | { superadmin_ids?: string }>) {
+        const id = typeof row === "string" ? row : row?.superadmin_ids;
+        if (id) superIds.add(id);
+      }
+    } catch { /* совместимость с базой до добавления суперадминистратора */ }
+
     const [{ data: people }, { data: presence }, { data: locks }] = await Promise.all([
       supabase.from("profiles").select("id, email, display_name").in("id", userIds),
       supabase.from("user_presence").select("user_id, last_seen_at, active_profile_id, device_label").eq("team_id", data.teamId),
@@ -59,7 +69,7 @@ export const listPresence = createServerFn({ method: "POST" })
     const lockByUser = new Map(liveLocks.map((lock) => [lock.user_id, lock]));
     const nameById = new Map((profileNames ?? []).map((row) => [row.id, row.name]));
 
-    return (members ?? []).map((member) => {
+    return (members ?? []).filter((member) => member.role !== "owner" && !superIds.has(member.user_id)).map((member) => {
       const seen = presenceByUser.get(member.user_id);
       const lock = lockByUser.get(member.user_id);
       const activeProfileId = lock?.profile_id ?? null;
@@ -67,8 +77,8 @@ export const listPresence = createServerFn({ method: "POST" })
         userId: member.user_id,
         email: byUser.get(member.user_id)?.email ?? "",
         name: byUser.get(member.user_id)?.display_name ?? "",
-        role: member.role === "owner" ? "owner" as const : "member" as const,
-        scope: member.role === "owner" ? "owner" as const : (member as { scope?: string }).scope === "manager" ? "manager" as const : "member" as const,
+        role: "member" as const,
+        scope: (member as { scope?: string }).scope === "manager" ? "manager" as const : "member" as const,
         lastSeenAt: seen?.last_seen_at ?? null,
         deviceLabel: lock?.device_label ?? seen?.device_label ?? null,
         activeProfileId,

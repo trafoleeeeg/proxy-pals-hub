@@ -74,5 +74,6 @@ describe("server launch transaction boundary", () => {
 test("only confirmed lease denial ends close retries", () => {
   expect(classifyTerminalClose(new Error("No profile access"))).toBe("access_revoked");
   expect(classifyTerminalClose(new Error("Session lease lost; reopen the profile"))).toBe("lease_lost");
+  expect(classifyTerminalClose(new Error("RPC failed [42501]: Session lease lost; reopen the profile"))).toBe("lease_lost");
   expect(classifyTerminalClose(new Error("temporary database outage"))).toBeNull();
 });

@@ -159,14 +159,18 @@ function AuthSync({ queryClient }: { queryClient: QueryClient }) {
     const { data } = supabase.auth.onAuthStateChange((event) => {
       if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;
       if (event === "SIGNED_OUT") queryClient.clear();
-      router.invalidate();
-      if (event === "SIGNED_IN") {
-        const here = window.location.pathname;
-        if (here === "/" || here === "/auth") window.location.replace("/app");
-      } else if (event === "SIGNED_OUT" && window.location.pathname !== "/auth") {
-        const next = window.location.pathname.startsWith("/") ? window.location.pathname : "/app";
-        window.location.replace(`/auth?next=${encodeURIComponent(next)}`);
-      }
+      // Auth callbacks execute while the auth client can still own its Web Lock.
+      // Defer router work so protected requests never wait on that same lock.
+      window.setTimeout(() => {
+        void router.invalidate();
+        if (event === "SIGNED_IN") {
+          const here = window.location.pathname;
+          if (here === "/" || here === "/auth") window.location.replace("/app");
+        } else if (event === "SIGNED_OUT" && window.location.pathname !== "/auth") {
+          const next = window.location.pathname.startsWith("/") ? window.location.pathname : "/app";
+          window.location.replace(`/auth?next=${encodeURIComponent(next)}`);
+        }
+      }, 0);
     });
     return () => data.subscription.unsubscribe();
   }, [queryClient, router]);

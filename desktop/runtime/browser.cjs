@@ -412,11 +412,12 @@ async function createProfileBrowser(electron, {
   shell.webContents.on("before-input-event", shortcuts);
   shell.webContents.on("render-process-gone", () => { if (!destroyed) void closeProfile().catch(() => {}); });
   shell.on("resize", layout);
+  shell.on("move", positionExtensionPopup);
   shell.on("close", (event) => { event.preventDefault(); void closeProfile().catch(() => { error = "Не удалось сохранить профиль. Повторите закрытие."; publish(); }); });
   shell.on("closed", () => {
     destroyed = true;
     clearTimeout(publishTimer); publishTimer = null;
-    extensionPopup = null; extensionPopupId = "";
+    closeExtensionPopup();
     registry.delete(shellContents);
     for (const tab of [...tabs.values()]) tab.destroy();
     if (!registry.size) { ipcMain.removeHandler("umbra-runtime:browser"); handlers.delete(ipcMain); }

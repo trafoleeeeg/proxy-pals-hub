@@ -117,7 +117,8 @@ export const bulkCreateProfiles = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(bulkCreateSchema)
   .handler(async ({ data, context }) => {
-    await requireTeamManager(context, data.teamId);
+    await requirePermission(context, data.teamId, "profile.create");
+    await requireFolderAccess(context, data.teamId, data.folder);
     const rows = data.fingerprints.map((fp, i) => ({
       team_id: data.teamId,
       name: `${data.prefix} ${i + 1}`,
@@ -137,7 +138,8 @@ export const deleteProfile = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(idSchema)
   .handler(async ({ data, context }) => {
-    const profile = await requireProfile(context, data.id, true);
+    const profile = await requireProfile(context, data.id);
+    await requirePermission(context, profile.team_id, "profile.delete");
     await callServerRpc(context.supabase, "bulk_mutate_profiles", {
       _team_id: profile.team_id, _profile_ids: [data.id], _operation: "delete", _changes: {},
     });
@@ -148,7 +150,8 @@ export const cloneProfile = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(idSchema)
   .handler(async ({ data, context }) => {
-    await requireProfile(context, data.id, true);
+    const source = await requireProfile(context, data.id);
+    await requirePermission(context, source.team_id, "profile.create");
     const { data: src, error } = await context.supabase
       .from("browser_profiles")
       .select("team_id, name, folder, tags, notes, proxy_id, fingerprint, status_id, custom_fields")
@@ -167,7 +170,9 @@ export const cloneProfile = createServerFn({ method: "POST" })
 export const bulkUpdateProfiles = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth]).inputValidator(bulkUpdateSchema)
   .handler(async ({ data, context }) => {
-    await requireTeamManager(context, data.teamId);
+    await requirePermission(context, data.teamId, "profile.edit");
+    if (data.changes.folder !== undefined) await requireFolderAccess(context, data.teamId, data.changes.folder);
+    if (data.changes.proxyId !== undefined) await requirePermission(context, data.teamId, "profile.proxy");
     await requireTeamProxy(context, data.teamId, data.changes.proxyId);
     const updated = await callServerRpc(context.supabase, "bulk_mutate_profiles", {
       _team_id: data.teamId, _profile_ids: data.ids, _operation: "update", _changes: data.changes as Json,

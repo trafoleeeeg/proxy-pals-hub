@@ -397,7 +397,58 @@ export function TeamPage() {
         </TabsContent>
 
         <TabsContent value="folders">
-          <p className="mb-3 text-sm text-muted-foreground">Доступ к папке открывает сотруднику все профили внутри неё, включая новые.</p>
+          <p className="mb-3 text-sm text-muted-foreground">Основная папка есть всегда. Остальные папки вы создаёте сами, а доступ к папке открывает сотруднику все профили внутри неё, включая новые.</p>
+          <div className="mb-4 flex flex-wrap gap-2">
+            <Input
+              placeholder="название новой папки"
+              aria-label="Название новой папки"
+              value={newFolder}
+              onChange={(e) => setNewFolder(e.target.value)}
+              className="max-w-xs"
+            />
+            <Button onClick={() => createFolderMut.mutate()} disabled={!newFolder.trim() || createFolderMut.isPending}>Создать папку</Button>
+          </div>
+          <div className="mb-6 rounded-lg border border-border bg-card">
+            <Table>
+              <TableHeader><TableRow><TableHead>Папка</TableHead><TableHead className="text-right">Действия</TableHead></TableRow></TableHeader>
+              <TableBody>
+                {folderRows.map((row) => (
+                  <TableRow key={row.id}>
+                    <TableCell className="font-medium">
+                      {row.name}
+                      {row.isDefault && <Badge variant="outline" className="ml-2">основная</Badge>}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {!row.isDefault && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={renameFolderMut.isPending}
+                            onClick={() => {
+                              const name = window.prompt("Новое название папки", row.name)?.trim();
+                              if (name && name !== row.name) renameFolderMut.mutate({ id: row.id, name });
+                            }}
+                          >
+                            Переименовать
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={deleteFolderMut.isPending}
+                            onClick={() => { if (window.confirm(`Удалить папку «${row.name}»? Профили перейдут в основную.`)) deleteFolderMut.mutate(row.id); }}
+                          >
+                            <Trash2 className="size-4" /> Удалить
+                          </Button>
+                        </>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {!folderRows.length && <TableRow><TableCell className="py-6 text-sm text-muted-foreground">Папок пока нет</TableCell></TableRow>}
+              </TableBody>
+            </Table>
+          </div>
           {folderAccess.isError && <p role="alert" className="py-3 text-sm text-destructive">Не удалось загрузить доступы к папкам. <Button variant="outline" onClick={() => folderAccess.refetch()}>Повторить</Button></p>}
           <div className="overflow-x-auto rounded-lg border border-border bg-card">
             <Table>
@@ -426,6 +477,48 @@ export function TeamPage() {
                 {(!folders.length || !staff.length) && (
                   <TableRow><TableCell className="py-8 text-sm text-muted-foreground">{!staff.length ? "Сначала пригласите сотрудников" : "Пока нет папок с профилями"}</TableCell></TableRow>
                 )}
+              </TableBody>
+            </Table>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="staff" className="space-y-6">
+          <div className="rounded-lg border border-border bg-card p-4">
+            <h2 className="mb-3 text-sm font-semibold">Создать учётную запись сотрудника</h2>
+            <div className="flex flex-wrap gap-2">
+              <Input className="max-w-xs" type="email" placeholder="почта" aria-label="Почта сотрудника для учётной записи" value={employee.email} onChange={(e) => setEmployee((v) => ({ ...v, email: e.target.value }))} />
+              <Input className="max-w-xs" type="password" placeholder="пароль (от 8 символов)" aria-label="Пароль сотрудника" value={employee.password} onChange={(e) => setEmployee((v) => ({ ...v, password: e.target.value }))} />
+              <Input className="max-w-xs" placeholder="имя (необязательно)" aria-label="Имя сотрудника" value={employee.displayName} onChange={(e) => setEmployee((v) => ({ ...v, displayName: e.target.value }))} />
+              <Button onClick={() => employeeMut.mutate()} disabled={!employee.email.trim() || employee.password.length < 8 || employeeMut.isPending}>
+                <UserPlus className="size-4" /> Создать
+              </Button>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">Сотрудник сразу сможет войти в Umbra с этой почтой и паролем.</p>
+          </div>
+
+          {presence.isError && <p role="alert" className="text-sm text-destructive">Не удалось загрузить активность. <Button variant="outline" onClick={() => presence.refetch()}>Повторить</Button></p>}
+          <div className="overflow-x-auto rounded-lg border border-border bg-card">
+            <Table>
+              <TableHeader><TableRow><TableHead>Сотрудник</TableHead><TableHead>Статус</TableHead><TableHead>Последняя активность</TableHead><TableHead>Сейчас в профиле</TableHead></TableRow></TableHeader>
+              <TableBody>
+                {(presence.data ?? []).map((row) => {
+                  const seen = row.lastSeenAt ? new Date(row.lastSeenAt) : null;
+                  const online = !!seen && Date.now() - seen.getTime() < 120_000;
+                  return (
+                    <TableRow key={row.userId}>
+                      <TableCell>
+                        <div className="font-medium">{row.name || row.email}</div>
+                        {row.name && <div className="text-xs text-muted-foreground">{row.email}</div>}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={online ? "default" : "outline"}>{online ? "в сети" : "не в сети"}</Badge>
+                      </TableCell>
+                      <TableCell className="text-xs">{seen ? seen.toLocaleString("ru-RU") : "ещё не входил"}</TableCell>
+                      <TableCell className="text-xs">{row.activeProfileId ? `занят: ${row.activeProfileName}` : "—"}</TableCell>
+                    </TableRow>
+                  );
+                })}
+                {!(presence.data ?? []).length && <TableRow><TableCell className="py-6 text-sm text-muted-foreground">Сотрудников пока нет</TableCell></TableRow>}
               </TableBody>
             </Table>
           </div>

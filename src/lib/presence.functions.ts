@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { presenceSchema, teamSchema } from "./server-validation";
-import { callServerRpc, requireTeamManager } from "./server-db";
+import { requireTeamManager } from "./server-db";
 
 export type PresenceRow = {
   userId: string;
@@ -21,8 +21,8 @@ export const touchPresence = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { error } = await context.supabase.rpc("touch_presence", {
       _team_id: data.teamId,
-      _profile_id: data.profileId ?? null,
-      _device_label: data.deviceLabel ?? null,
+      _profile_id: data.profileId ?? undefined,
+      _device_label: data.deviceLabel ?? undefined,
     });
     if (error) throw new Error("Не удалось отметить активность");
     return { ok: true };

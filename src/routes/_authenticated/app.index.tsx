@@ -13,6 +13,7 @@ import { useWorkspace } from "@/lib/useWorkspace";
 import { ALL_FOLDERS, useProfileFolder } from "@/lib/useProfileFolder";
 import { listProfiles, saveProfile, cloneProfile, bulkCreateProfiles } from "@/lib/profiles.functions";
 import { listProxies } from "@/lib/proxies.functions";
+import { listFolders } from "@/lib/folders.functions";
 import { useDesktopProfileLifecycle } from "@/hooks/useDesktopProfileLifecycle";
 import { generateFingerprint, describeFingerprint, type Fingerprint } from "@/lib/fingerprint";
 import { ProfileFingerprint } from "@/components/profile-fingerprint";

@@ -87,7 +87,12 @@ function createWindow() {
     } else {
       splashStatus("Соединение нестабильно, пробуем ещё раз…");
     }
-    try { await window.loadURL(APP_URL); }
+    try {
+      const panelUrl = new URL(APP_URL);
+      panelUrl.searchParams.set("desktop", app.getVersion());
+      panelUrl.searchParams.set("boot", String(Date.now()));
+      await window.loadURL(panelUrl.href, { extraHeaders: "Cache-Control: no-cache\r\nPragma: no-cache" });
+    }
     catch {
       if (window.isDestroyed() || quitting) return;
       if (attempt < 2) {

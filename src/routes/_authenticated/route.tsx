@@ -1,5 +1,5 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
-import { supabase } from "@/integrations/supabase/client";
+import { getAuthenticatedUser } from "@/integrations/supabase/auth-session";
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
@@ -7,12 +7,11 @@ export const Route = createFileRoute("/_authenticated")({
     const user = await context.queryClient.fetchQuery({
       queryKey: ["authenticated-user"], staleTime: 30_000, retry: false,
       queryFn: async () => {
-        // Локальная сессия отвечает мгновенно; запрос к серверу — только если её нет.
-        const { data: local } = await supabase.auth.getSession();
-        if (local.session?.user) return local.session.user;
-        const { data, error } = await supabase.auth.getUser();
-        if (error || !data.user) throw redirect({ to: "/auth" });
-        return data.user;
+        // A locally persisted user is not proof that its access/refresh token
+        // is still accepted. Validate it before protected queries can mount.
+        const user = await getAuthenticatedUser();
+        if (!user) throw redirect({ to: "/auth", search: { next: "/app" } });
+        return user;
       },
     });
     return { user };

@@ -19,6 +19,7 @@ function renderer() {
   const managerSearch = byId("manager-search");
   const newTab = byId("new");
   const pinnedExtensions = byId("pinned-extensions");
+  const tabNodes = new Map();
   let current;
   let latestState = {};
   let draggedTab;
@@ -303,40 +304,65 @@ function renderer() {
     byId("restore-menu").disabled = !state.canRestoreTab;
     byId("zoom-value").textContent = `${state.zoomPercent || 100}%`;
     const focused = document.activeElement?.dataset?.focusKey;
-    tabs.replaceChildren(...state.tabs.map((tab) => {
-      const item = document.createElement("div");
-      item.className = "tab"; item.dataset.id = tab.id; item.draggable = true;
-      const select = document.createElement("button");
-      select.className = "tab-title"; select.setAttribute("role", "tab");
-      select.setAttribute("aria-selected", String(tab.id === state.activeId));
-      select.dataset.focusKey = "tab-" + tab.id;
-      const favicon = document.createElement(tab.favicon ? "img" : "span");
-      favicon.className = "favicon";
-      if (tab.favicon) { favicon.src = tab.favicon; favicon.alt = ""; }
-      else favicon.innerHTML = icon("globe");
+    // Вкладки обновляем точечно: полная перерисовка на каждое событие загрузки
+    // убирала кнопку из-под курсора, и клик по вкладке терялся.
+    const seen = new Set();
+    let previous = null;
+    for (const tab of state.tabs) {
+      seen.add(tab.id);
+      let node = tabNodes.get(tab.id);
+      if (!node) {
+        const item = document.createElement("div");
+        item.className = "tab"; item.dataset.id = tab.id; item.draggable = true;
+        const select = document.createElement("button");
+        select.className = "tab-title"; select.setAttribute("role", "tab");
+        select.dataset.focusKey = "tab-" + tab.id;
+        const favicon = document.createElement("span"); favicon.className = "favicon"; favicon.innerHTML = icon("globe");
+        const label = document.createElement("span"); label.className = "tab-label";
+        select.append(favicon, label);
+        select.onclick = () => void run({ action: "select", id: item.dataset.id });
+        select.onauxclick = (event) => { if (event.button === 1) void run({ action: "close-tab", id: item.dataset.id }); };
+        const close = document.createElement("button"); close.innerHTML = icon("close");
+        close.className = "tab-close"; close.title = "Закрыть вкладку"; close.setAttribute("aria-label", "Закрыть вкладку");
+        close.dataset.focusKey = "close-" + tab.id;
+        close.onclick = () => void run({ action: "close-tab", id: item.dataset.id });
+        item.addEventListener("dragstart", () => { draggedTab = item.dataset.id; item.classList.add("dragging"); });
+        item.addEventListener("dragend", () => { draggedTab = undefined; item.classList.remove("dragging"); });
+        item.addEventListener("dragover", (event) => event.preventDefault());
+        item.addEventListener("drop", (event) => {
+          event.preventDefault();
+          const id = item.dataset.id;
+          if (!draggedTab || draggedTab === id) return;
+          const ids = (latestState.tabs || []).map((entry) => entry.id);
+          const from = ids.indexOf(draggedTab); const to = ids.indexOf(id);
+          if (from < 0 || to < 0) return;
+          ids.splice(to, 0, ids.splice(from, 1)[0]);
+          void run({ action: "reorder-tabs", ids });
+        });
+        item.append(select, close);
+        node = { item, select, label, favicon, shown: {} };
+        tabNodes.set(tab.id, node);
+      }
       const blank = !tab.url || tab.url === "about:blank";
       const name = blank || !tab.title || tab.title === "about:blank" ? "Новая вкладка" : tab.title;
-      const label = document.createElement("span"); label.className = "tab-label"; label.textContent = name;
-      select.append(favicon, label); select.title = blank ? name : `${name}\n${tab.url}`;
-      select.onclick = () => void run({ action: "select", id: tab.id });
-      select.onauxclick = (event) => { if (event.button === 1) void run({ action: "close-tab", id: tab.id }); };
-      const close = document.createElement("button"); close.innerHTML = icon("close");
-      close.className = "tab-close"; close.title = "Закрыть вкладку"; close.setAttribute("aria-label", "Закрыть вкладку");
-      close.dataset.focusKey = "close-" + tab.id;
-      close.onclick = () => void run({ action: "close-tab", id: tab.id });
-      item.addEventListener("dragstart", () => { draggedTab = tab.id; item.classList.add("dragging"); });
-      item.addEventListener("dragend", () => { draggedTab = undefined; item.classList.remove("dragging"); });
-      item.addEventListener("dragover", (event) => event.preventDefault());
-      item.addEventListener("drop", (event) => {
-        event.preventDefault();
-        if (!draggedTab || draggedTab === tab.id) return;
-        const ids = state.tabs.map((entry) => entry.id);
-        const from = ids.indexOf(draggedTab); const to = ids.indexOf(tab.id);
-        ids.splice(to, 0, ids.splice(from, 1)[0]);
-        void run({ action: "reorder-tabs", ids });
-      });
-      item.append(select, close); return item;
-    }));
+      const title = blank ? name : `${name}\n${tab.url}`;
+      const selected = String(tab.id === state.activeId);
+      if (node.shown.name !== name) { node.label.textContent = name; node.shown.name = name; }
+      if (node.shown.title !== title) { node.select.title = title; node.shown.title = title; }
+      if (node.shown.selected !== selected) { node.select.setAttribute("aria-selected", selected); node.shown.selected = selected; }
+      const source = tab.favicon || "";
+      if (node.shown.favicon !== source) {
+        node.shown.favicon = source;
+        const next = document.createElement(source ? "img" : "span");
+        next.className = "favicon";
+        if (source) { next.src = source; next.alt = ""; } else next.innerHTML = icon("globe");
+        node.favicon.replaceWith(next); node.favicon = next;
+      }
+      const expected = previous ? previous.nextSibling : tabs.firstChild;
+      if (expected !== node.item) tabs.insertBefore(node.item, expected);
+      previous = node.item;
+    }
+    for (const [id, node] of [...tabNodes]) if (!seen.has(id)) { node.item.remove(); tabNodes.delete(id); }
     if (focused) [...document.querySelectorAll("[data-focus-key]")].find((button) => button.dataset.focusKey === focused)?.focus();
     newTab.disabled = state.tabs.length >= 32;
     bookmarksBar.hidden = !state.bookmarkBarVisible || !(state.bookmarks || []).length;

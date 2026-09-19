@@ -41,3 +41,26 @@ export const createProfileField = createServerFn({ method: "POST" })
     if (error) throw new Error(error.code === "23505" ? "Такая колонка уже существует" : "Не удалось добавить колонку");
     return row;
   });
+export const updateProfileStatus = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data) => z.object({ teamId, statusId: z.string().uuid(), name: z.string().trim().min(1).max(80), color }).strict().parse(data))
+  .handler(async ({ data, context }) => {
+    await requirePermission(context, data.teamId, "profile.edit");
+    const { data: row, error } = await context.supabase.from("profile_statuses")
+      .update({ name: data.name, color: data.color })
+      .eq("id", data.statusId).eq("team_id", data.teamId)
+      .select("id, name, color, position").single();
+    if (error || !row) throw new Error(error?.code === "23505" ? "Такой статус уже существует" : "Не удалось изменить статус");
+    return row;
+  });
+
+export const deleteProfileStatus = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data) => z.object({ teamId, statusId: z.string().uuid() }).strict().parse(data))
+  .handler(async ({ data, context }) => {
+    await requirePermission(context, data.teamId, "profile.edit");
+    const { error } = await context.supabase.from("profile_statuses")
+      .delete().eq("id", data.statusId).eq("team_id", data.teamId);
+    if (error) throw new Error("Не удалось удалить статус");
+    return { ok: true };
+  });

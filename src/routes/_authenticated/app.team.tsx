@@ -507,7 +507,52 @@ export function TeamPage() {
               </TableBody>
             </Table>
           </div>
+
+          <div className="mt-6 space-y-3">
+            <h2 className="text-sm font-semibold">Кому какие папки переданы</h2>
+            {staff.map((m) => {
+              const granted = folders.filter((name) => folderAccessSet.has(`${name}:${m.userId}`));
+              return (
+                <div key={m.userId} className="rounded-lg border border-border bg-card p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-sm font-medium">{m.email}</span>
+                    {granted.length > 0 && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={folderAccessMut.isPending}
+                        onClick={() => granted.forEach((name) => folderAccessMut.mutate({ folder: name, userId: m.userId, granted: false }))}
+                      >
+                        Отозвать все папки
+                      </Button>
+                    )}
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {granted.length === 0 && <span className="text-xs text-muted-foreground">Папки не переданы</span>}
+                    {granted.map((name) => (
+                      <Badge key={name} variant="outline" className="gap-1 pr-1">
+                        {name}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-5"
+                          title={`Отозвать папку ${name}`}
+                          aria-label={`Отозвать у ${m.email} папку ${name}`}
+                          disabled={folderAccessMut.isPending}
+                          onClick={() => folderAccessMut.mutate({ folder: name, userId: m.userId, granted: false })}
+                        >
+                          <X className="size-3" />
+                        </Button>
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+            {!staff.length && <p className="text-sm text-muted-foreground">Сначала создайте учётные записи сотрудников</p>}
+          </div>
         </TabsContent>
+
 
         <TabsContent value="staff" className="space-y-6">
           {ws?.isSuperadmin && (

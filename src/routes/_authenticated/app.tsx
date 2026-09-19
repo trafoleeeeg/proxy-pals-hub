@@ -132,7 +132,7 @@ function AppShell() {
             <SelectContent>{(selection.workspaces.data?.length ? selection.workspaces.data : ws ? [ws] : []).map((team) => <SelectItem key={team.teamId} value={team.teamId}>{team.teamName}</SelectItem>)}</SelectContent>
           </Select>
           {selection.workspaces.isError && <Button size="sm" variant="ghost" onClick={() => selection.workspaces.refetch()}>Повторить загрузку команд</Button>}
-          <p className="text-xs text-muted-foreground">{ws?.role === "owner" ? "Владелец" : ws ? "Сотрудник" : ""}</p>
+          <p className="text-xs text-muted-foreground">{ws?.scope === "owner" ? "Владелец" : ws?.scope === "manager" ? "Администратор" : ws ? "Сотрудник" : ""}</p>
         </div>
         <Button variant="ghost" size="sm" title="Выйти" aria-label="Выйти" disabled={signingOut || !runtime.ready} className={"mt-2 w-full " + (collapsed ? "px-0" : "justify-start px-2")} onClick={signOut}><LogOut className="size-4" />{!collapsed && <span>{signingOut ? "Сохранение…" : "Выйти"}</span>}</Button>
       </div>

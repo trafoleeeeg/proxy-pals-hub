@@ -155,10 +155,16 @@ export function TeamPage() {
     onError: (error: Error) => toast.error(error.message || "Не удалось удалить папку"),
   });
 
+  // Короткий логин без «@» превращается в служебный адрес Umbra.
+  const loginToEmail = (login: string) => {
+    const value = login.trim();
+    return value.includes("@") ? value.toLowerCase() : `${value.toLowerCase()}@umbra.app`;
+  };
+
   const employeeMut = useMutation({
     mutationFn: () => createEmployeeFn({ data: {
       teamId: ws!.teamId,
-      email: employee.email.trim(),
+      email: loginToEmail(employee.email),
       password: employee.password,
       ...(employee.displayName.trim() ? { displayName: employee.displayName.trim() } : {}),
     } }),
@@ -486,7 +492,7 @@ export function TeamPage() {
           <div className="rounded-lg border border-border bg-card p-4">
             <h2 className="mb-3 text-sm font-semibold">Создать учётную запись сотрудника</h2>
             <div className="flex flex-wrap gap-2">
-              <Input className="max-w-xs" type="email" placeholder="почта" aria-label="Почта сотрудника для учётной записи" value={employee.email} onChange={(e) => setEmployee((v) => ({ ...v, email: e.target.value }))} />
+              <Input className="max-w-xs" type="text" placeholder="логин или почта" aria-label="Логин или почта сотрудника для учётной записи" value={employee.email} onChange={(e) => setEmployee((v) => ({ ...v, email: e.target.value }))} />
               <Input className="max-w-xs" type="password" placeholder="пароль (от 8 символов)" aria-label="Пароль сотрудника" value={employee.password} onChange={(e) => setEmployee((v) => ({ ...v, password: e.target.value }))} />
               <Input className="max-w-xs" placeholder="имя (необязательно)" aria-label="Имя сотрудника" value={employee.displayName} onChange={(e) => setEmployee((v) => ({ ...v, displayName: e.target.value }))} />
               <Button onClick={() => employeeMut.mutate()} disabled={!employee.email.trim() || employee.password.length < 8 || employeeMut.isPending}>

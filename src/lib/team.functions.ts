@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { acceptInviteSchema, accessSchema, bulkAccessSchema, inviteIdSchema, inviteSchema, employeeSchema, memberSchema, teamSchema, workspaceSchema } from "./server-validation";
-import { callServerRpc, requireProfile, requireTeamManager, requireTeamOwner, type ServerContext, type TeamScope } from "./server-db";
+import { callServerRpc, requireProfile, requireTeamManager, type ServerContext, type TeamScope } from "./server-db";
 import { z } from "zod";
 
 export type Workspace = {
@@ -58,7 +58,7 @@ export const getWorkspace = createServerFn({ method: "POST" })
 export const listMembers = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth]).inputValidator(teamSchema)
   .handler(async ({ data, context }) => {
-    await requireTeamOwner(context, data.teamId);
+    await requireTeamManager(context, data.teamId);
     const { supabase } = context;
     const { data: members, error: memberError } = await supabase.from("team_members")
       .select("id, user_id, role, scope, created_at").eq("team_id", data.teamId).order("created_at");
@@ -94,7 +94,7 @@ export const listMembers = createServerFn({ method: "POST" })
 export const createInvite = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth]).inputValidator(inviteSchema)
   .handler(async ({ data, context }) => {
-    await requireTeamOwner(context, data.teamId);
+    await requireTeamManager(context, data.teamId);
     const token = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
     const { data: row, error } = await context.supabase.from("team_invites").insert({
       team_id: data.teamId, email: data.email, invited_by: context.userId, token, role: "member",
@@ -146,7 +146,7 @@ export const setMemberScope = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input) => z.object({ teamId: z.string().uuid(), userId: z.string().uuid(), scope: z.enum(["member", "manager"]) }).strict().parse(input))
   .handler(async ({ data, context }) => {
-    await requireTeamOwner(context, data.teamId);
+    await requireTeamManager(context, data.teamId);
     await callServerRpc(context.supabase, "set_member_scope", { _team_id: data.teamId, _user_id: data.userId, _scope: data.scope });
     return { ok: true };
   });
@@ -171,7 +171,7 @@ export const listAudit = createServerFn({ method: "POST" })
 export const createEmployee = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth]).inputValidator(employeeSchema)
   .handler(async ({ data, context }) => {
-    await requireTeamOwner(context, data.teamId);
+    await requireTeamManager(context, data.teamId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const created = await supabaseAdmin.auth.admin.createUser({
       email: data.email,

@@ -34,6 +34,12 @@ function safeNext(next?: string) {
   return next;
 }
 
+// Короткий логин без «@» превращаем в служебный адрес Umbra.
+function toEmail(login: string) {
+  const value = login.trim();
+  return value.includes("@") ? value : `${value.toLowerCase()}@umbra.app`;
+}
+
 function AuthPage() {
   const search = Route.useSearch();
   const navigate = useNavigate();
@@ -52,14 +58,14 @@ function AuthPage() {
     try {
       if (mode === "signup") {
         const { error } = await supabase.auth.signUp({
-          email,
+          email: toEmail(email),
           password,
           options: { emailRedirectTo: `${window.location.origin}${next}` },
         });
         if (error) throw error;
         toast.success("Проверьте почту — мы отправили ссылку для подтверждения.");
       } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { error } = await supabase.auth.signInWithPassword({ email: toEmail(email), password });
         if (error) throw error;
         navigate({ to: next });
       }
@@ -87,12 +93,12 @@ function AuthPage() {
 
         <form onSubmit={submit} className="mt-6 space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="email">Почта</Label>
+            <Label htmlFor="email">Логин или почта</Label>
             <Input
               id="email"
-              type="email"
+              type="text"
               required
-              autoComplete="email"
+              autoComplete="username"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />

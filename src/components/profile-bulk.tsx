@@ -72,7 +72,9 @@ export function ProfileBulkDialog({ action, ids, teamId, isOwner, blocked, proxi
         const active = fields.includes(field);
         return <div key={field} className="space-y-2">
           <label className="flex items-center gap-2 text-sm"><Checkbox checked={active} disabled={!enabled || action === "move"} onCheckedChange={(v) => setFields((current) => v === true ? [...current, field] : current.filter((key) => key !== field))} />{labels[field]}</label>
-          {active && field === "folder" && <Input aria-label="Новая папка" placeholder="Без папки" value={folder} onChange={(e) => setFolder(e.target.value)} />}
+          {active && field === "folder" && (folders.length > 0
+            ? <Select value={folder} disabled={!enabled} onValueChange={setFolder}><SelectTrigger aria-label="Новая папка"><SelectValue placeholder="Выберите папку" /></SelectTrigger><SelectContent>{folders.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent></Select>
+            : <Input aria-label="Новая папка" placeholder="Без папки" value={folder} onChange={(e) => setFolder(e.target.value)} />)}
           {active && field === "tags" && <Input aria-label="Новые метки через запятую" value={tags} onChange={(e) => setTags(e.target.value)} />}
           {active && field === "notes" && <Textarea aria-label="Новые заметки" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />}
           {active && field === "proxyId" && <Select value={proxyId} disabled={!enabled} onValueChange={setProxyId}><SelectTrigger aria-label="Новый прокси"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">Без прокси</SelectItem>{proxies.map((proxy) => <SelectItem key={proxy.id} value={proxy.id}>{proxy.label}</SelectItem>)}</SelectContent></Select>}
@@ -81,6 +83,6 @@ export function ProfileBulkDialog({ action, ids, teamId, isOwner, blocked, proxi
       })}
     </fieldset>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-    <DialogFooter><Button variant="outline" disabled={busy} onClick={onClose}>Отмена</Button><Button variant={action === "delete" ? "destructive" : "default"} disabled={!enabled || (action === "transfer" && !folder.trim()) || ((action === "edit" || action === "move") && (!fields.length || (fields.includes("fingerprint") && !!fingerprintError(fingerprint))))} onClick={submit}>{busy ? "Выполняется…" : action === "delete" ? `Удалить ${ids.length}` : "Применить"}</Button></DialogFooter>
+    <DialogFooter><Button variant="outline" disabled={busy} onClick={onClose}>Отмена</Button><Button variant={action === "delete" ? "destructive" : "default"} disabled={!enabled || ((action === "transfer" || action === "move") && !folder.trim()) || ((action === "edit" || action === "move") && (!fields.length || (fields.includes("fingerprint") && !!fingerprintError(fingerprint))))} onClick={submit}>{busy ? "Выполняется…" : action === "delete" ? `Удалить ${ids.length}` : "Применить"}</Button></DialogFooter>
   </DialogContent></Dialog>;
 }

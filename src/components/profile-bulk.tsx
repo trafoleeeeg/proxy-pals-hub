@@ -38,12 +38,8 @@ export function ProfileBulkDialog({ action, ids, teamId, isOwner, blocked, proxi
       if (action === "delete") await deleteFn({ data: { teamId, ids } });
       else if (action === "transfer") {
         const target = folder.trim();
-        if (!target && !userId) return;
-        await transferFn({ data: { teamId, profileIds: ids, ...(target ? { folder: target } : {}), ...(userId ? { userId } : {}) } });
-      }
-      else if (action === "access") {
-        if (!userId) return;
-        await accessFn({ data: { teamId, profileIds: ids, userId, granted } });
+        if (!target) return;
+        await transferFn({ data: { teamId, profileIds: ids, folder: target } });
       } else {
         const changes: ProfileChanges = {};
         if (fields.includes("folder")) changes.folder = folder;

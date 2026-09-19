@@ -3,7 +3,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import type { Fingerprint } from "./fingerprint";
 import type { Json } from "@/integrations/supabase/types";
 import { bulkCreateSchema, bulkDeleteSchema, bulkUpdateSchema, idSchema, importCookiesSchema, profileIdSchema, saveProfileSchema, teamSchema } from "./server-validation";
-import { callServerRpc, requireProfile, requireTeamAccess, requireTeamManager, requireTeamProxy, writeAudit } from "./server-db";
+import { accessibleFolders, callServerRpc, requireFolderAccess, requirePermission, requireProfile, requireTeamAccess, requireTeamProxy, writeAudit } from "./server-db";
 import { parseCookieImport } from "./server-cookies";
 
 export type ProfileRow = {
@@ -78,7 +78,9 @@ export const saveProfile = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(saveProfileSchema)
   .handler(async ({ data, context }) => {
-    await requireTeamManager(context, data.teamId);
+    await requirePermission(context, data.teamId, data.id ? "profile.edit" : "profile.create");
+    await requireFolderAccess(context, data.teamId, data.folder.trim());
+    if (data.proxyId) await requirePermission(context, data.teamId, "profile.proxy");
     await requireTeamProxy(context, data.teamId, data.proxyId);
     const payload = {
       name: data.name,

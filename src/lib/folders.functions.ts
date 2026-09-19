@@ -64,7 +64,7 @@ export const createFolder = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(createFolderSchema)
   .handler(async ({ data, context }) => {
-    await requireTeamManager(context, data.teamId);
+    await requirePermission(context, data.teamId, "folder.manage");
     const { data: row, error } = await context.supabase
       .from("profile_folders")
       .insert({ team_id: data.teamId, name: data.name, created_by: context.userId })
@@ -79,7 +79,7 @@ export const renameFolder = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(renameFolderSchema)
   .handler(async ({ data, context }) => {
-    await requireTeamManager(context, data.teamId);
+    await requirePermission(context, data.teamId, "folder.manage");
     const { data: current, error: readError } = await context.supabase
       .from("profile_folders").select("name").eq("id", data.id).eq("team_id", data.teamId).maybeSingle();
     if (readError || !current) throw new Error("Папка не найдена");
@@ -98,7 +98,7 @@ export const deleteFolder = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(folderIdSchema)
   .handler(async ({ data, context }) => {
-    await requireTeamManager(context, data.teamId);
+    await requirePermission(context, data.teamId, "folder.manage");
     const { data: current, error: readError } = await context.supabase
       .from("profile_folders").select("name, is_default").eq("id", data.id).eq("team_id", data.teamId).maybeSingle();
     if (readError || !current) throw new Error("Папка не найдена");

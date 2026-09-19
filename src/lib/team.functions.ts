@@ -73,13 +73,6 @@ export const listMembers = createServerFn({ method: "POST" })
       .select("id, email, token, expires_at, accepted_at, created_at").eq("team_id", data.teamId)
       .is("accepted_at", null).order("created_at", { ascending: false });
     if (inviteError) throw new Error(inviteError.message);
-    const { data: profiles, error: profileError } = await supabase.from("browser_profiles").select("id").eq("team_id", data.teamId);
-    if (profileError) throw new Error(profileError.message);
-    const profileIds = (profiles ?? []).map((profile) => profile.id);
-    const { data: access, error: accessError } = profileIds.length
-      ? await supabase.from("profile_access").select("profile_id, user_id").in("profile_id", profileIds)
-      : { data: [], error: null };
-    if (accessError) throw new Error(accessError.message);
     return {
       members: (members ?? []).map((member) => ({
         id: member.id, userId: member.user_id, role: member.role,
@@ -87,7 +80,7 @@ export const listMembers = createServerFn({ method: "POST" })
         email: byId.get(member.user_id)?.email ?? "", name: byId.get(member.user_id)?.display_name ?? "",
         createdAt: member.created_at,
       })),
-      invites: invites ?? [], access: access ?? [],
+      invites: invites ?? [],
     };
   });
 

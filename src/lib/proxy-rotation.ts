@@ -21,23 +21,15 @@ export async function confirmRotation({
   wait?: (ms: number) => Promise<unknown>;
   attempts?: number;
 }) {
-  // Mobile providers can expose one or more short-lived exit addresses while
-  // the modem reconnects. Do not publish the first different IP as final:
-  // require the same new address in two fresh connections. Mobile exits flap
-  // during reconnect, so the two sightings do not have to be consecutive —
-  // otherwise every flap resets the counter and the wait burns the whole
-  // rotation timeout even though the IP changed long ago.
-  // Проверяем часто, чтобы подтверждение нового IP занимало секунды, а не минуту.
-  const sightings = new Map<string, number>();
+  // Для мобильного прокси первый успешный ответ с адресом, отличным от
+  // исходного, уже подтверждает смену. Дополнительная проверка удерживала
+  // интерфейс в состоянии «меняем IP» до общего тайм-аута провайдера.
   for (let attempt = 0; attempt < attempts; attempt++) {
-    // Короткие паузы: подтверждение занимает секунды, а не минуту.
     await wait(attempt === 0 ? 300 : 600);
     const result = await probe();
     const final = attempt === attempts - 1;
     const changedIp = result.ok && result.ip && result.ip !== previousIp ? result.ip : null;
-    const seen = changedIp !== null ? (sightings.get(changedIp) ?? 0) + 1 : 0;
-    if (changedIp !== null) sightings.set(changedIp, seen);
-    if (seen >= 2) {
+    if (changedIp !== null) {
       const saved = await record(result, true, true);
       if (saved && typeof saved === "object" && "staleRotation" in saved && saved.staleRotation === true) {
         return { ...result, rotationConfirmed: false };

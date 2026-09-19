@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { confirmRotation, rotationExpired, rotationOutcome } from "../src/lib/proxy-rotation";
 import { validateRotationUrl } from "../src/lib/proxy-input";
 
-test("rotation requires a stable different IP; temporary failures and unchanged addresses remain pending", async () => {
+test("rotation completes on the first different IP; failures and unchanged addresses remain pending", async () => {
   expect(rotationOutcome("1.2.3.4", { ok: true, ip: "1.2.3.4" }, false)).toBe("changing");
   expect(rotationOutcome("1.2.3.4", { ok: false }, false)).toBe("changing");
   expect(rotationOutcome(null, { ok: true, ip: "1.2.3.5" }, true)).toBe("error");
@@ -15,7 +15,7 @@ test("rotation requires a stable different IP; temporary failures and unchanged 
   });
   expect(result.ip).toBe("1.2.3.5");
   expect(result.rotationConfirmed).toBe(true);
-  expect(records).toHaveLength(4);
+  expect(records).toHaveLength(3);
   const finals: boolean[] = [];
   await expect(confirmRotation({
     previousIp: "1.2.3.4", probe: async () => ({ ok: true, ip: "1.2.3.4" }), attempts: 2,
@@ -24,8 +24,8 @@ test("rotation requires a stable different IP; temporary failures and unchanged 
   expect(finals).toEqual([false, true]);
 });
 
-test("rotation ignores a transient changed IP and confirms the stable address", async () => {
-  const ips = ["1.2.3.4", "1.2.3.5", "1.2.3.6", "1.2.3.6"];
+test("rotation immediately confirms the first changed address", async () => {
+  const ips = ["1.2.3.4", "1.2.3.5", "1.2.3.6"];
   const records: Array<[unknown, boolean, boolean]> = [];
   const result = await confirmRotation({
     previousIp: "1.2.3.4",
@@ -33,8 +33,8 @@ test("rotation ignores a transient changed IP and confirms the stable address", 
     record: async (value, final, confirmed) => { records.push([value, final, confirmed]); },
     wait: async () => {},
   });
-  expect(result.ip).toBe("1.2.3.6");
-  expect(records).toHaveLength(4);
+  expect(result.ip).toBe("1.2.3.5");
+  expect(records).toHaveLength(2);
   expect(records.at(-1)?.[1]).toBe(true);
   expect(records.at(-1)?.[2]).toBe(true);
 });

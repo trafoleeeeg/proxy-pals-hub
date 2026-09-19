@@ -85,7 +85,9 @@ function ProfilesWorkspace() {
   const [visibleColumns, setVisibleColumns] = useState<FixedColumn[]>(DEFAULT_COLUMNS);
   const [visibleFields, setVisibleFields] = useState<string[]>([]);
   const profiles = useQuery({ queryKey: ["profiles", ws?.teamId], queryFn: () => { if (!ws) throw new Error("Команда не загружена"); return listFn({ data: { teamId: ws.teamId } }); }, enabled: !!ws, refetchInterval: 20_000 });
-  const proxies = useQuery({ queryKey: ["proxies", ws?.teamId], queryFn: () => { if (!ws) throw new Error("Команда не загружена"); return proxiesFn({ data: { teamId: ws.teamId } }); }, enabled: !!ws });
+  // Пока идёт смена IP, опрашиваем прокси каждые 5 секунд — иначе плашка
+  // «меняем IP…» зависает на устаревших данных после завершения смены.
+  const proxies = useQuery({ queryKey: ["proxies", ws?.teamId], queryFn: () => { if (!ws) throw new Error("Команда не загружена"); return proxiesFn({ data: { teamId: ws.teamId } }); }, enabled: !!ws, refetchInterval: (query) => query.state.data?.some((proxy) => proxy.rotationStatus === "changing") ? 5000 : false });
   const metadata = useQuery({ queryKey: ["profile-metadata", ws?.teamId], queryFn: () => { if (!ws) throw new Error("Команда не загружена"); return metadataFn({ data: { teamId: ws.teamId } }); }, enabled: !!ws });
   const running = useMemo(() => new Set(runtime.running.map((p) => p.profileId)), [runtime.running]);
   const pending = useMemo(() => new Set([...runtime.pending, ...runtime.busy]), [runtime.pending, runtime.busy]);

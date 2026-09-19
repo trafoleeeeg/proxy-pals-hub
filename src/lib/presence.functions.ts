@@ -18,13 +18,15 @@ export type PresenceRow = {
 export const touchPresence = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(presenceSchema)
-  .handler(async ({ data, context }) => ({
-    lastSeenAt: await callServerRpc(context.supabase, "touch_presence", {
+  .handler(async ({ data, context }) => {
+    const { error } = await context.supabase.rpc("touch_presence", {
       _team_id: data.teamId,
       _profile_id: data.profileId ?? null,
       _device_label: data.deviceLabel ?? null,
-    }),
-  }));
+    });
+    if (error) throw new Error("Не удалось отметить активность");
+    return { ok: true };
+  });
 
 export const listPresence = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])

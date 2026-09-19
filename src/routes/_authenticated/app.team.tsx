@@ -15,6 +15,7 @@ import {
   setMemberScope,
 } from "@/lib/team.functions";
 import { listProfiles } from "@/lib/profiles.functions";
+import { listFolderAccess, setFolderAccess } from "@/lib/folders.functions";
 import { ProfileBulkDialog } from "@/components/profile-bulk";
 import { toggleVisibleSelection } from "@/components/profile-model";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -42,6 +43,8 @@ export function TeamPage() {
   const profilesFn = useServerFn(listProfiles);
   const accessFn = useServerFn(setProfileAccess);
   const scopeFn = useServerFn(setMemberScope);
+  const folderAccessListFn = useServerFn(listFolderAccess);
+  const folderAccessFn = useServerFn(setFolderAccess);
   const [email, setEmail] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [bulkAccess, setBulkAccess] = useState<string[] | null>(null);
@@ -64,6 +67,12 @@ export function TeamPage() {
     enabled: !!ws?.teamId && isOwner,
   });
 
+  const folderAccess = useQuery({
+    queryKey: ["folder-access", ws?.teamId],
+    queryFn: () => folderAccessListFn({ data: { teamId: ws!.teamId } }),
+    enabled: !!ws?.teamId && canManage,
+  });
+
   const log = useQuery({
     queryKey: ["audit", ws?.teamId],
     queryFn: () => audit({ data: { teamId: ws!.teamId } }),
@@ -76,7 +85,7 @@ export function TeamPage() {
   }, [profiles.data]);
 
   const refresh = async () => {
-    await Promise.all([qc.invalidateQueries({ queryKey: ["team"] }), qc.invalidateQueries({ queryKey: ["audit"] }), qc.invalidateQueries({ queryKey: ["profiles"] })]);
+    await Promise.all([qc.invalidateQueries({ queryKey: ["team"] }), qc.invalidateQueries({ queryKey: ["audit"] }), qc.invalidateQueries({ queryKey: ["profiles"] }), qc.invalidateQueries({ queryKey: ["folder-access"] })]);
   };
 
   const inviteMut = useMutation({
@@ -96,6 +105,13 @@ export function TeamPage() {
       scopeFn({ data: { teamId: ws!.teamId, userId: v.userId, scope: v.scope } }),
     onSuccess: async () => { toast.success("Уровень доступа изменён"); await refresh(); },
     onError: () => toast.error("Не удалось изменить уровень доступа. Это может сделать только владелец."),
+  });
+
+  const folderAccessMut = useMutation({
+    mutationFn: (v: { folder: string; userId: string; granted: boolean }) =>
+      folderAccessFn({ data: { teamId: ws!.teamId, folder: v.folder, userId: v.userId, granted: v.granted } }),
+    onSuccess: refresh,
+    onError: () => toast.error("Не удалось изменить доступ к папке. Обновите страницу и повторите попытку."),
   });
 
   const accessMut = useMutation({
@@ -152,6 +168,8 @@ export function TeamPage() {
     (team.data?.access ?? []).map((a) => `${a.profile_id}:${a.user_id}`),
   );
   const staff = (team.data?.members ?? []).filter((m) => m.role === "member");
+  const folders = [...new Set((profiles.data ?? []).map((p) => p.folder).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ru"));
+  const folderAccessSet = new Set((folderAccess.data ?? []).map((row) => `${row.folder}:${row.userId}`));
 
   return (
     <div>
@@ -163,6 +181,7 @@ export function TeamPage() {
         <TabsList>
           <TabsTrigger value="members">Участники</TabsTrigger>
           <TabsTrigger value="access">Доступы</TabsTrigger>
+          <TabsTrigger value="folders">Папки</TabsTrigger>
           <TabsTrigger value="log">Журнал</TabsTrigger>
         </TabsList>
 
@@ -317,6 +336,41 @@ export function TeamPage() {
                       Сначала пригласите сотрудников
                     </TableCell>
                   </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="folders">
+          <p className="mb-3 text-sm text-muted-foreground">Доступ к папке открывает сотруднику все профили внутри неё, включая новые.</p>
+          {folderAccess.isError && <p role="alert" className="py-3 text-sm text-destructive">Не удалось загрузить доступы к папкам. <Button variant="outline" onClick={() => folderAccess.refetch()}>Повторить</Button></p>}
+          <div className="overflow-x-auto rounded-lg border border-border bg-card">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Папка</TableHead>
+                  {staff.map((m) => <TableHead key={m.userId} className="text-center text-xs">{m.email}</TableHead>)}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {folders.map((name) => (
+                  <TableRow key={name}>
+                    <TableCell className="font-medium">{name}</TableCell>
+                    {staff.map((m) => (
+                      <TableCell key={m.userId} className="text-center">
+                        <Checkbox
+                          aria-label={`Доступ ${m.email} к папке ${name}`}
+                          disabled={folderAccessMut.isPending || folderAccess.isError}
+                          checked={folderAccessSet.has(`${name}:${m.userId}`)}
+                          onCheckedChange={(v) => folderAccessMut.mutate({ folder: name, userId: m.userId, granted: v === true })}
+                        />
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))}
+                {(!folders.length || !staff.length) && (
+                  <TableRow><TableCell className="py-8 text-sm text-muted-foreground">{!staff.length ? "Сначала пригласите сотрудников" : "Пока нет папок с профилями"}</TableCell></TableRow>
                 )}
               </TableBody>
             </Table>

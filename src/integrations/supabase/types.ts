@@ -194,6 +194,41 @@ export type Database = {
           },
         ]
       }
+      folder_access: {
+        Row: {
+          created_at: string
+          folder: string
+          granted_by: string | null
+          id: string
+          team_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          folder: string
+          granted_by?: string | null
+          id?: string
+          team_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          folder?: string
+          granted_by?: string | null
+          id?: string
+          team_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "folder_access_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profile_access: {
         Row: {
           created_at: string
@@ -772,6 +807,15 @@ export type Database = {
         }
         Returns: Json
       }
+      set_folder_access: {
+        Args: {
+          _folder: string
+          _granted: boolean
+          _team_id: string
+          _user_id: string
+        }
+        Returns: boolean
+      }
       set_member_scope: {
         Args: { _scope: string; _team_id: string; _user_id: string }
         Returns: boolean
@@ -782,6 +826,15 @@ export type Database = {
           _profile_ids: string[]
           _team_id: string
           _user_id: string
+        }
+        Returns: number
+      }
+      transfer_profiles: {
+        Args: {
+          _folder?: string
+          _profile_ids: string[]
+          _team_id: string
+          _user_id?: string
         }
         Returns: number
       }

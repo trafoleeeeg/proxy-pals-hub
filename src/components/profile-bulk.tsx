@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { bulkUpdateProfiles, bulkDeleteProfiles } from "@/lib/profiles.functions";
 import { listMembers, setProfilesAccess } from "@/lib/team.functions";
+import { transferProfiles } from "@/lib/folders.functions";
 import { generateFingerprint } from "@/lib/fingerprint";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ProfileFingerprint } from "./profile-fingerprint";
 import { fingerprintError, profileFingerprintPayload, splitTags, type ProfileChanges } from "./profile-model";
 
-export type BulkAction = "edit" | "move" | "access" | "delete";
+export type BulkAction = "edit" | "move" | "access" | "transfer" | "delete";
 export function ProfileBulkDialog({ action, ids, teamId, isOwner, blocked, proxies, onClose, onSaved }: {
   action: BulkAction; ids: string[]; teamId: string; isOwner: boolean; blocked: boolean;
   proxies: { id: string; label: string }[]; onClose: () => void; onSaved: () => void;
@@ -22,7 +23,8 @@ export function ProfileBulkDialog({ action, ids, teamId, isOwner, blocked, proxi
   const deleteFn = useServerFn(bulkDeleteProfiles);
   const accessFn = useServerFn(setProfilesAccess);
   const membersFn = useServerFn(listMembers);
-  const members = useQuery({ queryKey: ["team", teamId], queryFn: () => membersFn({ data: { teamId } }), enabled: isOwner && action === "access" });
+  const transferFn = useServerFn(transferProfiles);
+  const members = useQuery({ queryKey: ["team", teamId], queryFn: () => membersFn({ data: { teamId } }), enabled: isOwner && (action === "access" || action === "transfer") });
   const [fields, setFields] = useState<string[]>(action === "move" ? ["folder"] : []);
   const [folder, setFolder] = useState("");
   const [tags, setTags] = useState("");
@@ -40,6 +42,11 @@ export function ProfileBulkDialog({ action, ids, teamId, isOwner, blocked, proxi
     setBusy(true); setError(null);
     try {
       if (action === "delete") await deleteFn({ data: { teamId, ids } });
+      else if (action === "transfer") {
+        const target = folder.trim();
+        if (!target && !userId) return;
+        await transferFn({ data: { teamId, profileIds: ids, ...(target ? { folder: target } : {}), ...(userId ? { userId } : {}) } });
+      }
       else if (action === "access") {
         if (!userId) return;
         await accessFn({ data: { teamId, profileIds: ids, userId, granted } });
@@ -60,12 +67,18 @@ export function ProfileBulkDialog({ action, ids, teamId, isOwner, blocked, proxi
     } catch { setError("Операция не выполнена. Проверьте права, блокировки профилей и подключение; затем обновите список."); }
     finally { setBusy(false); }
   }
-  const titles = { edit: "Изменить выбранные профили", move: "Перенести в папку", access: "Доступ сотрудника", delete: "Удалить выбранные профили?" };
+  const titles = { edit: "Изменить выбранные профили", move: "Перенести в папку", access: "Доступ сотрудника", transfer: "Передать профили", delete: "Удалить выбранные профили?" };
   return <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose(); }}><DialogContent role={action === "delete" ? "alertdialog" : "dialog"} className="max-h-[90dvh] w-[calc(100%-2rem)] overflow-y-auto sm:max-w-xl">
     <DialogHeader className="min-w-0 pr-5"><DialogTitle className="break-words leading-snug tracking-normal">{titles[action]}</DialogTitle><DialogDescription>{action === "delete" ? `Будут удалены профили (${ids.length}), их облачные cookies и доступы сотрудников. Отменить удаление нельзя.` : `Выбрано профилей: ${ids.length}`}</DialogDescription></DialogHeader>
     {ids.length > 200 && <p role="alert" className="text-sm text-destructive">За одну операцию можно изменить до 200 профилей. Уменьшите выбор.</p>}
     {blocked && action !== "access" && <p role="alert" className="text-sm text-warning">Сначала закройте выбранные профили и завершите синхронизацию.</p>}
-    {action === "access" ? <div className="space-y-3">
+    {action === "transfer" ? <div className="space-y-3">
+      <p className="text-sm text-muted-foreground">Профили переедут в указанную папку, а выбранный сотрудник получит к ним доступ. Прежний доступ сохраняется.</p>
+      <Input aria-label="Папка назначения" placeholder="Папка назначения (необязательно)" value={folder} disabled={!enabled} onChange={(e) => setFolder(e.target.value)} />
+      {members.isPending && <p role="status" className="text-sm text-muted-foreground">Загрузка сотрудников…</p>}
+      {members.isError && <p role="alert" className="text-sm text-destructive">Не удалось загрузить сотрудников. <Button size="sm" variant="ghost" onClick={() => members.refetch()}>Повторить</Button></p>}
+      <Select value={userId} disabled={!enabled || members.isPending || members.isError} onValueChange={setUserId}><SelectTrigger aria-label="Сотрудник"><SelectValue placeholder="Сотрудник (необязательно)" /></SelectTrigger><SelectContent>{(members.data?.members ?? []).filter((member) => member.role === "member").map((member) => <SelectItem key={member.userId} value={member.userId}>{member.email}</SelectItem>)}</SelectContent></Select>
+    </div> : action === "access" ? <div className="space-y-3">
       {members.isPending && <p role="status" className="text-sm text-muted-foreground">Загрузка сотрудников…</p>}
       {members.isError && <p role="alert" className="text-sm text-destructive">Не удалось загрузить сотрудников. <Button size="sm" variant="ghost" onClick={() => members.refetch()}>Повторить</Button></p>}
       <Select value={userId} disabled={!enabled || members.isPending || members.isError} onValueChange={setUserId}><SelectTrigger aria-label="Сотрудник"><SelectValue placeholder="Сотрудник" /></SelectTrigger><SelectContent>{(members.data?.members ?? []).filter((member) => member.role === "member").map((member) => <SelectItem key={member.userId} value={member.userId}>{member.email}</SelectItem>)}</SelectContent></Select>
@@ -86,6 +99,6 @@ export function ProfileBulkDialog({ action, ids, teamId, isOwner, blocked, proxi
       })}
     </fieldset>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-    <DialogFooter><Button variant="outline" disabled={busy} onClick={onClose}>Отмена</Button><Button variant={action === "delete" ? "destructive" : "default"} disabled={!enabled || (action === "access" && (!userId || members.isError)) || ((action === "edit" || action === "move") && (!fields.length || (fields.includes("fingerprint") && !!fingerprintError(fingerprint))))} onClick={submit}>{busy ? "Выполняется…" : action === "delete" ? `Удалить ${ids.length}` : "Применить"}</Button></DialogFooter>
+    <DialogFooter><Button variant="outline" disabled={busy} onClick={onClose}>Отмена</Button><Button variant={action === "delete" ? "destructive" : "default"} disabled={!enabled || (action === "access" && (!userId || members.isError)) || (action === "transfer" && !folder.trim() && !userId) || ((action === "edit" || action === "move") && (!fields.length || (fields.includes("fingerprint") && !!fingerprintError(fingerprint))))} onClick={submit}>{busy ? "Выполняется…" : action === "delete" ? `Удалить ${ids.length}` : "Применить"}</Button></DialogFooter>
   </DialogContent></Dialog>;
 }

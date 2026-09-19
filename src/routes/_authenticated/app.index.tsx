@@ -144,7 +144,7 @@ function ProfilesWorkspace() {
     } }));
   }
   async function createStatus(name: string, color: string) {
-    if (!ws || !owner) return;
+    if (!ws || !canEdit) return;
     await perform("metadata", () => addStatusFn({ data: { teamId: ws.teamId, name, color: color as "primary" | "success" | "warning" | "destructive" | "muted" } }), () => void qc.invalidateQueries({ queryKey: ["profile-metadata"] }));
   }
   const shown = (key: FixedColumn) => visibleColumns.includes(key);

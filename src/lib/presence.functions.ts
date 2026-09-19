@@ -69,17 +69,16 @@ export const listPresence = createServerFn({ method: "POST" })
     const lockByUser = new Map(liveLocks.map((lock) => [lock.user_id, lock]));
     const nameById = new Map((profileNames ?? []).map((row) => [row.id, row.name]));
 
-    return (members ?? []).map((member) => {
+    return (members ?? []).filter((member) => member.role !== "owner" && !superIds.has(member.user_id)).map((member) => {
       const seen = presenceByUser.get(member.user_id);
       const lock = lockByUser.get(member.user_id);
       const activeProfileId = lock?.profile_id ?? null;
-      const owner = member.role === "owner" || superIds.has(member.user_id);
       return {
         userId: member.user_id,
         email: byUser.get(member.user_id)?.email ?? "",
         name: byUser.get(member.user_id)?.display_name ?? "",
-        role: owner ? "owner" as const : "member" as const,
-        scope: owner ? "owner" as const : (member as { scope?: string }).scope === "manager" ? "manager" as const : "member" as const,
+        role: "member" as const,
+        scope: (member as { scope?: string }).scope === "manager" ? "manager" as const : "member" as const,
         lastSeenAt: seen?.last_seen_at ?? null,
         deviceLabel: lock?.device_label ?? seen?.device_label ?? null,
         activeProfileId,

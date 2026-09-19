@@ -75,9 +75,9 @@ export const memberSchema = z.object({ teamId: uuidSchema, userId: uuidSchema })
 export const accessSchema = z.object({ profileId: uuidSchema, userId: uuidSchema, granted: z.boolean() }).strict();
 export const bulkAccessSchema = z.object({ teamId: uuidSchema, profileIds: profileIdsSchema, userId: uuidSchema, granted: z.boolean() }).strict();
 export const folderAccessSchema = z.object({
-  teamId: uuidSchema, folder: folder.pipe(z.string().min(0).max(200)), userId: uuidSchema, granted: z.boolean(),
+  teamId: uuidSchema, folder: folder.pipe(z.string().min(1).max(200)), userId: uuidSchema, granted: z.boolean(),
 }).strict();
 export const transferSchema = z.object({
   teamId: uuidSchema, profileIds: profileIdsSchema,
-  folder: folder.optional(), userId: uuidSchema.optional(),
+  folder: folder.pipe(z.string().min(1).max(200)).optional(), userId: uuidSchema.optional(),
 }).strict().refine((d) => d.folder !== undefined || d.userId !== undefined, "Укажите папку или сотрудника");

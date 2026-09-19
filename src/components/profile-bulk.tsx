@@ -12,28 +12,24 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ProfileFingerprint } from "./profile-fingerprint";
 import { fingerprintError, profileFingerprintPayload, splitTags, type ProfileChanges } from "./profile-model";
 
-export type BulkAction = "edit" | "move" | "access" | "transfer" | "delete";
-export function ProfileBulkDialog({ action, ids, teamId, isOwner, blocked, proxies, onClose, onSaved }: {
+// Профили передаются только между папками: доступ сотрудника зависит от папки.
+export type BulkAction = "edit" | "move" | "transfer" | "delete";
+export function ProfileBulkDialog({ action, ids, teamId, isOwner, blocked, proxies, folders = [], onClose, onSaved }: {
   action: BulkAction; ids: string[]; teamId: string; isOwner: boolean; blocked: boolean;
-  proxies: { id: string; label: string }[]; onClose: () => void; onSaved: () => void;
+  proxies: { id: string; label: string }[]; folders?: string[]; onClose: () => void; onSaved: () => void;
 }) {
   const updateFn = useServerFn(bulkUpdateProfiles);
   const deleteFn = useServerFn(bulkDeleteProfiles);
-  const accessFn = useServerFn(setProfilesAccess);
-  const membersFn = useServerFn(listMembers);
   const transferFn = useServerFn(transferProfiles);
-  const members = useQuery({ queryKey: ["team", teamId], queryFn: () => membersFn({ data: { teamId } }), enabled: isOwner && (action === "access" || action === "transfer") });
   const [fields, setFields] = useState<string[]>(action === "move" ? ["folder"] : []);
   const [folder, setFolder] = useState("");
   const [tags, setTags] = useState("");
   const [notes, setNotes] = useState("");
   const [proxyId, setProxyId] = useState("none");
   const [fingerprint, setFingerprint] = useState(() => generateFingerprint());
-  const [userId, setUserId] = useState("");
-  const [granted, setGranted] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const enabled = isOwner && ids.length > 0 && ids.length <= 200 && !busy && (!blocked || action === "access");
+  const enabled = isOwner && ids.length > 0 && ids.length <= 200 && !busy && !blocked;
 
   async function submit() {
     if (!enabled) return;

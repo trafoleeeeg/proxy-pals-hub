@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState } from "react";
-import { Globe2, MoreVertical, CircleUserRound, Copy, Cookie, FolderInput, LockKeyhole, Pencil, Play, Plus, RefreshCw, Search, Settings2, Square, Tag, Trash2, UserPlus, X } from "lucide-react";
+import { Globe2, MoreVertical, CircleUserRound, Copy, Cookie, FolderInput, LockKeyhole, Pencil, Play, Plus, RefreshCw, Search, Settings2, Square, Tag, Trash2, X } from "lucide-react";
 
 const statusColor: Record<string, string> = {
   primary: "text-primary", success: "text-success", warning: "text-warning",
@@ -185,7 +185,6 @@ function ProfilesWorkspace() {
       <Button variant="ghost" size="icon" title="Снять выбор" aria-label="Снять выбор" onClick={() => setSelected([])}><X className="size-4" /></Button>
       <Button variant="outline" size="sm" disabled={!!busy} onClick={() => setAction({ mode: "edit", ids: [...selected] })}><Pencil className="size-4" />Изменить</Button>
       <Button variant="outline" size="sm" disabled={!!busy} onClick={() => setAction({ mode: "move", ids: [...selected] })}><FolderInput className="size-4" />В папку</Button>
-      <Button variant="outline" size="sm" disabled={!!busy} onClick={() => setAction({ mode: "access", ids: [...selected] })}><UserPlus className="size-4" />Доступ</Button>
       <Button variant="outline" size="sm" disabled={!!busy} onClick={() => setAction({ mode: "transfer", ids: [...selected] })}><FolderInput className="size-4" />Передать</Button>
       <Button variant="outline" size="icon" title="Удалить выбранные профили" aria-label="Удалить выбранные профили" disabled={!!busy} onClick={() => setAction({ mode: "delete", ids: [...selected] })}><Trash2 className="size-4 text-destructive" /></Button>
     </div>}

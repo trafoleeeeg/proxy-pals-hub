@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ClipboardPaste, Columns3, Pencil, Plus, Tag } from "lucide-react";
+import { ClipboardPaste, Columns3, Pencil, Plus, Tag, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -32,9 +32,28 @@ export function ColumnSettings({ visible, onChange, fields, visibleFields, onFie
   </DropdownMenu>;
 }
 
-export function MetadataManager({ open, onClose, statuses, fields, busy, onAddStatus, onAddField }: {
+function StatusEditorRow({ status, busy, onUpdate, onDelete }: {
+  status: ProfileStatus; busy: boolean;
+  onUpdate: (id: string, name: string, color: string) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+}) {
+  const [name, setName] = useState(status.name);
+  const [color, setColor] = useState(status.color);
+  useEffect(() => { setName(status.name); setColor(status.color); }, [status.id, status.name, status.color]);
+  const dirty = name.trim() !== status.name || color !== status.color;
+  return <div className="grid grid-cols-[1fr_9rem_auto_auto] items-center gap-2">
+    <Input aria-label={"Название статуса " + status.name} value={name} maxLength={80} onChange={(event) => setName(event.target.value)} />
+    <Select value={color} onValueChange={setColor}><SelectTrigger aria-label={"Цвет статуса " + status.name}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="primary">Фиолетовый</SelectItem><SelectItem value="success">Зелёный</SelectItem><SelectItem value="warning">Жёлтый</SelectItem><SelectItem value="destructive">Красный</SelectItem><SelectItem value="muted">Серый</SelectItem></SelectContent></Select>
+    <Button size="icon" variant="outline" aria-label={"Сохранить статус " + status.name} disabled={busy || !dirty || !name.trim()} onClick={() => void onUpdate(status.id, name.trim(), color)}><Pencil /></Button>
+    <Button size="icon" variant="outline" aria-label={"Удалить статус " + status.name} disabled={busy} onClick={() => { if (window.confirm(`Удалить статус «${status.name}»? Он пропадёт у всех профилей.`)) void onDelete(status.id); }}><Trash2 /></Button>
+  </div>;
+}
+
+export function MetadataManager({ open, onClose, statuses, fields, busy, onAddStatus, onAddField, onUpdateStatus, onDeleteStatus }: {
   open: boolean; onClose: () => void; statuses: ProfileStatus[]; fields: ProfileField[]; busy: boolean;
   onAddStatus: (name: string, color: string) => Promise<void>; onAddField: (name: string, type: string) => Promise<void>;
+  onUpdateStatus: (id: string, name: string, color: string) => Promise<void>;
+  onDeleteStatus: (id: string) => Promise<void>;
 }) {
   const [statusName, setStatusName] = useState("");
   const [statusColor, setStatusColor] = useState("primary");
@@ -43,7 +62,11 @@ export function MetadataManager({ open, onClose, statuses, fields, busy, onAddSt
   return <Dialog open={open} onOpenChange={(value) => { if (!value && !busy) onClose(); }}><DialogContent className="w-[calc(100%-2rem)] sm:max-w-lg">
     <DialogHeader><DialogTitle>Поля профилей</DialogTitle><DialogDescription>Статусы и дополнительные колонки общие для всей команды.</DialogDescription></DialogHeader>
     <div className="space-y-5">
-      <section className="space-y-2"><h3 className="text-sm font-medium">Статусы</h3><div className="flex flex-wrap gap-2">{statuses.map((status) => <span key={status.id} className="rounded-md border border-border bg-secondary px-2 py-1 text-xs">{status.name}</span>)}{!statuses.length && <span className="text-xs text-muted-foreground">Статусов пока нет</span>}</div>
+      <section className="space-y-2"><h3 className="text-sm font-medium">Статусы</h3>
+        <div className="space-y-2">
+          {statuses.map((status) => <StatusEditorRow key={status.id} status={status} busy={busy} onUpdate={onUpdateStatus} onDelete={onDeleteStatus} />)}
+          {!statuses.length && <span className="text-xs text-muted-foreground">Статусов пока нет</span>}
+        </div>
         <div className="grid grid-cols-[1fr_9rem_auto] gap-2"><Input aria-label="Название статуса" placeholder="Например, Готов" value={statusName} maxLength={80} onChange={(event) => setStatusName(event.target.value)} /><Select value={statusColor} onValueChange={setStatusColor}><SelectTrigger aria-label="Цвет статуса"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="primary">Фиолетовый</SelectItem><SelectItem value="success">Зелёный</SelectItem><SelectItem value="warning">Жёлтый</SelectItem><SelectItem value="destructive">Красный</SelectItem><SelectItem value="muted">Серый</SelectItem></SelectContent></Select><Button size="icon" aria-label="Добавить статус" disabled={busy || !statusName.trim()} onClick={() => void onAddStatus(statusName, statusColor).then(() => setStatusName(""))}><Plus /></Button></div>
       </section>
       <section className="space-y-2 border-t border-border pt-4"><h3 className="text-sm font-medium">Дополнительные колонки</h3><div className="space-y-1">{fields.map((field) => <div key={field.id} className="flex items-center gap-2 text-sm"><Tag className="size-3 text-muted-foreground" />{field.name}<span className="ml-auto text-xs text-muted-foreground">{field.field_type === "text" ? "Текст" : field.field_type === "number" ? "Число" : field.field_type === "date" ? "Дата" : "Ссылка"}</span></div>)}{!fields.length && <span className="text-xs text-muted-foreground">Дополнительных колонок пока нет</span>}</div>

@@ -23,7 +23,7 @@ import { ProfileBulkDialog, type BulkAction } from "@/components/profile-bulk";
 import { ProfileProxyCell, useProxyOps } from "@/components/profile-proxy";
 import { ColumnSettings, InlineText, MetadataManager, NotesCell, ResizableHead, StatusCell, useColumnWidths, type FixedColumn } from "@/components/profile-table-tools";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { createProfileField, createProfileStatus, listProfileMetadata } from "@/lib/profile-metadata.functions";
+import { createProfileField, createProfileStatus, deleteProfileStatus, listProfileMetadata, updateProfileStatus } from "@/lib/profile-metadata.functions";
 import { fingerprintError, profileFingerprintPayload, splitTags, toggleVisibleSelection } from "@/components/profile-model";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -74,6 +74,8 @@ function ProfilesWorkspace() {
   const metadataFn = useServerFn(listProfileMetadata);
   const addStatusFn = useServerFn(createProfileStatus);
   const addFieldFn = useServerFn(createProfileField);
+  const updateStatusFn = useServerFn(updateProfileStatus);
+  const deleteStatusFn = useServerFn(deleteProfileStatus);
   const runtime = useDesktopProfileLifecycle();
   const proxyOps = useProxyOps(ws?.teamId);
   const foldersFn = useServerFn(listFolders);
@@ -238,7 +240,7 @@ function ProfilesWorkspace() {
 
     {action && ws && <ProfileBulkDialog action={action.mode} ids={action.ids} teamId={ws.teamId} isOwner={manage} blocked={action.ids.some(locked)} proxies={proxies.data ?? []} folders={folderNames} onClose={() => setAction(null)} onSaved={() => { setSelected([]); refresh(); }} />}
     {cookiesProfile && <ProfileCookies profileId={cookiesProfile.id} name={cookiesProfile.name} isOwner={owner} locked={locked(cookiesProfile.id)} onClose={() => setCookiesId(null)} onSaved={refresh} />}
-    {ws && <MetadataManager open={metadataOpen} onClose={() => setMetadataOpen(false)} statuses={metadata.data?.statuses ?? []} fields={metadata.data?.fields ?? []} busy={!!busy} onAddStatus={async (name, color) => { await perform("metadata", () => addStatusFn({ data: { teamId: ws.teamId, name, color: color as "primary" | "success" | "warning" | "destructive" | "muted" } }), () => void qc.invalidateQueries({ queryKey: ["profile-metadata"] })); }} onAddField={async (name, fieldType) => { await perform("metadata", () => addFieldFn({ data: { teamId: ws.teamId, name, fieldType: fieldType as "text" | "number" | "date" | "url" } }), () => void qc.invalidateQueries({ queryKey: ["profile-metadata"] })); }} />}
+    {ws && <MetadataManager open={metadataOpen} onClose={() => setMetadataOpen(false)} statuses={metadata.data?.statuses ?? []} fields={metadata.data?.fields ?? []} busy={!!busy} onAddStatus={async (name, color) => { await perform("metadata", () => addStatusFn({ data: { teamId: ws.teamId, name, color: color as "primary" | "success" | "warning" | "destructive" | "muted" } }), () => void qc.invalidateQueries({ queryKey: ["profile-metadata"] })); }} onAddField={async (name, fieldType) => { await perform("metadata", () => addFieldFn({ data: { teamId: ws.teamId, name, fieldType: fieldType as "text" | "number" | "date" | "url" } }), () => void qc.invalidateQueries({ queryKey: ["profile-metadata"] })); }} onUpdateStatus={async (statusId, name, color) => { await perform("metadata", () => updateStatusFn({ data: { teamId: ws.teamId, statusId, name, color: color as "primary" | "success" | "warning" | "destructive" | "muted" } }), () => { void qc.invalidateQueries({ queryKey: ["profile-metadata"] }); refresh(); }); }} onDeleteStatus={async (statusId) => { await perform("metadata", () => deleteStatusFn({ data: { teamId: ws.teamId, statusId } }), () => { void qc.invalidateQueries({ queryKey: ["profile-metadata"] }); refresh(); }); }} />}
     <Dialog open={!!editing} onOpenChange={(open) => { if (!open && !busy) setEditing(null); }}><DialogContent className="max-h-[90dvh] w-[calc(100%-2rem)] overflow-y-auto sm:max-w-2xl">
       <DialogHeader><DialogTitle>{editing?.id ? "Изменить профиль" : "Новый профиль"}</DialogTitle><DialogDescription>Настройки профиля Windows</DialogDescription></DialogHeader>
       {editing && <fieldset disabled={!!busy} className="space-y-3">

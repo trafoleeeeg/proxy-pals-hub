@@ -268,9 +268,11 @@ function renderer() {
   });
   document.addEventListener("pointerdown", (event) => {
     if (!event.target.closest(".popover,.toolbar-button,#bookmark-manager,#proxy-page")) closePopovers();
+    // Клик по любой части оболочки закрывает окно расширения, как в Chrome.
+    if (!event.target.closest(".pinned-extension,#extensions")) void run({ action: "close-extension" });
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") closePopovers();
+    if (event.key === "Escape") { closePopovers(); void run({ action: "close-extension" }); }
   });
   api.subscribe((incoming) => {
     if (incoming.focusAddress) { address.focus(); address.select(); return; }

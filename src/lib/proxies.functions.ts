@@ -39,7 +39,7 @@ export type ProxyListRow = {
 };
 
 async function requireTeam(context: Context, teamId: string, manage = true) {
-  const denied = manage ? "Недостаточно прав: нужен уровень администратора" : "Нет доступа к команде";
+  const denied = manage ? "Недостаточно прав для управления прокси" : "Нет доступа к команде";
   const { data: team, error: teamError } = await context.supabase.from("teams").select("owner_id")
     .eq("id", teamId).maybeSingle();
   if (teamError || !team) throw new Error(denied);
@@ -47,7 +47,11 @@ async function requireTeam(context: Context, teamId: string, manage = true) {
   const { data, error } = await context.supabase.from("team_members").select("scope")
     .eq("team_id", teamId).eq("user_id", context.userId).maybeSingle();
   if (error || !data) throw new Error(denied);
-  if (manage && (data as { scope?: string }).scope !== "manager") throw new Error(denied);
+  if (!manage || (data as { scope?: string }).scope === "manager") return;
+  // Сотруднику управление прокси разрешает владелец точечно.
+  const { memberPermissions } = await import("./server-db");
+  const permissions = await memberPermissions(context, teamId);
+  if (!permissions["proxy.manage"]) throw new Error(denied);
 }
 
 async function requireProxy(context: Context, target: Target) {

@@ -11,15 +11,14 @@ import {
   revokeInvite,
   removeMember,
   listAudit,
-  setProfileAccess,
+  listMemberPermissions,
+  setMemberPermissions,
   setMemberScope,
   createEmployee,
 } from "@/lib/team.functions";
-import { listProfiles } from "@/lib/profiles.functions";
+import { PERMISSION_LABELS, PERMISSION_ORDER, EMPTY_PERMISSIONS, type PermissionKey } from "@/lib/usePermissions";
 import { listFolderAccess, setFolderAccess, listFolders, createFolder, renameFolder, deleteFolder } from "@/lib/folders.functions";
 import { listPresence } from "@/lib/presence.functions";
-import { ProfileBulkDialog } from "@/components/profile-bulk";
-import { toggleVisibleSelection } from "@/components/profile-model";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,8 +41,8 @@ export function TeamPage() {
   const revoke = useServerFn(revokeInvite);
   const kick = useServerFn(removeMember);
   const audit = useServerFn(listAudit);
-  const profilesFn = useServerFn(listProfiles);
-  const accessFn = useServerFn(setProfileAccess);
+  const permissionsListFn = useServerFn(listMemberPermissions);
+  const permissionsSaveFn = useServerFn(setMemberPermissions);
   const scopeFn = useServerFn(setMemberScope);
   const folderAccessListFn = useServerFn(listFolderAccess);
   const folderAccessFn = useServerFn(setFolderAccess);
@@ -56,11 +55,9 @@ export function TeamPage() {
   const [newFolder, setNewFolder] = useState("");
   const [employee, setEmployee] = useState({ email: "", password: "", displayName: "" });
   const [email, setEmail] = useState("");
-  const [selected, setSelected] = useState<string[]>([]);
-  const [bulkAccess, setBulkAccess] = useState<string[] | null>(null);
   const [removing, setRemoving] = useState<{ userId: string; email: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { setSelected([]); setBulkAccess(null); setRemoving(null); }, [ws?.teamId]);
+  useEffect(() => { setRemoving(null); }, [ws?.teamId]);
 
   const isOwner = ws?.role === "owner";
   const canManage = !!ws?.canManage;
@@ -71,9 +68,9 @@ export function TeamPage() {
     enabled: !!ws?.teamId && isOwner,
   });
 
-  const profiles = useQuery({
-    queryKey: ["profiles", ws?.teamId],
-    queryFn: () => profilesFn({ data: { teamId: ws!.teamId } }),
+  const rights = useQuery({
+    queryKey: ["member-permissions", ws?.teamId],
+    queryFn: () => permissionsListFn({ data: { teamId: ws!.teamId } }),
     enabled: !!ws?.teamId && isOwner,
   });
 
@@ -102,13 +99,8 @@ export function TeamPage() {
     enabled: !!ws?.teamId && canManage,
   });
 
-  useEffect(() => {
-    const rows = profiles.data;
-    if (rows) setSelected((current) => current.filter((id) => rows.some((profile) => profile.id === id)));
-  }, [profiles.data]);
-
   const refresh = async () => {
-    await Promise.all([qc.invalidateQueries({ queryKey: ["team"] }), qc.invalidateQueries({ queryKey: ["audit"] }), qc.invalidateQueries({ queryKey: ["profiles"] }), qc.invalidateQueries({ queryKey: ["folder-access"] }), qc.invalidateQueries({ queryKey: ["folders"] }), qc.invalidateQueries({ queryKey: ["presence"] })]);
+    await Promise.all([qc.invalidateQueries({ queryKey: ["team"] }), qc.invalidateQueries({ queryKey: ["audit"] }), qc.invalidateQueries({ queryKey: ["profiles"] }), qc.invalidateQueries({ queryKey: ["folder-access"] }), qc.invalidateQueries({ queryKey: ["folders"] }), qc.invalidateQueries({ queryKey: ["presence"] }), qc.invalidateQueries({ queryKey: ["member-permissions"] }), qc.invalidateQueries({ queryKey: ["permissions"] })]);
   };
 
   const inviteMut = useMutation({
@@ -172,11 +164,11 @@ export function TeamPage() {
     onError: (error: Error) => toast.error(error.message || "Не удалось создать учётную запись"),
   });
 
-  const accessMut = useMutation({
-    mutationFn: (v: { profileId: string; userId: string; granted: boolean }) =>
-      accessFn({ data: v }),
+  const rightsMut = useMutation({
+    mutationFn: (v: { userId: string; permissions: Record<PermissionKey, boolean> }) =>
+      permissionsSaveFn({ data: { teamId: ws!.teamId, userId: v.userId, permissions: v.permissions } }),
     onSuccess: refresh,
-    onError: () => toast.error("Не удалось изменить доступ. Обновите список и повторите попытку."),
+    onError: () => toast.error("Не удалось изменить права сотрудника. Обновите страницу и повторите попытку."),
   });
 
   async function removeSelectedMember() {
@@ -222,9 +214,11 @@ export function TeamPage() {
     );
   }
 
-  const accessSet = new Set(
-    (team.data?.access ?? []).map((a) => `${a.profile_id}:${a.user_id}`),
-  );
+  const rightsByUser = new Map((rights.data ?? []).map((row) => [row.userId, row]));
+  const rightsOf = (userId: string): Record<PermissionKey, boolean> => {
+    const row = rightsByUser.get(userId);
+    return Object.fromEntries(PERMISSION_ORDER.map((key) => [key, row?.[key] === true])) as Record<PermissionKey, boolean>;
+  };
   const staff = (team.data?.members ?? []).filter((m) => m.role === "member");
   const folderRows = folderList.data ?? [];
   const folders = folderRows.map((row) => row.name);
@@ -239,7 +233,7 @@ export function TeamPage() {
       <Tabs defaultValue="members" className="mt-6">
         <TabsList>
           <TabsTrigger value="members">Участники</TabsTrigger>
-          <TabsTrigger value="access">Доступы</TabsTrigger>
+          <TabsTrigger value="rights">Права</TabsTrigger>
           <TabsTrigger value="folders">Папки</TabsTrigger>
           <TabsTrigger value="staff">Сотрудники</TabsTrigger>
           <TabsTrigger value="log">Журнал</TabsTrigger>
@@ -347,59 +341,56 @@ export function TeamPage() {
           )}
         </TabsContent>
 
-        <TabsContent value="access">
-          {profiles.isPending && <p role="status" className="py-3 text-sm">Загрузка профилей…</p>}
-          {profiles.isError && <p role="alert" className="py-3 text-sm text-destructive">Не удалось загрузить профили. <Button variant="outline" onClick={() => profiles.refetch()}>Повторить</Button></p>}
-          <div className="mb-3 flex flex-wrap items-center gap-3"><span className="text-sm text-muted-foreground">Выбрано: {selected.length}</span><Button variant="outline" disabled={!selected.length || team.isError || accessMut.isPending} onClick={() => setBulkAccess([...selected])}><UserPlus className="size-4" />Изменить доступ</Button></div>
+        <TabsContent value="rights">
+          <p className="mb-3 text-sm text-muted-foreground">Сотрудник работает только с профилями в открытых ему папках. Здесь вы решаете, что именно он может делать: по умолчанию — ничего, кроме запуска профилей.</p>
+          {rights.isPending && <p role="status" className="py-3 text-sm">Загрузка прав…</p>}
+          {rights.isError && <p role="alert" className="py-3 text-sm text-destructive">Не удалось загрузить права. <Button variant="outline" onClick={() => rights.refetch()}>Повторить</Button></p>}
           <div className="overflow-x-auto rounded-lg border border-border bg-card">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-10"><Checkbox aria-label="Выбрать все профили для доступа" checked={!selected.length ? false : selected.length === profiles.data?.length ? true : "indeterminate"} disabled={!profiles.data?.length} onCheckedChange={(v) => setSelected(v === true ? (profiles.data ?? []).map((p) => p.id) : [])} /></TableHead>
-                  <TableHead>Профиль</TableHead>
-                  {staff.map((m) => (
-                    <TableHead key={m.userId} className="text-center text-xs">
-                      {m.email}
-                    </TableHead>
+                  <TableHead>Сотрудник</TableHead>
+                  {PERMISSION_ORDER.map((key) => (
+                    <TableHead key={key} className="text-center text-xs">{PERMISSION_LABELS[key]}</TableHead>
                   ))}
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(profiles.data ?? []).map((p) => (
-                  <TableRow key={p.id}>
-                    <TableCell><Checkbox aria-label={`Выбрать ${p.name}`} checked={selected.includes(p.id)} onCheckedChange={(v) => setSelected((current) => toggleVisibleSelection(current, [p.id], v === true))} /></TableCell>
-                    <TableCell className="font-medium">{p.name}</TableCell>
-                    {staff.map((m) => {
-                      const granted = accessSet.has(`${p.id}:${m.userId}`);
-                      return (
-                        <TableCell key={m.userId} className="text-center">
+                {staff.map((m) => {
+                  const current = rightsOf(m.userId);
+                  const admin = m.scope === "manager";
+                  return (
+                    <TableRow key={m.userId}>
+                      <TableCell className="font-medium">
+                        {m.email}
+                        {admin && <Badge variant="outline" className="ml-2">администратор</Badge>}
+                      </TableCell>
+                      {PERMISSION_ORDER.map((key) => (
+                        <TableCell key={key} className="text-center">
                           <Checkbox
-                            aria-label={`Доступ ${m.email} к ${p.name}`}
-                            disabled={accessMut.isPending || team.isError || !!bulkAccess}
-                            checked={granted}
-                            onCheckedChange={(v) =>
-                              accessMut.mutate({
-                                profileId: p.id,
-                                userId: m.userId,
-                                granted: v === true,
-                              })
-                            }
+                            aria-label={`${PERMISSION_LABELS[key]} — ${m.email}`}
+                            disabled={admin || rightsMut.isPending || rights.isError}
+                            checked={admin || current[key]}
+                            onCheckedChange={(v) => rightsMut.mutate({ userId: m.userId, permissions: { ...current, [key]: v === true } })}
                           />
                         </TableCell>
-                      );
-                    })}
-                  </TableRow>
-                ))}
-                {staff.length === 0 && (
-                  <TableRow>
-                    <TableCell className="py-8 text-sm text-muted-foreground">
-                      Сначала пригласите сотрудников
-                    </TableCell>
-                  </TableRow>
+                      ))}
+                    </TableRow>
+                  );
+                })}
+                {!staff.length && (
+                  <TableRow><TableCell className="py-8 text-sm text-muted-foreground">Сначала создайте учётные записи сотрудников</TableCell></TableRow>
                 )}
               </TableBody>
             </Table>
           </div>
+          {!!staff.length && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" disabled={rightsMut.isPending} onClick={() => staff.forEach((m) => { if (m.scope !== "manager") rightsMut.mutate({ userId: m.userId, permissions: { ...EMPTY_PERMISSIONS } }); })}>
+                Снять все права
+              </Button>
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="folders">
@@ -557,7 +548,6 @@ export function TeamPage() {
           </div>
         </TabsContent>
       </Tabs>
-      {bulkAccess && ws && <ProfileBulkDialog action="access" ids={bulkAccess} teamId={ws.teamId} isOwner={isOwner} blocked={false} proxies={[]} onClose={() => setBulkAccess(null)} onSaved={() => { setSelected([]); void refresh(); }} />}
       <Dialog open={!!removing} onOpenChange={(open) => { if (!open && !busy) setRemoving(null); }}><DialogContent role="alertdialog" className="w-[calc(100%-2rem)]"><DialogHeader><DialogTitle>Удалить сотрудника?</DialogTitle><DialogDescription className="break-words">{removing?.email} потеряет доступ к профилям команды.</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" disabled={busy} onClick={() => setRemoving(null)}>Отмена</Button><Button variant="destructive" disabled={busy} onClick={removeSelectedMember}>{busy ? "Удаление…" : "Удалить сотрудника"}</Button></DialogFooter></DialogContent></Dialog>
     </div>
   );

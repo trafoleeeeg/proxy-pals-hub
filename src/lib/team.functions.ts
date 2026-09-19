@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { acceptInviteSchema, accessSchema, bulkAccessSchema, inviteIdSchema, inviteSchema, employeeSchema, memberSchema, teamSchema, workspaceSchema } from "./server-validation";
-import { callServerRpc, requireProfile, requireTeamManager, type ServerContext, type TeamScope } from "./server-db";
+import { acceptInviteSchema, inviteIdSchema, inviteSchema, employeeSchema, memberSchema, teamSchema, workspaceSchema } from "./server-validation";
+import { callServerRpc, memberPermissions, requireTeamManager, PERMISSION_KEYS, type Permission, type PermissionMap, type ServerContext, type TeamScope } from "./server-db";
 import { z } from "zod";
 
 export type Workspace = {
@@ -73,13 +73,6 @@ export const listMembers = createServerFn({ method: "POST" })
       .select("id, email, token, expires_at, accepted_at, created_at").eq("team_id", data.teamId)
       .is("accepted_at", null).order("created_at", { ascending: false });
     if (inviteError) throw new Error(inviteError.message);
-    const { data: profiles, error: profileError } = await supabase.from("browser_profiles").select("id").eq("team_id", data.teamId);
-    if (profileError) throw new Error(profileError.message);
-    const profileIds = (profiles ?? []).map((profile) => profile.id);
-    const { data: access, error: accessError } = profileIds.length
-      ? await supabase.from("profile_access").select("profile_id, user_id").in("profile_id", profileIds)
-      : { data: [], error: null };
-    if (accessError) throw new Error(accessError.message);
     return {
       members: (members ?? []).map((member) => ({
         id: member.id, userId: member.user_id, role: member.role,
@@ -87,7 +80,7 @@ export const listMembers = createServerFn({ method: "POST" })
         email: byId.get(member.user_id)?.email ?? "", name: byId.get(member.user_id)?.display_name ?? "",
         createdAt: member.created_at,
       })),
-      invites: invites ?? [], access: access ?? [],
+      invites: invites ?? [],
     };
   });
 
@@ -124,23 +117,49 @@ export const acceptInvite = createServerFn({ method: "POST" })
     teamId: await callServerRpc(context.supabase, "accept_team_invite", { _token: data.token }),
   }));
 
-export const setProfileAccess = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth]).inputValidator(accessSchema)
+// Доступ к профилям выдаётся только через папки. Точечная выдача прав на
+// отдельный профиль убрана намеренно.
+export const getMyPermissions = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth]).inputValidator(teamSchema)
+  .handler(async ({ data, context }): Promise<PermissionMap & { scope: TeamScope | null }> =>
+    memberPermissions(context, data.teamId));
+
+export const listMemberPermissions = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth]).inputValidator(teamSchema)
   .handler(async ({ data, context }) => {
-    const profile = await requireProfile(context, data.profileId, true);
-    await callServerRpc(context.supabase, "set_profiles_access", {
-      _team_id: profile.team_id, _profile_ids: [profile.id], _user_id: data.userId, _granted: data.granted,
+    await requireTeamManager(context, data.teamId);
+    const { data: rows, error } = await context.supabase.from("member_permissions" as never)
+      .select("*").eq("team_id", data.teamId);
+    if (error) throw new Error("Не удалось загрузить права сотрудников");
+    return ((rows ?? []) as Record<string, unknown>[]).map((row) => ({
+      userId: String(row["user_id"]),
+      "profile.create": row["can_create_profile"] === true,
+      "profile.edit": row["can_edit_profile"] === true,
+      "profile.delete": row["can_delete_profile"] === true,
+      "profile.proxy": row["can_change_profile_proxy"] === true,
+      "folder.manage": row["can_manage_folders"] === true,
+      "proxy.manage": row["can_manage_proxies"] === true,
+      "bookmarks.manage": row["can_manage_bookmarks"] === true,
+    }));
+  });
+
+export const setMemberPermissions = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) => z.object({
+    teamId: z.string().uuid(), userId: z.string().uuid(),
+    permissions: z.object(Object.fromEntries(PERMISSION_KEYS.map((key) => [key, z.boolean()])) as Record<(typeof PERMISSION_KEYS)[number], z.ZodBoolean>).strict(),
+  }).strict().parse(input))
+  .handler(async ({ data, context }) => {
+    await requireTeamManager(context, data.teamId);
+    await callServerRpc(context.supabase, "set_member_permissions", {
+      _team_id: data.teamId, _user_id: data.userId,
+      _create: data.permissions["profile.create"], _edit: data.permissions["profile.edit"],
+      _delete: data.permissions["profile.delete"], _proxy: data.permissions["profile.proxy"],
+      _folders: data.permissions["folder.manage"], _proxies: data.permissions["proxy.manage"],
+      _bookmarks: data.permissions["bookmarks.manage"],
     });
     return { ok: true };
   });
-
-export const setProfilesAccess = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth]).inputValidator(bulkAccessSchema)
-  .handler(async ({ data, context }) => ({
-    updated: await callServerRpc(context.supabase, "set_profiles_access", {
-      _team_id: data.teamId, _profile_ids: data.profileIds, _user_id: data.userId, _granted: data.granted,
-    }),
-  }));
 
 export const setMemberScope = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])

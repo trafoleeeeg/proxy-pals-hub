@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { bookmarkDefaultsSchema, DEFAULT_TEAM_BOOKMARKS } from "./bookmark-defaults";
-import { callServerRpc, requireTeamAccess, requireTeamManager } from "./server-db";
+import { callServerRpc, requirePermission, requireTeamAccess } from "./server-db";
 import { z } from "zod";
 
 const teamInput = z.object({ teamId: z.string().uuid() }).strict();
@@ -29,7 +29,7 @@ export const getBookmarkDefaults = createServerFn({ method: "POST" })
 export const saveBookmarkDefaults = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth]).inputValidator(saveInput)
   .handler(async ({ data, context }) => {
-    await requireTeamManager(context, data.teamId);
+    await requirePermission(context, data.teamId, "bookmarks.manage");
     const raw = await callServerRpc(context.supabase, "save_team_bookmark_defaults", {
       _team_id: data.teamId,
       _bookmarks: data.bookmarks,

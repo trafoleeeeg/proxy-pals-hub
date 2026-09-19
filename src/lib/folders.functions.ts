@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { createFolderSchema, folderAccessSchema, folderIdSchema, renameFolderSchema, teamSchema, transferSchema } from "./server-validation";
-import { callServerRpc, requireTeamManager, writeAudit } from "./server-db";
+import { accessibleFolders, callServerRpc, requirePermission, requireTeamManager, writeAudit } from "./server-db";
 
 export type FolderAccessRow = { folder: string; userId: string };
 
@@ -33,12 +33,12 @@ export const transferProfiles = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(transferSchema)
   .handler(async ({ data, context }) => {
-    await requireTeamManager(context, data.teamId);
+    await requirePermission(context, data.teamId, "profile.edit");
     const moved = await callServerRpc(context.supabase, "transfer_profiles", {
       _team_id: data.teamId,
       _profile_ids: data.profileIds,
-      _folder: data.folder ?? null,
-      _user_id: data.userId ?? null,
+      _folder: data.folder,
+      _user_id: null,
     });
     return { moved };
   });
@@ -57,14 +57,18 @@ export const listFolders = createServerFn({ method: "POST" })
       .order("is_default", { ascending: false })
       .order("name");
     if (error) throw new Error("Не удалось загрузить папки");
-    return (rows ?? []).map((row) => ({ id: row.id, name: row.name, isDefault: row.is_default }));
+    // Сотрудник видит только те папки, которые ему открыл владелец.
+    const allowed = await accessibleFolders(context, data.teamId);
+    return (rows ?? [])
+      .filter((row) => allowed === null || allowed.includes(row.name))
+      .map((row) => ({ id: row.id, name: row.name, isDefault: row.is_default }));
   });
 
 export const createFolder = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(createFolderSchema)
   .handler(async ({ data, context }) => {
-    await requireTeamManager(context, data.teamId);
+    await requirePermission(context, data.teamId, "folder.manage");
     const { data: row, error } = await context.supabase
       .from("profile_folders")
       .insert({ team_id: data.teamId, name: data.name, created_by: context.userId })
@@ -79,7 +83,7 @@ export const renameFolder = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(renameFolderSchema)
   .handler(async ({ data, context }) => {
-    await requireTeamManager(context, data.teamId);
+    await requirePermission(context, data.teamId, "folder.manage");
     const { data: current, error: readError } = await context.supabase
       .from("profile_folders").select("name").eq("id", data.id).eq("team_id", data.teamId).maybeSingle();
     if (readError || !current) throw new Error("Папка не найдена");
@@ -98,7 +102,7 @@ export const deleteFolder = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(folderIdSchema)
   .handler(async ({ data, context }) => {
-    await requireTeamManager(context, data.teamId);
+    await requirePermission(context, data.teamId, "folder.manage");
     const { data: current, error: readError } = await context.supabase
       .from("profile_folders").select("name, is_default").eq("id", data.id).eq("team_id", data.teamId).maybeSingle();
     if (readError || !current) throw new Error("Папка не найдена");

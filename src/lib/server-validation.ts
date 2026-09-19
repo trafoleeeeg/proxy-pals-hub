@@ -72,15 +72,14 @@ export const inviteSchema = z.object({ teamId: uuidSchema, email: z.string().tri
 export const inviteIdSchema = z.object({ inviteId: uuidSchema }).strict();
 export const acceptInviteSchema = z.object({ token: z.string().trim().regex(/^[a-fA-F0-9]{64}$/) }).strict();
 export const memberSchema = z.object({ teamId: uuidSchema, userId: uuidSchema }).strict();
-export const accessSchema = z.object({ profileId: uuidSchema, userId: uuidSchema, granted: z.boolean() }).strict();
-export const bulkAccessSchema = z.object({ teamId: uuidSchema, profileIds: profileIdsSchema, userId: uuidSchema, granted: z.boolean() }).strict();
 export const folderAccessSchema = z.object({
   teamId: uuidSchema, folder: folder.pipe(z.string().min(1).max(200)), userId: uuidSchema, granted: z.boolean(),
 }).strict();
+// Профили передаются только между папками: точечная передача сотруднику убрана.
 export const transferSchema = z.object({
   teamId: uuidSchema, profileIds: profileIdsSchema,
-  folder: folder.pipe(z.string().min(1).max(200)).optional(), userId: uuidSchema.optional(),
-}).strict().refine((d) => d.folder !== undefined || d.userId !== undefined, "Укажите папку или сотрудника");
+  folder: folder.pipe(z.string().min(1).max(200)),
+}).strict();
 
 const folderName = folder.pipe(z.string().min(1).max(200));
 export const createFolderSchema = z.object({ teamId: uuidSchema, name: folderName }).strict();

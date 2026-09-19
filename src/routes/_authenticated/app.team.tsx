@@ -443,7 +443,9 @@ export function TeamPage() {
                       {row.isDefault && <Badge variant="outline" className="ml-2">основная</Badge>}
                     </TableCell>
                     <TableCell className="text-right">
-                      {!row.isDefault && (
+                      {row.virtual ? (
+                        <span className="text-xs text-muted-foreground">папка из профилей</span>
+                      ) : !row.isDefault && (
                         <>
                           <Button
                             variant="ghost"
@@ -467,6 +469,7 @@ export function TeamPage() {
                         </>
                       )}
                     </TableCell>
+
                   </TableRow>
                 ))}
                 {!folderRows.length && <TableRow><TableCell className="py-6 text-sm text-muted-foreground">Папок пока нет</TableCell></TableRow>}

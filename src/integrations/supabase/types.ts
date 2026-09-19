@@ -394,6 +394,44 @@ export type Database = {
           },
         ]
       }
+      profile_folders: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          is_default: boolean
+          name: string
+          team_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_default?: boolean
+          name: string
+          team_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_default?: boolean
+          name?: string
+          team_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "profile_folders_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profile_locks: {
         Row: {
           acquired_at: string
@@ -724,6 +762,51 @@ export type Database = {
         }
         Relationships: []
       }
+      user_presence: {
+        Row: {
+          active_profile_id: string | null
+          created_at: string
+          device_label: string | null
+          last_seen_at: string
+          team_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          active_profile_id?: string | null
+          created_at?: string
+          device_label?: string | null
+          last_seen_at?: string
+          team_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          active_profile_id?: string | null
+          created_at?: string
+          device_label?: string | null
+          last_seen_at?: string
+          team_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_presence_active_profile_id_fkey"
+            columns: ["active_profile_id"]
+            isOneToOne: false
+            referencedRelation: "browser_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_presence_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -828,6 +911,10 @@ export type Database = {
           _user_id: string
         }
         Returns: number
+      }
+      touch_presence: {
+        Args: { _device_label?: string; _profile_id?: string; _team_id: string }
+        Returns: string
       }
       transfer_profiles: {
         Args: {

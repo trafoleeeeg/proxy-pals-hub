@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { acceptInviteSchema, accessSchema, bulkAccessSchema, inviteIdSchema, inviteSchema, memberSchema, teamSchema, workspaceSchema } from "./server-validation";
+import { acceptInviteSchema, accessSchema, bulkAccessSchema, inviteIdSchema, inviteSchema, employeeSchema, memberSchema, teamSchema, workspaceSchema } from "./server-validation";
 import { callServerRpc, requireProfile, requireTeamManager, requireTeamOwner, type ServerContext, type TeamScope } from "./server-db";
 import { z } from "zod";
 
@@ -166,4 +166,33 @@ export const listAudit = createServerFn({ method: "POST" })
     if (peopleError) throw new Error(peopleError.message);
     const byId = new Map((people ?? []).map((person) => [person.id, person.email]));
     return (rows ?? []).map((row) => ({ ...row, email: byId.get(row.user_id ?? "") ?? "" }));
+  });
+
+export const createEmployee = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth]).inputValidator(employeeSchema)
+  .handler(async ({ data, context }) => {
+    await requireTeamOwner(context, data.teamId);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const created = await supabaseAdmin.auth.admin.createUser({
+      email: data.email,
+      password: data.password,
+      email_confirm: true,
+      user_metadata: data.displayName ? { display_name: data.displayName } : {},
+    });
+    if (created.error || !created.data.user) {
+      const message = created.error?.message ?? "";
+      throw new Error(/already/i.test(message) ? "Такая почта уже зарегистрирована" : "Не удалось создать учётную запись");
+    }
+    const userId = created.data.user.id;
+    await supabaseAdmin.from("profiles").upsert({
+      id: userId, email: data.email, ...(data.displayName ? { display_name: data.displayName } : {}),
+    });
+    const { error } = await supabaseAdmin.from("team_members")
+      .insert({ team_id: data.teamId, user_id: userId, role: "member", scope: "member" });
+    if (error) throw new Error("Учётная запись создана, но не удалось добавить её в команду");
+    await context.supabase.from("audit_log").insert({
+      team_id: data.teamId, user_id: context.userId, action: "employee.created",
+      target_type: "user", target_id: userId,
+    });
+    return { userId, email: data.email };
   });

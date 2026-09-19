@@ -70,14 +70,26 @@ export const listMembers = createServerFn({ method: "POST" })
       : { data: [], error: null };
     if (peopleError) throw new Error(peopleError.message);
     const byId = new Map((people ?? []).map((person) => [person.id, person]));
+    // Суперадминистратор всегда показывается как владелец с полным доступом.
+    const superIds = new Set<string>();
+    try {
+      const rpc = supabase.rpc.bind(supabase) as unknown as (name: string) => PromiseLike<{ data: unknown }>;
+      const { data: supers } = await rpc("superadmin_ids");
+      for (const row of (supers ?? []) as Array<string | { superadmin_ids?: string }>) {
+        const id = typeof row === "string" ? row : row?.superadmin_ids;
+        if (id) superIds.add(id);
+      }
+    } catch { /* старая база без суперадминов */ }
     const { data: invites, error: inviteError } = await supabase.from("team_invites")
       .select("id, email, token, expires_at, accepted_at, created_at").eq("team_id", data.teamId)
       .is("accepted_at", null).order("created_at", { ascending: false });
     if (inviteError) throw new Error(inviteError.message);
     return {
       members: (members ?? []).map((member) => ({
-        id: member.id, userId: member.user_id, role: member.role,
-        scope: (member as { scope?: string }).scope === "manager" ? "manager" as const : "member" as const,
+        id: member.id, userId: member.user_id,
+        role: superIds.has(member.user_id) ? "owner" as const : member.role,
+        scope: superIds.has(member.user_id) ? "owner" as const
+          : (member as { scope?: string }).scope === "manager" ? "manager" as const : "member" as const,
         email: byId.get(member.user_id)?.email ?? "", name: byId.get(member.user_id)?.display_name ?? "",
         createdAt: member.created_at,
       })),

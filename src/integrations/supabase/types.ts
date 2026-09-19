@@ -977,6 +977,7 @@ export type Database = {
         }
         Returns: number
       }
+      superadmin_ids: { Args: never; Returns: string[] }
       touch_presence: {
         Args: { _device_label?: string; _profile_id?: string; _team_id: string }
         Returns: string

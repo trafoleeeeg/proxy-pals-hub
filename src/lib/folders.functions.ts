@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { createFolderSchema, folderAccessSchema, folderIdSchema, renameFolderSchema, teamSchema, transferSchema } from "./server-validation";
-import { callServerRpc, requireTeamManager, writeAudit } from "./server-db";
+import { accessibleFolders, callServerRpc, requirePermission, requireTeamManager, writeAudit } from "./server-db";
 
 export type FolderAccessRow = { folder: string; userId: string };
 
@@ -33,12 +33,12 @@ export const transferProfiles = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(transferSchema)
   .handler(async ({ data, context }) => {
-    await requireTeamManager(context, data.teamId);
+    await requirePermission(context, data.teamId, "profile.edit");
     const moved = await callServerRpc(context.supabase, "transfer_profiles", {
       _team_id: data.teamId,
       _profile_ids: data.profileIds,
-      _folder: data.folder ?? null,
-      _user_id: data.userId ?? null,
+      _folder: data.folder,
+      _user_id: null,
     });
     return { moved };
   });

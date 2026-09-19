@@ -61,19 +61,11 @@ export function ProfileBulkDialog({ action, ids, teamId, isOwner, blocked, proxi
   return <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose(); }}><DialogContent role={action === "delete" ? "alertdialog" : "dialog"} className="max-h-[90dvh] w-[calc(100%-2rem)] overflow-y-auto sm:max-w-xl">
     <DialogHeader className="min-w-0 pr-5"><DialogTitle className="break-words leading-snug tracking-normal">{titles[action]}</DialogTitle><DialogDescription>{action === "delete" ? `Будут удалены профили (${ids.length}), их облачные cookies и доступы сотрудников. Отменить удаление нельзя.` : `Выбрано профилей: ${ids.length}`}</DialogDescription></DialogHeader>
     {ids.length > 200 && <p role="alert" className="text-sm text-destructive">За одну операцию можно изменить до 200 профилей. Уменьшите выбор.</p>}
-    {blocked && action !== "access" && <p role="alert" className="text-sm text-warning">Сначала закройте выбранные профили и завершите синхронизацию.</p>}
+    {blocked && <p role="alert" className="text-sm text-warning">Сначала закройте выбранные профили и завершите синхронизацию.</p>}
     {action === "transfer" ? <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">Профили переедут в указанную папку, а выбранный сотрудник получит к ним доступ. Прежний доступ сохраняется.</p>
-      <Input aria-label="Папка назначения" placeholder="Папка назначения (необязательно)" value={folder} disabled={!enabled} onChange={(e) => setFolder(e.target.value)} />
-      {members.isPending && <p role="status" className="text-sm text-muted-foreground">Загрузка сотрудников…</p>}
-      {members.isError && <p role="alert" className="text-sm text-destructive">Не удалось загрузить сотрудников. <Button size="sm" variant="ghost" onClick={() => members.refetch()}>Повторить</Button></p>}
-      <Select value={userId} disabled={!enabled || members.isPending || members.isError} onValueChange={setUserId}><SelectTrigger aria-label="Сотрудник"><SelectValue placeholder="Сотрудник (необязательно)" /></SelectTrigger><SelectContent>{(members.data?.members ?? []).filter((member) => member.role === "member").map((member) => <SelectItem key={member.userId} value={member.userId}>{member.email}</SelectItem>)}</SelectContent></Select>
-    </div> : action === "access" ? <div className="space-y-3">
-      {members.isPending && <p role="status" className="text-sm text-muted-foreground">Загрузка сотрудников…</p>}
-      {members.isError && <p role="alert" className="text-sm text-destructive">Не удалось загрузить сотрудников. <Button size="sm" variant="ghost" onClick={() => members.refetch()}>Повторить</Button></p>}
-      <Select value={userId} disabled={!enabled || members.isPending || members.isError} onValueChange={setUserId}><SelectTrigger aria-label="Сотрудник"><SelectValue placeholder="Сотрудник" /></SelectTrigger><SelectContent>{(members.data?.members ?? []).filter((member) => member.role === "member").map((member) => <SelectItem key={member.userId} value={member.userId}>{member.email}</SelectItem>)}</SelectContent></Select>
-      {!members.isPending && !members.isError && !members.data?.members.some((m) => m.role === "member") && <p className="text-sm text-muted-foreground">В команде пока нет сотрудников.</p>}
-      <Select value={granted ? "grant" : "revoke"} disabled={!enabled} onValueChange={(v) => setGranted(v === "grant")}><SelectTrigger aria-label="Действие с доступом"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="grant">Предоставить доступ</SelectItem><SelectItem value="revoke">Отозвать доступ</SelectItem></SelectContent></Select>
+      <p className="text-sm text-muted-foreground">Профили переедут в выбранную папку. Доступ сотрудников определяется папкой: кому открыта папка, тому доступны и профили в ней.</p>
+      {folders.length > 0 && <Select value={folder} disabled={!enabled} onValueChange={setFolder}><SelectTrigger aria-label="Папка назначения"><SelectValue placeholder="Папка назначения" /></SelectTrigger><SelectContent>{folders.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent></Select>}
+      {folders.length === 0 && <Input aria-label="Папка назначения" placeholder="Папка назначения" value={folder} disabled={!enabled} onChange={(e) => setFolder(e.target.value)} />}
     </div> : action !== "delete" && <fieldset disabled={!enabled} className="space-y-3">
       {(action === "move" ? ["folder"] : ["folder", "tags", "notes", "proxyId", "fingerprint"]).map((field) => {
         const labels: Record<string, string> = { folder: "Папка", tags: "Метки", notes: "Заметки", proxyId: "Прокси", fingerprint: "Отпечаток" };

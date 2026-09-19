@@ -70,9 +70,9 @@ export function TeamPage() {
     enabled: !!ws?.teamId && isOwner,
   });
 
-  const profiles = useQuery({
-    queryKey: ["profiles", ws?.teamId],
-    queryFn: () => profilesFn({ data: { teamId: ws!.teamId } }),
+  const rights = useQuery({
+    queryKey: ["member-permissions", ws?.teamId],
+    queryFn: () => permissionsListFn({ data: { teamId: ws!.teamId } }),
     enabled: !!ws?.teamId && isOwner,
   });
 

@@ -265,12 +265,12 @@ describe("desktop profile lifecycle", () => {
     expect(f.state.closeCalls[0]).toEqual({ profileId: "a", lockToken: "lease-a", deviceId: "device-1", cookies: "[]" });
   });
 
-  test("unreadable durable storage blocks new launches until synchronization recovers", async () => {
+  test("unreadable durable storage stays encrypted but does not block unrelated launches", async () => {
     const f = fixture();
     const read = f.bridge.pendingProfileClosures;
     f.bridge.pendingProfileClosures = async () => ({ ok: false, profiles: [] });
-    await f.controller.sync();
-    await expect(f.controller.start("a")).rejects.toThrow();
+    await f.controller.restore();
+    await f.controller.start("a");
     await expect(f.controller.closeAll()).rejects.toThrow();
     expect(f.controller.hasWork()).toBe(true);
     f.bridge.pendingProfileClosures = read;

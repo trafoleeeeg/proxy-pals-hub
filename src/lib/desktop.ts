@@ -199,11 +199,18 @@ export class DesktopProfileLifecycle {
     this.emit();
     const job = (async () => {
       try {
-        const outbox = await withDesktopTimeout(this.bridge.pendingProfileClosures(), "Очередь сохранения не ответила вовремя");
-        if (!outbox.ok) throw new Error("Не удалось прочитать ожидающие сессии.");
-        // Mark only affected profiles as unavailable immediately. Uploading
-        // their durable snapshots continues in sync() and must not hold the UI.
-        this.outboxFailures = new Set(outbox.profiles.map((profile) => profile.profileId));
+        try {
+          const outbox = await withDesktopTimeout(this.bridge.pendingProfileClosures(), "Очередь сохранения не ответила вовремя");
+          if (!outbox.ok) throw new Error("Не удалось прочитать ожидающие сессии.");
+          // Mark only affected profiles as unavailable immediately. Uploading
+          // their durable snapshots continues in sync() and must not hold the UI.
+          this.outboxFailures = new Set(outbox.profiles.map((profile) => profile.profileId));
+          delete this.errors["outbox"];
+        } catch {
+          // A native outbox read failure must not hide the workspace or already
+          // running profiles. Keep the encrypted files untouched and retry later.
+          this.errors["outbox"] = "Не удалось прочитать очередь сохранения cookies. Остальные профили доступны.";
+        }
         const result = await withDesktopTimeout(this.bridge.listRunningProfiles(), "Приложение не ответило вовремя");
         if (!result.ok) throw new Error();
         for (const profile of result.profiles) {
@@ -225,7 +232,7 @@ export class DesktopProfileLifecycle {
   };
 
   start = (profileId: string): Promise<void> => {
-    if (this.shutdownJob || this.restoring || this.errors["restore"] || this.errors["outbox"]) return Promise.reject(new Error("Дождитесь синхронизации приложения."));
+    if (this.shutdownJob || this.restoring || this.errors["restore"]) return Promise.reject(new Error("Дождитесь синхронизации приложения."));
     if (this.jobs.has(profileId) || this.sessions.has(profileId)) return Promise.resolve();
     return this.run(profileId, async () => {
       if (this.outboxFailures.has(profileId) || [...this.pending.values()].some((p) => p.profileId === profileId)) throw new Error("Сначала сохраните предыдущую сессию профиля.");

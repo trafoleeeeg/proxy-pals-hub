@@ -74,6 +74,8 @@ function ProfilesWorkspace() {
   const metadataFn = useServerFn(listProfileMetadata);
   const addStatusFn = useServerFn(createProfileStatus);
   const addFieldFn = useServerFn(createProfileField);
+  const updateStatusFn = useServerFn(updateProfileStatus);
+  const deleteStatusFn = useServerFn(deleteProfileStatus);
   const runtime = useDesktopProfileLifecycle();
   const proxyOps = useProxyOps(ws?.teamId);
   const foldersFn = useServerFn(listFolders);

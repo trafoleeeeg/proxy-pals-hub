@@ -5,6 +5,7 @@ import { Bot, Download, Globe, LayoutGrid, LogOut, Monitor, PanelLeftClose, Pane
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useWorkspace, useWorkspaceSelection, WorkspaceProvider } from "@/lib/useWorkspace";
+import { useRealtimeSync } from "@/lib/useRealtimeSync";
 import { DesktopProfileProvider, useDesktopProfileLifecycle } from "@/hooks/useDesktopProfileLifecycle";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";

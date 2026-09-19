@@ -66,10 +66,12 @@ async function applyFingerprint(wc, fp) {
   wc.debugger.attach("1.3");
   try {
     await wc.debugger.sendCommand("Page.enable");
-    await wc.debugger.sendCommand("Emulation.setUserAgentOverride", userAgentOverride(fp));
-    await wc.debugger.sendCommand("Emulation.setLocaleOverride", { locale: fp.languages[0] });
-    await wc.debugger.sendCommand("Emulation.setTimezoneOverride", { timezoneId: fp.timezone });
-    await wc.debugger.sendCommand("Page.addScriptToEvaluateOnNewDocument", { source: `(${DOCUMENT_SOURCE})(${JSON.stringify(fp)});` });
+    await Promise.all([
+      wc.debugger.sendCommand("Emulation.setUserAgentOverride", userAgentOverride(fp)),
+      wc.debugger.sendCommand("Emulation.setLocaleOverride", { locale: fp.languages[0] }),
+      wc.debugger.sendCommand("Emulation.setTimezoneOverride", { timezoneId: fp.timezone }),
+      wc.debugger.sendCommand("Page.addScriptToEvaluateOnNewDocument", { source: `(${DOCUMENT_SOURCE})(${JSON.stringify(fp)});` }),
+    ]);
   } catch {
     if (wc.debugger.isAttached()) wc.debugger.detach();
     throw new Error("Unable to apply fingerprint before navigation");

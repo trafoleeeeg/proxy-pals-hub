@@ -59,3 +59,18 @@ test("managed paths ignore registry path injection and reject linked source dire
     await assert.rejects(store.addFromDirectory(source), /ссылки/);
   } finally { await fs.rm(temp, { recursive: true, force: true }); }
 });
+
+test("extension toolbar chooses the icon nearest to 32 px", async () => {
+  const temp = await fs.mkdtemp(path.join(os.tmpdir(), "umbra-extension-icons-"));
+  try {
+    const source = path.join(temp, "source");
+    await fs.mkdir(source);
+    await fs.writeFile(path.join(source, "manifest.json"), JSON.stringify({
+      manifest_version: 3, name: "Icons", version: "1.0", icons: { 16: "16.png", 32: "32.png", 128: "128.png" },
+    }));
+    await Promise.all([16, 32, 128].map((size) => fs.writeFile(path.join(source, `${size}.png`), Buffer.from(`icon-${size}`))));
+    const store = createExtensionStore(() => path.join(temp, "user-data"));
+    await store.addFromDirectory(source);
+    assert.equal((await store.list())[0].icon, `data:image/png;base64,${Buffer.from("icon-32").toString("base64")}`);
+  } finally { await fs.rm(temp, { recursive: true, force: true }); }
+});

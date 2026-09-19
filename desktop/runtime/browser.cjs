@@ -119,12 +119,14 @@ async function createProfileBrowser(electron, {
   }
   // Окно расширения открывается отдельным безрамочным окном поверх страницы —
   // как popup в Chrome: оно получает клики и закрывается при потере фокуса.
-  const POPUP_SIZE = { width: 380, height: 520 };
+  const POPUP_SIZE = { width: 360, height: 480 };
   const OPTIONS_SIZE = { width: 900, height: 640 };
   let extensionPopup = null;
   let extensionPopupId = "";
   let extensionPopupAnchor = 0;
   let extensionPopupSize = { ...POPUP_SIZE };
+  let extensionPopupFitTimer = null;
+  let extensionPopupShownAt = 0;
   function positionExtensionPopup() {
     if (!extensionPopup || extensionPopup.isDestroyed() || shell.isDestroyed()) return;
     const area = shell.getContentBounds();
@@ -141,6 +143,7 @@ async function createProfileBrowser(electron, {
   function closeExtensionPopup() {
     const popup = extensionPopup;
     extensionPopup = null; extensionPopupId = ""; extensionPopupAnchor = 0; extensionPopupSize = { ...POPUP_SIZE };
+    clearTimeout(extensionPopupFitTimer); extensionPopupFitTimer = null;
     if (!popup) return;
     try { if (!popup.isDestroyed()) popup.destroy(); } catch { /* окно уже закрыто */ }
   }
@@ -151,10 +154,18 @@ async function createProfileBrowser(electron, {
         true);
       if (popup !== extensionPopup || popup.isDestroyed()) return;
       if (size && size.w > 40 && size.h > 40) {
-        extensionPopupSize = { width: Math.min(800, Math.max(240, size.w + 2)), height: Math.min(640, Math.max(140, size.h + 2)) };
+        extensionPopupSize = { width: Math.min(520, Math.max(240, size.w + 2)), height: Math.min(600, Math.max(140, size.h + 2)) };
         positionExtensionPopup();
       }
     } catch { /* расширение не отдало размер — остаётся размер по умолчанию */ }
+  }
+  function refitExtensionPopup(popup, attempts = 8) {
+    clearTimeout(extensionPopupFitTimer);
+    if (!attempts || popup !== extensionPopup || popup.isDestroyed()) return;
+    extensionPopupFitTimer = setTimeout(() => {
+      void fitExtensionPopup(popup).finally(() => refitExtensionPopup(popup, attempts - 1));
+    }, attempts === 8 ? 80 : 180);
+    extensionPopupFitTimer.unref?.();
   }
   function openExtensionPopup(extension, anchor) {
     const page = extension?.popup || extension?.options || "";
@@ -177,18 +188,18 @@ async function createProfileBrowser(electron, {
     popup.webContents.on("before-input-event", (event, input) => {
       if (input.type === "keyDown" && input.key === "Escape") { event.preventDefault(); closeExtensionPopup(); }
     });
-    popup.on("blur", () => { if (popup === extensionPopup) closeExtensionPopup(); });
+    popup.on("blur", () => {
+      setTimeout(() => {
+        if (popup === extensionPopup && Date.now() - extensionPopupShownAt > 250
+          && BrowserWindow.getFocusedWindow?.() !== popup) closeExtensionPopup();
+      }, 0);
+    });
     popup.on("closed", () => { if (popup === extensionPopup) { extensionPopup = null; extensionPopupId = ""; } });
     popup.webContents.loadURL(`chrome-extension://${extension.runtimeId}/${page}`).then(async () => {
       if (popup !== extensionPopup || popup.isDestroyed()) return;
       // Содержимое, которое не поместилось, должно прокручиваться, а не обрезаться.
       await popup.webContents.insertCSS("html,body{overflow:auto!important}").catch(() => {});
-      if (extension.popup) await fitExtensionPopup(popup);
-      if (popup !== extensionPopup || popup.isDestroyed()) return;
-      positionExtensionPopup();
-      popup.show();
-      popup.focus();
-      flushPublish();
+      if (extension.popup) refitExtensionPopup(popup);
     }).catch((failure) => {
       closeExtensionPopup();
       error = String(failure?.code || "") === "ERR_FILE_NOT_FOUND"
@@ -196,6 +207,10 @@ async function createProfileBrowser(electron, {
         : "Не удалось открыть окно расширения";
       flushPublish();
     });
+    extensionPopupShownAt = Date.now();
+    popup.show();
+    popup.focus();
+    flushPublish();
   }
   function select(tab) {
     if (shell.isDestroyed() || !tab || tab.isDestroyed()) return;
@@ -365,6 +380,11 @@ async function createProfileBrowser(electron, {
   function dispatch(message) {
     // Switching existing tabs must not wait for a slow new tab or network check.
     if (message?.action === "select") { bookmarksOpen = false; proxiesOpen = false; select(tabs.get(message.id)); return Promise.resolve({}); }
+    if (["close-tab", "navigate", "back", "forward", "reload"].includes(message?.action)) {
+      return command(message).then(() => ({})).catch(() => {
+        error = "Не удалось выполнить действие. Проверьте адрес и подключение прокси."; publish(); return { error };
+      });
+    }
     commandQueue = commandQueue.then(() => command(message)).then(() => ({})).catch(() => {
       error = "Не удалось выполнить действие. Проверьте адрес и подключение прокси."; publish(); return { error };
     });
@@ -478,7 +498,9 @@ async function createProfileBrowser(electron, {
         const source = Array.isArray(icons) ? icons.find((icon) => /^https?:/i.test(icon)) : "";
         if (!source) return;
         try {
-          const response = await wc.session.fetch(source);
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 2500);
+          const response = await wc.session.fetch(source, { signal: controller.signal }).finally(() => clearTimeout(timer));
           const type = response.headers.get("content-type") || "image/png";
           const bytes = Buffer.from(await response.arrayBuffer());
           if (!type.startsWith("image/") || bytes.length > 256 * 1024 || wc.isDestroyed()) return;

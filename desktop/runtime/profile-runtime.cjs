@@ -426,7 +426,8 @@ function createProfileRuntime(electron, options = {}) {
       if (entry.windows.size === 1) {
         closeProfileWindow(entry.profileId).catch(() => { entry.lastError = "Profile close failed; local data retained"; });
       } else if (!entry.closingRequested) {
-        snapshot(entry).then(() => { if (!win.isDestroyed()) win.destroy(); }).catch(() => { entry.lastError = "Popup cookie flush failed"; });
+        if (!win.isDestroyed()) win.destroy();
+        void snapshot(entry).catch(() => { entry.lastError = "Не удалось сохранить текущую сессию вкладки"; });
       }
     });
     win.on("closed", () => {
@@ -623,13 +624,16 @@ function createProfileRuntime(electron, options = {}) {
       if (entry.ses) {
         blockSession(entry.ses);
         for (const win of entry.windows) if (!win.isDestroyed()) win.webContents.stop();
-        await entry.ses.closeAllConnections();
+        await Promise.race([
+          entry.ses.closeAllConnections(),
+          new Promise((resolve) => setTimeout(resolve, 3000)),
+        ]);
       }
       await Promise.allSettled([...entry.pendingWindows]);
       // Freeze page JS before taking the final snapshot/outbox record.
-      for (const win of entry.windows) {
-        if (!win.isDestroyed() && win.webContents.debugger.isAttached()) await win.webContents.debugger.sendCommand("Emulation.setScriptExecutionDisabled", { value: true });
-      }
+      await Promise.all([...entry.windows].map((win) => !win.isDestroyed() && win.webContents.debugger.isAttached()
+        ? win.webContents.debugger.sendCommand("Emulation.setScriptExecutionDisabled", { value: true })
+        : Promise.resolve()));
       await persistTabs(entry).catch(() => {});
       const result = entry.cookiesUpdatedAt ? await snapshot(entry) : { profileId: entry.profileId, lockToken: entry.lockToken, deviceId: entry.deviceId, cookies: null, cookiesUpdatedAt: null };
       if (typeof entry.onClosed === "function") await entry.onClosed(result);

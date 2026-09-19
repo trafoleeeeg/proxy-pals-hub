@@ -13,7 +13,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 export function useWorkspaceSelection() {
   const selection = useContext(Selection);
   const fn = useServerFn(listWorkspaces);
-  const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: () => fn({}), staleTime: 60_000 });
+  const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: () => fn({}), staleTime: 60_000, retry: 3, refetchOnReconnect: true });
   return { ...selection, workspaces };
 }
 
@@ -24,5 +24,7 @@ export function useWorkspace() {
     queryKey: ["workspace", teamId],
     queryFn: () => fn({ data: teamId ? { teamId } : {} }),
     staleTime: 60_000,
+    retry: 3,
+    refetchOnReconnect: true,
   });
 }

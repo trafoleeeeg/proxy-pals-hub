@@ -15,19 +15,29 @@ export type Workspace = {
 };
 
 async function readWorkspaces(context: ServerContext): Promise<Workspace[]> {
-  await callServerRpc(context.supabase, "ensure_workspace", {});
-  const { data: me, error: personError } = await context.supabase.from("profiles").select("email").eq("id", context.userId).single();
-  if (personError) throw new Error(personError.message);
+  // Старый клиент мог открыть панель раньше, чем Lovable Cloud применил все
+  // миграции. Существующая команда при этом должна оставаться доступной.
+  let bootstrapFailed = false;
+  try { await callServerRpc(context.supabase, "ensure_workspace", {}); }
+  catch { bootstrapFailed = true; }
+  const { data: me } = await context.supabase.from("profiles").select("email").eq("id", context.userId).maybeSingle();
   const { data: teams, error } = await context.supabase.from("teams").select("id, name, owner_id").order("created_at").order("id");
-  if (error) throw new Error(error.message);
-  const { data: memberships } = await context.supabase.from("team_members").select("team_id, scope").eq("user_id", context.userId);
+  if (error) throw new Error("Не удалось загрузить рабочее пространство");
+  if (!(teams ?? []).length && bootstrapFailed) throw new Error("Не удалось подготовить рабочее пространство");
+  let { data: memberships, error: membershipError } = await context.supabase.from("team_members").select("team_id, scope").eq("user_id", context.userId);
+  if (membershipError) {
+    const legacy = await context.supabase.from("team_members").select("team_id").eq("user_id", context.userId);
+    if (legacy.error) throw new Error("Не удалось загрузить доступ к команде");
+    memberships = (legacy.data ?? []).map((row) => ({ ...row, scope: "member" }));
+    membershipError = null;
+  }
   const scopeByTeam = new Map((memberships ?? []).map((row) => [row.team_id, (row as { scope?: string }).scope === "manager" ? "manager" : "member"] as const));
   return (teams ?? []).map((team) => {
     const owner = team.owner_id === context.userId;
     const scope: TeamScope = owner ? "owner" : (scopeByTeam.get(team.id) ?? "member");
     return {
       teamId: team.id, teamName: team.name, role: owner ? "owner" as const : "member" as const,
-      scope, canManage: scope !== "member", userId: context.userId, email: me.email ?? "",
+      scope, canManage: scope !== "member", userId: context.userId, email: me?.email ?? "",
     };
   });
 }

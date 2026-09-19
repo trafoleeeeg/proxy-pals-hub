@@ -321,11 +321,13 @@ async function createProfileBrowser(electron, {
       case "toggle-bookmark-bar": await setBookmarkBarVisible(!getBookmarkBarVisible()); break;
       case "manage-extensions": openExtensionManager(); break;
       case "pin-extension": await setExtensionPinned(message.id, message.pinned === true); break;
+      case "close-extension": break;
       case "open-extension": {
         if (extensionPopupId === message.id) { closeExtensionPopup(); break; }
         const extension = (getExtensions() || []).find((item) => item.id === message.id);
         if (!extension) { error = "Расширение не найдено"; break; }
-        openExtensionPopup(extension);
+        if (extension.failed) { error = `Расширение «${extension.name}» не загрузилось. Обновите или переустановите его.`; break; }
+        openExtensionPopup(extension, Number(message.anchor));
         break;
       }
       case "chrome-overlay-height": {

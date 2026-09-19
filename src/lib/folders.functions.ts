@@ -44,7 +44,7 @@ export const transferProfiles = createServerFn({ method: "POST" })
   });
 
 export const DEFAULT_FOLDER = "Основная";
-export type FolderRow = { id: string; name: string; isDefault: boolean };
+export type FolderRow = { id: string; name: string; isDefault: boolean; virtual: boolean };
 
 export const listFolders = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -59,10 +59,24 @@ export const listFolders = createServerFn({ method: "POST" })
     if (error) throw new Error("Не удалось загрузить папки");
     // Сотрудник видит только те папки, которые ему открыл владелец.
     const allowed = await accessibleFolders(context, data.teamId);
-    return (rows ?? [])
+    const list: FolderRow[] = (rows ?? [])
       .filter((row) => allowed === null || allowed.includes(row.name))
-      .map((row) => ({ id: row.id, name: row.name, isDefault: row.is_default }));
+      .map((row) => ({ id: row.id, name: row.name, isDefault: row.is_default, virtual: false }));
+    // Папки, заданные прямо в профилях, тоже показываем — иначе их не видно в меню.
+    const { data: used } = await context.supabase
+      .from("browser_profiles").select("folder").eq("team_id", data.teamId);
+    const known = new Set(list.map((row) => row.name));
+    for (const row of used ?? []) {
+      const name = (row.folder ?? "").trim();
+      if (!name || known.has(name)) continue;
+      if (allowed !== null && !allowed.includes(name)) continue;
+      known.add(name);
+      list.push({ id: `virtual:${name}`, name, isDefault: false, virtual: true });
+    }
+    return list.sort((a, b) =>
+      a.isDefault === b.isDefault ? a.name.localeCompare(b.name, "ru") : a.isDefault ? -1 : 1);
   });
+
 
 export const createFolder = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])

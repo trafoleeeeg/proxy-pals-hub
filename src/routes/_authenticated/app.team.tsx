@@ -101,13 +101,8 @@ export function TeamPage() {
     enabled: !!ws?.teamId && canManage,
   });
 
-  useEffect(() => {
-    const rows = profiles.data;
-    if (rows) setSelected((current) => current.filter((id) => rows.some((profile) => profile.id === id)));
-  }, [profiles.data]);
-
   const refresh = async () => {
-    await Promise.all([qc.invalidateQueries({ queryKey: ["team"] }), qc.invalidateQueries({ queryKey: ["audit"] }), qc.invalidateQueries({ queryKey: ["profiles"] }), qc.invalidateQueries({ queryKey: ["folder-access"] }), qc.invalidateQueries({ queryKey: ["folders"] }), qc.invalidateQueries({ queryKey: ["presence"] })]);
+    await Promise.all([qc.invalidateQueries({ queryKey: ["team"] }), qc.invalidateQueries({ queryKey: ["audit"] }), qc.invalidateQueries({ queryKey: ["profiles"] }), qc.invalidateQueries({ queryKey: ["folder-access"] }), qc.invalidateQueries({ queryKey: ["folders"] }), qc.invalidateQueries({ queryKey: ["presence"] }), qc.invalidateQueries({ queryKey: ["member-permissions"] }), qc.invalidateQueries({ queryKey: ["permissions"] })]);
   };
 
   const inviteMut = useMutation({

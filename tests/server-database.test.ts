@@ -126,7 +126,7 @@ describe("real migrations and RLS", () => {
 
   test("bulk operations are atomic and reject cross-team selection", async () => {
     await expect(asUser(owner, "select public.bulk_mutate_profiles($1, $2::uuid[], 'update', $3::jsonb)", [team, [profile, otherProfile], JSON.stringify({ folder: "bad" })])).rejects.toThrow("cross-team");
-    expect((await asUser<{ folder: string }>(owner, "select folder from public.browser_profiles where id = $1", [profile]))[0]!.folder).toBe("");
+    expect((await asUser<{ folder: string }>(owner, "select folder from public.browser_profiles where id = $1", [profile]))[0]!.folder).toBe("Основная");
     await asUser(owner, "select public.bulk_mutate_profiles($1, $2::uuid[], 'update', $3::jsonb)", [team, [profile], JSON.stringify({ folder: "Ready", tags: ["a", "b"] })]);
     expect((await asUser<{ folder: string }>(owner, "select folder from public.browser_profiles where id = $1", [profile]))[0]!.folder).toBe("Ready");
     await expect(asUser(member, "select public.bulk_mutate_profiles($1, $2::uuid[], 'delete', '{}'::jsonb)", [team, [profile]])).rejects.toThrow("Недостаточно прав для изменения профилей");

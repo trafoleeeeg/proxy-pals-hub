@@ -4,7 +4,7 @@ import { createContext, createElement, useContext, useState, type ReactNode } fr
 import { getWorkspace, listWorkspaces } from "./team.functions";
 
 const Selection = createContext<{ teamId: string | undefined; select: (teamId: string) => void }>({ teamId: undefined, select: () => {} });
-const WORKSPACE_TIMEOUT_MS = 15_000;
+const WORKSPACE_TIMEOUT_MS = 8_000;
 
 async function withWorkspaceTimeout<T>(operation: Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -25,7 +25,9 @@ export function useWorkspaceSelection() {
   const fn = useServerFn(listWorkspaces);
   const workspaces = useQuery({
     queryKey: ["workspaces"], queryFn: () => withWorkspaceTimeout(fn({})), staleTime: 60_000,
-    retry: 2, retryDelay: 1_000, refetchOnReconnect: true,
+    // Emergency recovery mode: never hold the whole panel through several
+    // serial retries. The visible retry button starts a fresh request.
+    retry: false, refetchOnReconnect: true,
   });
   return { ...selection, workspaces };
 }
@@ -37,8 +39,7 @@ export function useWorkspace() {
     queryKey: ["workspace", teamId],
     queryFn: () => withWorkspaceTimeout(fn({ data: teamId ? { teamId } : {} })),
     staleTime: 60_000,
-    retry: 2,
-    retryDelay: 1_000,
+    retry: false,
     refetchOnReconnect: true,
   });
 }

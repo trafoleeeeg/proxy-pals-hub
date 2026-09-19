@@ -57,7 +57,11 @@ export const listFolders = createServerFn({ method: "POST" })
       .order("is_default", { ascending: false })
       .order("name");
     if (error) throw new Error("Не удалось загрузить папки");
-    return (rows ?? []).map((row) => ({ id: row.id, name: row.name, isDefault: row.is_default }));
+    // Сотрудник видит только те папки, которые ему открыл владелец.
+    const allowed = await accessibleFolders(context, data.teamId);
+    return (rows ?? [])
+      .filter((row) => allowed === null || allowed.includes(row.name))
+      .map((row) => ({ id: row.id, name: row.name, isDefault: row.is_default }));
   });
 
 export const createFolder = createServerFn({ method: "POST" })

@@ -343,59 +343,56 @@ export function TeamPage() {
           )}
         </TabsContent>
 
-        <TabsContent value="access">
-          {profiles.isPending && <p role="status" className="py-3 text-sm">Загрузка профилей…</p>}
-          {profiles.isError && <p role="alert" className="py-3 text-sm text-destructive">Не удалось загрузить профили. <Button variant="outline" onClick={() => profiles.refetch()}>Повторить</Button></p>}
-          <div className="mb-3 flex flex-wrap items-center gap-3"><span className="text-sm text-muted-foreground">Выбрано: {selected.length}</span><Button variant="outline" disabled={!selected.length || team.isError || accessMut.isPending} onClick={() => setBulkAccess([...selected])}><UserPlus className="size-4" />Изменить доступ</Button></div>
+        <TabsContent value="rights">
+          <p className="mb-3 text-sm text-muted-foreground">Сотрудник работает только с профилями в открытых ему папках. Здесь вы решаете, что именно он может делать: по умолчанию — ничего, кроме запуска профилей.</p>
+          {rights.isPending && <p role="status" className="py-3 text-sm">Загрузка прав…</p>}
+          {rights.isError && <p role="alert" className="py-3 text-sm text-destructive">Не удалось загрузить права. <Button variant="outline" onClick={() => rights.refetch()}>Повторить</Button></p>}
           <div className="overflow-x-auto rounded-lg border border-border bg-card">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-10"><Checkbox aria-label="Выбрать все профили для доступа" checked={!selected.length ? false : selected.length === profiles.data?.length ? true : "indeterminate"} disabled={!profiles.data?.length} onCheckedChange={(v) => setSelected(v === true ? (profiles.data ?? []).map((p) => p.id) : [])} /></TableHead>
-                  <TableHead>Профиль</TableHead>
-                  {staff.map((m) => (
-                    <TableHead key={m.userId} className="text-center text-xs">
-                      {m.email}
-                    </TableHead>
+                  <TableHead>Сотрудник</TableHead>
+                  {PERMISSION_ORDER.map((key) => (
+                    <TableHead key={key} className="text-center text-xs">{PERMISSION_LABELS[key]}</TableHead>
                   ))}
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(profiles.data ?? []).map((p) => (
-                  <TableRow key={p.id}>
-                    <TableCell><Checkbox aria-label={`Выбрать ${p.name}`} checked={selected.includes(p.id)} onCheckedChange={(v) => setSelected((current) => toggleVisibleSelection(current, [p.id], v === true))} /></TableCell>
-                    <TableCell className="font-medium">{p.name}</TableCell>
-                    {staff.map((m) => {
-                      const granted = accessSet.has(`${p.id}:${m.userId}`);
-                      return (
-                        <TableCell key={m.userId} className="text-center">
+                {staff.map((m) => {
+                  const current = rightsOf(m.userId);
+                  const admin = m.scope === "manager";
+                  return (
+                    <TableRow key={m.userId}>
+                      <TableCell className="font-medium">
+                        {m.email}
+                        {admin && <Badge variant="outline" className="ml-2">администратор</Badge>}
+                      </TableCell>
+                      {PERMISSION_ORDER.map((key) => (
+                        <TableCell key={key} className="text-center">
                           <Checkbox
-                            aria-label={`Доступ ${m.email} к ${p.name}`}
-                            disabled={accessMut.isPending || team.isError || !!bulkAccess}
-                            checked={granted}
-                            onCheckedChange={(v) =>
-                              accessMut.mutate({
-                                profileId: p.id,
-                                userId: m.userId,
-                                granted: v === true,
-                              })
-                            }
+                            aria-label={`${PERMISSION_LABELS[key]} — ${m.email}`}
+                            disabled={admin || rightsMut.isPending || rights.isError}
+                            checked={admin || current[key]}
+                            onCheckedChange={(v) => rightsMut.mutate({ userId: m.userId, permissions: { ...current, [key]: v === true } })}
                           />
                         </TableCell>
-                      );
-                    })}
-                  </TableRow>
-                ))}
-                {staff.length === 0 && (
-                  <TableRow>
-                    <TableCell className="py-8 text-sm text-muted-foreground">
-                      Сначала пригласите сотрудников
-                    </TableCell>
-                  </TableRow>
+                      ))}
+                    </TableRow>
+                  );
+                })}
+                {!staff.length && (
+                  <TableRow><TableCell className="py-8 text-sm text-muted-foreground">Сначала создайте учётные записи сотрудников</TableCell></TableRow>
                 )}
               </TableBody>
             </Table>
           </div>
+          {!!staff.length && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" disabled={rightsMut.isPending} onClick={() => staff.forEach((m) => { if (m.scope !== "manager") rightsMut.mutate({ userId: m.userId, permissions: { ...EMPTY_PERMISSIONS } }); })}>
+                Снять все права
+              </Button>
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="folders">

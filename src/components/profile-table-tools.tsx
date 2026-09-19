@@ -32,7 +32,24 @@ export function ColumnSettings({ visible, onChange, fields, visibleFields, onFie
   </DropdownMenu>;
 }
 
-export function MetadataManager({ open, onClose, statuses, fields, busy, onAddStatus, onAddField }: {
+function StatusEditorRow({ status, busy, onUpdate, onDelete }: {
+  status: ProfileStatus; busy: boolean;
+  onUpdate: (id: string, name: string, color: string) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+}) {
+  const [name, setName] = useState(status.name);
+  const [color, setColor] = useState(status.color);
+  useEffect(() => { setName(status.name); setColor(status.color); }, [status.id, status.name, status.color]);
+  const dirty = name.trim() !== status.name || color !== status.color;
+  return <div className="grid grid-cols-[1fr_9rem_auto_auto] items-center gap-2">
+    <Input aria-label={"Название статуса " + status.name} value={name} maxLength={80} onChange={(event) => setName(event.target.value)} />
+    <Select value={color} onValueChange={setColor}><SelectTrigger aria-label={"Цвет статуса " + status.name}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="primary">Фиолетовый</SelectItem><SelectItem value="success">Зелёный</SelectItem><SelectItem value="warning">Жёлтый</SelectItem><SelectItem value="destructive">Красный</SelectItem><SelectItem value="muted">Серый</SelectItem></SelectContent></Select>
+    <Button size="icon" variant="outline" aria-label={"Сохранить статус " + status.name} disabled={busy || !dirty || !name.trim()} onClick={() => void onUpdate(status.id, name.trim(), color)}><Pencil /></Button>
+    <Button size="icon" variant="outline" aria-label={"Удалить статус " + status.name} disabled={busy} onClick={() => { if (window.confirm(`Удалить статус «${status.name}»? Он пропадёт у всех профилей.`)) void onDelete(status.id); }}><Trash2 /></Button>
+  </div>;
+}
+
+export function MetadataManager({ open, onClose, statuses, fields, busy, onAddStatus, onAddField, onUpdateStatus, onDeleteStatus }: {
   open: boolean; onClose: () => void; statuses: ProfileStatus[]; fields: ProfileField[]; busy: boolean;
   onAddStatus: (name: string, color: string) => Promise<void>; onAddField: (name: string, type: string) => Promise<void>;
   onUpdateStatus: (id: string, name: string, color: string) => Promise<void>;

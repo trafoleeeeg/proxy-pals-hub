@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { acceptInviteSchema, inviteIdSchema, inviteSchema, employeeSchema, memberSchema, teamSchema, workspaceSchema } from "./server-validation";
-import { callServerRpc, memberPermissions, requireTeamManager, PERMISSION_KEYS, type Permission, type PermissionMap, type ServerContext, type TeamScope } from "./server-db";
+import { callServerRpc, isSuperadmin, memberPermissions, requireTeamManager, PERMISSION_KEYS, type Permission, type PermissionMap, type ServerContext, type TeamScope } from "./server-db";
 import { z } from "zod";
 
 export type Workspace = {
@@ -32,8 +32,9 @@ async function readWorkspaces(context: ServerContext): Promise<Workspace[]> {
     membershipError = null;
   }
   const scopeByTeam = new Map((memberships ?? []).map((row) => [row.team_id, (row as { scope?: string }).scope === "manager" ? "manager" : "member"] as const));
+  const superadmin = await isSuperadmin(context);
   return (teams ?? []).map((team) => {
-    const owner = team.owner_id === context.userId;
+    const owner = superadmin || team.owner_id === context.userId;
     const scope: TeamScope = owner ? "owner" : (scopeByTeam.get(team.id) ?? "member");
     return {
       teamId: team.id, teamName: team.name, role: owner ? "owner" as const : "member" as const,

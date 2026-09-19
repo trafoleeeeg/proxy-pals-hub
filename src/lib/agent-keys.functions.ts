@@ -16,13 +16,21 @@ async function assertOwner(
   ctx: { supabase: import("@supabase/supabase-js").SupabaseClient; userId: string },
   teamId: string,
 ) {
+  const { data: superadmin } = await ctx.supabase.rpc("is_superadmin");
+  if (superadmin === true) return;
+  const { data: team } = await ctx.supabase
+    .from("teams")
+    .select("owner_id")
+    .eq("id", teamId)
+    .maybeSingle();
+  if ((team as { owner_id?: string } | null)?.owner_id === ctx.userId) return;
   const { data } = await ctx.supabase
     .from("team_members")
     .select("role")
     .eq("team_id", teamId)
     .eq("user_id", ctx.userId)
     .maybeSingle();
-  if (data?.role !== "owner") throw new Error("Доступ только для владельца команды");
+  if ((data as { role?: string } | null)?.role !== "owner") throw new Error("Доступ только для владельца команды");
 }
 
 export const listAgentKeys = createServerFn({ method: "POST" })

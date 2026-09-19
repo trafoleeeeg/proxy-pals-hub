@@ -887,6 +887,7 @@ export type Database = {
         Args: { _cookies_enc: string; _profile_id: string }
         Returns: string
       }
+      is_superadmin: { Args: never; Returns: boolean }
       mutate_profile_lease: {
         Args: {
           _cookies_enc?: string

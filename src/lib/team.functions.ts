@@ -70,6 +70,16 @@ export const listMembers = createServerFn({ method: "POST" })
       : { data: [], error: null };
     if (peopleError) throw new Error(peopleError.message);
     const byId = new Map((people ?? []).map((person) => [person.id, person]));
+    // Суперадминистратор всегда показывается как владелец с полным доступом.
+    const superIds = new Set<string>();
+    try {
+      const rpc = supabase.rpc.bind(supabase) as unknown as (name: string) => PromiseLike<{ data: unknown }>;
+      const { data: supers } = await rpc("superadmin_ids");
+      for (const row of (supers ?? []) as Array<string | { superadmin_ids?: string }>) {
+        const id = typeof row === "string" ? row : row?.superadmin_ids;
+        if (id) superIds.add(id);
+      }
+    } catch { /* старая база без суперадминов */ }
     const { data: invites, error: inviteError } = await supabase.from("team_invites")
       .select("id, email, token, expires_at, accepted_at, created_at").eq("team_id", data.teamId)
       .is("accepted_at", null).order("created_at", { ascending: false });

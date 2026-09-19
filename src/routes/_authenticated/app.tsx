@@ -81,6 +81,7 @@ function AppShell() {
   const selection = useWorkspaceSelection();
   const runtime = useDesktopProfileLifecycle();
   useRealtimeSync(ws?.teamId);
+  usePresenceHeartbeat(ws?.teamId, runtime.running);
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [signingOut, setSigningOut] = useState(false);

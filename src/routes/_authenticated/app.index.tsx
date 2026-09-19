@@ -235,7 +235,7 @@ function ProfilesWorkspace() {
       </div>
     </div>
 
-    {action && ws && <ProfileBulkDialog action={action.mode} ids={action.ids} teamId={ws.teamId} isOwner={manage} blocked={action.ids.some(locked)} proxies={proxies.data ?? []} folders={(folderList.data ?? []).map((row) => row.name)} onClose={() => setAction(null)} onSaved={() => { setSelected([]); refresh(); }} />}
+    {action && ws && <ProfileBulkDialog action={action.mode} ids={action.ids} teamId={ws.teamId} isOwner={manage} blocked={action.ids.some(locked)} proxies={proxies.data ?? []} folders={folderNames} onClose={() => setAction(null)} onSaved={() => { setSelected([]); refresh(); }} />}
     {cookiesProfile && <ProfileCookies profileId={cookiesProfile.id} name={cookiesProfile.name} isOwner={owner} locked={locked(cookiesProfile.id)} onClose={() => setCookiesId(null)} onSaved={refresh} />}
     {ws && <MetadataManager open={metadataOpen} onClose={() => setMetadataOpen(false)} statuses={metadata.data?.statuses ?? []} fields={metadata.data?.fields ?? []} busy={!!busy} onAddStatus={async (name, color) => { await perform("metadata", () => addStatusFn({ data: { teamId: ws.teamId, name, color: color as "primary" | "success" | "warning" | "destructive" | "muted" } }), () => void qc.invalidateQueries({ queryKey: ["profile-metadata"] })); }} onAddField={async (name, fieldType) => { await perform("metadata", () => addFieldFn({ data: { teamId: ws.teamId, name, fieldType: fieldType as "text" | "number" | "date" | "url" } }), () => void qc.invalidateQueries({ queryKey: ["profile-metadata"] })); }} />}
     <Dialog open={!!editing} onOpenChange={(open) => { if (!open && !busy) setEditing(null); }}><DialogContent className="max-h-[90dvh] w-[calc(100%-2rem)] overflow-y-auto sm:max-w-2xl">

@@ -81,3 +81,17 @@ export const transferSchema = z.object({
   teamId: uuidSchema, profileIds: profileIdsSchema,
   folder: folder.pipe(z.string().min(1).max(200)).optional(), userId: uuidSchema.optional(),
 }).strict().refine((d) => d.folder !== undefined || d.userId !== undefined, "Укажите папку или сотрудника");
+
+const folderName = folder.pipe(z.string().min(1).max(200));
+export const createFolderSchema = z.object({ teamId: uuidSchema, name: folderName }).strict();
+export const renameFolderSchema = z.object({ teamId: uuidSchema, id: uuidSchema, name: folderName }).strict();
+export const folderIdSchema = z.object({ teamId: uuidSchema, id: uuidSchema }).strict();
+export const presenceSchema = z.object({
+  teamId: uuidSchema, profileId: uuidSchema.nullable().optional(), deviceLabel: text(200).optional(),
+}).strict();
+export const employeeSchema = z.object({
+  teamId: uuidSchema,
+  email: z.string().trim().toLowerCase().email().max(254),
+  password: z.string().min(8, "Пароль не короче 8 символов").max(72),
+  displayName: text(120).optional(),
+}).strict();

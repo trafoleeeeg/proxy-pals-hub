@@ -102,6 +102,7 @@ function ProfilesWorkspace() {
   const pending = useMemo(() => new Set([...runtime.pending, ...runtime.busy]), [runtime.pending, runtime.busy]);
   const locked = (id: string) => running.has(id) || pending.has(id) || !!profiles.data?.find((p) => p.id === id)?.lock;
   const rows = (profiles.data ?? []).filter((p) => (folder === ALL || p.folder === folder) && (p.name + " " + p.folder + " " + p.tags.join(" ")).toLowerCase().includes(search.toLowerCase()));
+  const folderNames = [...new Set([...(folderList.data ?? []).map((row) => row.name), ...(profiles.data ?? []).map((p) => p.folder).filter(Boolean)])].sort((a, b) => a.localeCompare(b, "ru"));
   const visibleIds = rows.map((p) => p.id);
   const visibleSelected = visibleIds.filter((id) => selected.includes(id)).length;
   const cookiesProfile = profiles.data?.find((p) => p.id === cookiesId);

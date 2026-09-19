@@ -135,7 +135,9 @@ export function ProfileProxyCell({ proxy, ops, compact = false }: { proxy: Proxy
     </div>
     <div className="mono truncate pl-3.5 text-[11px] text-muted-foreground">
       {rotating
-        ? <>меняем IP{proxy.rotationPreviousIp ? <> · был <span className="text-foreground/70">{proxy.rotationPreviousIp}</span></> : ""}…</>
+        ? proxy.rotationNewIp
+          ? <>новый IP <span className="text-foreground/70">{proxy.rotationNewIp}</span>, подтверждаю…</>
+          : <>меняем IP{proxy.rotationPreviousIp ? <> · был <span className="text-foreground/70">{proxy.rotationPreviousIp}</span></> : ""}…</>
         : proxy.rotationPreviousIp
         ? <>был <span className="text-foreground/70">{proxy.rotationPreviousIp}</span> → стал <span className="text-success">{proxy.rotationNewIp ?? proxy.last_check_ip ?? "—"}</span></>
         : "смены IP не было"}

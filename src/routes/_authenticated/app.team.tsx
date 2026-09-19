@@ -166,11 +166,11 @@ export function TeamPage() {
     onError: (error: Error) => toast.error(error.message || "Не удалось создать учётную запись"),
   });
 
-  const accessMut = useMutation({
-    mutationFn: (v: { profileId: string; userId: string; granted: boolean }) =>
-      accessFn({ data: v }),
+  const rightsMut = useMutation({
+    mutationFn: (v: { userId: string; permissions: Record<PermissionKey, boolean> }) =>
+      permissionsSaveFn({ data: { teamId: ws!.teamId, userId: v.userId, permissions: v.permissions } }),
     onSuccess: refresh,
-    onError: () => toast.error("Не удалось изменить доступ. Обновите список и повторите попытку."),
+    onError: () => toast.error("Не удалось изменить права сотрудника. Обновите страницу и повторите попытку."),
   });
 
   async function removeSelectedMember() {
@@ -216,9 +216,11 @@ export function TeamPage() {
     );
   }
 
-  const accessSet = new Set(
-    (team.data?.access ?? []).map((a) => `${a.profile_id}:${a.user_id}`),
-  );
+  const rightsByUser = new Map((rights.data ?? []).map((row) => [row.userId, row]));
+  const rightsOf = (userId: string): Record<PermissionKey, boolean> => {
+    const row = rightsByUser.get(userId);
+    return Object.fromEntries(PERMISSION_ORDER.map((key) => [key, row?.[key] === true])) as Record<PermissionKey, boolean>;
+  };
   const staff = (team.data?.members ?? []).filter((m) => m.role === "member");
   const folderRows = folderList.data ?? [];
   const folders = folderRows.map((row) => row.name);
@@ -233,7 +235,7 @@ export function TeamPage() {
       <Tabs defaultValue="members" className="mt-6">
         <TabsList>
           <TabsTrigger value="members">Участники</TabsTrigger>
-          <TabsTrigger value="access">Доступы</TabsTrigger>
+          <TabsTrigger value="rights">Права</TabsTrigger>
           <TabsTrigger value="folders">Папки</TabsTrigger>
           <TabsTrigger value="staff">Сотрудники</TabsTrigger>
           <TabsTrigger value="log">Журнал</TabsTrigger>

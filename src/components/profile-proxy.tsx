@@ -87,9 +87,27 @@ export function useProxyOps(teamId: string | undefined) {
         },
       });
     },
-    onSuccess: (result) => result.rotationConfirmed
-      ? toast.success("Новый IP подтверждён: " + result.ip)
-      : toast.info("IP обновлён. Смена уже завершена в другом окне"),
+    onSuccess: (result, id) => {
+      // Не ждём очередного опроса сервера: подтверждённый новый адрес уже
+      // сохранён, поэтому сразу завершаем плашку «меняем IP» в текущей панели.
+      if (teamId && result.rotationConfirmed && result.ip) {
+        const changedAt = new Date().toISOString();
+        qc.setQueryData<ProxyRow[]>(["proxies", teamId], (rows) => rows?.map((proxy) => proxy.id === id ? {
+          ...proxy,
+          last_check_ok: true,
+          last_check_ip: result.ip ?? proxy.last_check_ip,
+          last_check_latency_ms: result.latency ?? proxy.last_check_latency_ms,
+          last_check_error: null,
+          rotationStatus: "success",
+          rotationNewIp: result.ip ?? proxy.rotationNewIp,
+          rotationChangedAt: changedAt,
+          rotationLastError: null,
+        } : proxy));
+        toast.success("Новый IP подтверждён: " + result.ip);
+        return;
+      }
+      toast.info("IP обновлён. Смена уже завершена в другом окне");
+    },
     onError: (error: Error) => toast.error(error.message),
     onSettled: invalidate,
   });

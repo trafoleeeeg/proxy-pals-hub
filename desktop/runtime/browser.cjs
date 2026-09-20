@@ -50,6 +50,18 @@ async function createProfileBrowser(electron, {
   // рабочий экран без заметного скачка из начального размера. В фоновом режиме
   // maximize пропускается: некоторые Linux window manager отображают окно.
   if (show) shell.maximize();
+  // На Windows каждое окно профиля должно жить в панели задач отдельной иконкой,
+  // а не группироваться со вторым окном Umbra. Для этого задаём окну собственный
+  // AppUserModelID — проводник считает его самостоятельным приложением.
+  if (process.platform === "win32" && typeof shell.setAppDetails === "function") {
+    const slug = String(name || "profile").toLowerCase().replace(/[^a-z\d]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "profile";
+    try {
+      shell.setAppDetails({
+        appId: `dev.umbra.desktop.profile.${slug}`,
+        relaunchDisplayName: `Umbra — ${name}`,
+      });
+    } catch { /* панель задач не критична для работы профиля */ }
+  }
   const tabs = new Map();
   let tabOrder = [];
   const recentlyClosed = [];

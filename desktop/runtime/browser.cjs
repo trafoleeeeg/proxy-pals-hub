@@ -56,7 +56,10 @@ async function createProfileBrowser(electron, {
   const shellContents = shell.webContents;
   let activeId;
   let chromeHeight = CHROME_HEIGHT;
-  let overlayHeight = 0;
+  // Меню и всплывающие панели рисуются поверх снимка страницы, а не сдвигают
+  // её вниз: страница остаётся на месте, как в Chrome.
+  let overlayOpen = false;
+  let pageSnapshot = "";
   let ready = false;
   let error = "";
   let bookmarksOpen = false;
@@ -111,9 +114,9 @@ async function createProfileBrowser(electron, {
     if (shell.isDestroyed()) return;
     const { width, height } = shell.getContentBounds();
     for (const tab of tabs.values()) {
-      const top = Math.max(chromeHeight, overlayHeight);
+      const top = chromeHeight;
       tab.view.setBounds({ x: 0, y: top, width: Math.max(1, width), height: Math.max(1, height - top) });
-       tab.view.setVisible(tab.id === activeId && !isHome(tab) && !bookmarksOpen && !proxiesOpen);
+       tab.view.setVisible(tab.id === activeId && !isHome(tab) && !bookmarksOpen && !proxiesOpen && !overlayOpen);
     }
     positionExtensionPopup();
   }

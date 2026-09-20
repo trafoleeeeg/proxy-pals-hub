@@ -5,7 +5,10 @@ const favicon = z.string().regex(/^data:image\/(?:png|jpeg|gif|webp|x-icon|vnd\.
 export const bookmarkSchema = z.object({
   id: z.string().uuid(),
   title: z.string().max(120),
-  url: z.string().url().refine((value) => /^https?:\/\//i.test(value), "Разрешены только HTTP(S)-ссылки"),
+  url: z.string().max(200_000).refine(
+    (value) => /^https?:\/\/\S/i.test(value) || (value.startsWith("javascript:") && !/[\r\n\0]/.test(value)),
+    "Разрешены только HTTP(S)-ссылки и букмарклеты",
+  ),
   favicon: favicon.optional(),
 }).strict();
 

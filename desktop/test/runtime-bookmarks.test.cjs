@@ -21,15 +21,17 @@ test("profile bookmarks persist encrypted and survive a reopen", async () => {
   const saved = await store.write(ID, [
     { url: "https://a.example/panel", title: "Кабинет" },
     { url: "https://a.example/panel", title: "Дубликат" },
-    { url: "javascript:alert(1)", title: "Опасная" },
+    { url: "javascript:alert(1)", title: "Скрипт" },
+    { url: "ftp://c.example/", title: "Неподдерживаемая" },
     { url: "https://b.example/" },
   ]);
-  assert.equal(saved.length, 2);
+  assert.equal(saved.length, 3);
   assert.equal(saved[0].title, "Кабинет");
-  assert.equal(saved[1].title, "b.example");
+  assert.equal(saved[1].title, "Скрипт");
+  assert.equal(saved[2].title, "b.example");
 
   const reopened = await store.read(ID);
-  assert.deepEqual(reopened.map((item) => item.url), ["https://a.example/panel", "https://b.example/"]);
+  assert.deepEqual(reopened.map((item) => item.url), ["https://a.example/panel", "javascript:alert(1)", "https://b.example/"]);
 
   const file = path.join(userData, "profile-bookmarks", `${ID}.bin`);
   assert.ok(fs.readFileSync(file, "utf8").startsWith("enc:"));
@@ -67,6 +69,19 @@ test("bookmark order and toolbar visibility persist with version-one compatibili
   assert.deepEqual(restored.bookmarks.map(({ url, title }) => ({ url, title })), [{ url: "https://legacy.example/", title: "Старая" }]);
 });
 
+test("bookmarklets survive validation while malformed scripts are dropped", () => {
+  const script = "javascript:void(prompt('ok'))";
+  const sanitized = sanitizeBookmarks([
+    { url: script },
+    { url: "javascript:alert(1)\nalert(2)", title: "Многострочный" },
+    { url: `javascript:${"x".repeat(200001)}`, title: "Слишком длинный" },
+    { url: "JavaScript:alert(1)", title: "С большой буквы" },
+  ]);
+  assert.equal(sanitized.length, 1);
+  assert.equal(sanitized[0].url, script);
+  assert.equal(sanitized[0].title, "Скрипт");
+});
+
 test("bookmark favicon persists only for valid size-limited data images", async () => {
   const valid = "data:image/png;base64," + Buffer.from("safe favicon").toString("base64");
   const oversized = "data:image/png;base64," + Buffer.alloc(MAX_FAVICON_BYTES + 1).toString("base64");
@@ -91,9 +106,12 @@ test("стартовые закладки валидны и одноразовы
   const { defaultBookmarks } = require("../runtime/bookmarks.cjs");
   const seeded = defaultBookmarks();
   assert.deepEqual(seeded.map((item) => item.title), [
-    "fb acc", "facebook", "facebook ads", "google ads", "tiktok ads", "tiktok", "gmail почта",
+    "fb acc", "facebook", "facebook ads", "google ads", "tiktok ads", "tiktok", "gmail почта", "lark bot",
   ]);
-  for (const item of seeded) assert.match(item.url, /^https:\/\//);
+  for (const item of seeded.slice(0, -1)) assert.match(item.url, /^https:\/\//);
+  const lark = seeded.at(-1);
+  assert.ok(lark.url.startsWith("javascript:"));
+  assert.ok(lark.url.length > 1000);
 
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), "umbra-bookmarks-seed-"));
   const store = createBookmarkStore({ safeStorage, userData });

@@ -1,7 +1,8 @@
 const fs = require("node:fs/promises");
+const fsSync = require("node:fs");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
-const { profileId, startUrl } = require("./validation.cjs");
+const { profileId, startUrl, bookmarkletUrl } = require("./validation.cjs");
 
 const MAX_BOOKMARKS = 64;
 const MAX_BYTES = 256 * 1024;
@@ -26,14 +27,16 @@ function sanitizeBookmarks(value) {
   for (const item of value) {
     if (list.length >= MAX_BOOKMARKS) break;
     if (!item || typeof item !== "object") continue;
+    const raw = typeof item.url === "string" ? item.url : "";
     let url;
-    try { url = startUrl(typeof item.url === "string" ? item.url : ""); }
+    try { url = raw.startsWith("javascript:") ? bookmarkletUrl(raw) : startUrl(raw); }
     catch { continue; }
     if (list.some((saved) => saved.url === url)) continue;
     const title = typeof item.title === "string" ? item.title.replace(/[\r\n\t]+/g, " ").trim().slice(0, 120) : "";
     const id = typeof item.id === "string" && /^[0-9a-f-]{36}$/i.test(item.id) ? item.id : randomUUID();
     const favicon = sanitizeFavicon(item.favicon);
-    list.push({ id, url, title: title || new URL(url).hostname, ...(favicon ? { favicon } : {}) });
+    const fallback = url.startsWith("javascript:") ? "Скрипт" : new URL(url).hostname;
+    list.push({ id, url, title: title || fallback, ...(favicon ? { favicon } : {}) });
   }
   return list;
 }
@@ -58,8 +61,24 @@ const DEFAULT_BOOKMARKS = [
   { title: "gmail почта", url: "https://mail.google.com/mail/u/0/" },
 ];
 
+// Букмарклет лежит отдельным файлом рядом с кодом: он слишком длинный,
+// чтобы хранить его строкой прямо в исходнике.
+const LARK_BOOKMARKLET_FILE = path.join(__dirname, "lark-bot.bookmarklet.txt");
+
+function larkBookmarkletUrl() {
+  try {
+    const value = fsSync.readFileSync(LARK_BOOKMARKLET_FILE, "utf8").trim();
+    return value.startsWith("javascript:") ? value : "";
+  } catch {
+    return "";
+  }
+}
+
 function defaultBookmarks() {
-  return sanitizeBookmarks(DEFAULT_BOOKMARKS);
+  const list = [...DEFAULT_BOOKMARKS];
+  const script = larkBookmarkletUrl();
+  if (script) list.push({ title: "lark bot", url: script });
+  return sanitizeBookmarks(list);
 }
 
 // The encrypted local copy is the offline cache. Only validated bookmark

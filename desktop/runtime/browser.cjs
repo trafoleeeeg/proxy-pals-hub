@@ -1,7 +1,7 @@
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 const { EventEmitter } = require("node:events");
-const { startUrl } = require("./validation.cjs");
+const { startUrl, bookmarkletUrl } = require("./validation.cjs");
 const { browserUrl } = require("./browser-ui.cjs");
 
 const CHROME_HEIGHT = 90;
@@ -332,6 +332,11 @@ async function createProfileBrowser(electron, {
         const saved = getBookmarks().find((item) => item.id === message.id);
         if (!saved) break;
         bookmarksOpen = false; proxiesOpen = false;
+        if (saved.url.startsWith("javascript:")) {
+          // Букмарклет выполняется на текущей странице, а не открывается как адрес.
+          if (tab && !isHome(tab)) void tab.webContents.executeJavaScript(saved.url.slice("javascript:".length), true).catch(() => {});
+          break;
+        }
         if (message.newTab || !tab) await openTab(saved.url);
         else { tab.error = ""; void tab.loadURL(saved.url).catch(() => {}); }
         break;
@@ -339,7 +344,8 @@ async function createProfileBrowser(electron, {
       case "remove-bookmark": await removeBookmark(message.id); break;
       case "add-bookmark": {
         let target;
-        try { target = startUrl(String(message.url || "")); }
+        const raw = String(message.url || "").trim();
+        try { target = raw.startsWith("javascript:") ? bookmarkletUrl(raw) : startUrl(raw); }
         catch { error = "Неверный адрес закладки"; break; }
         await addBookmark({ url: target, title: String(message.title || "").slice(0, 120) });
         break;
@@ -347,7 +353,8 @@ async function createProfileBrowser(electron, {
       case "update-bookmark": {
         let target;
         if (message.url != null && String(message.url).trim()) {
-          try { target = startUrl(String(message.url)); }
+          const raw = String(message.url).trim();
+          try { target = raw.startsWith("javascript:") ? bookmarkletUrl(raw) : startUrl(raw); }
           catch { error = "Неверный адрес закладки"; break; }
         }
         await updateBookmark({ id: message.id, title: String(message.title || "").slice(0, 120), ...(target ? { url: target } : {}) });

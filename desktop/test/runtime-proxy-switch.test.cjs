@@ -16,6 +16,7 @@ const proxies = () => ([
 function harness(options = {}) {
   const windows = [];
   let reloads = 0;
+  let resourceError;
   const setups = [];
   const settings = [];
   let browserOptions;
@@ -44,7 +45,7 @@ function harness(options = {}) {
     session: { fromPartition() {
       const cookies = new EventEmitter();
       Object.assign(cookies, { get: async () => [], set: async () => {}, flushStore: async () => {} });
-      return { cookies, webRequest: { onBeforeRequest() {} }, getUserAgent: () => "Chrome/144.0.0.0", setUserAgent() {},
+      return { cookies, webRequest: { onBeforeRequest() {}, onErrorOccurred(_filter, handler) { resourceError = typeof _filter === "object" ? handler : null; } }, getUserAgent: () => "Chrome/144.0.0.0", setUserAgent() {},
         flushStorageData() {}, closeAllConnections: async () => {}, clearStorageData: async () => {},
         setPermissionRequestHandler() {}, setPermissionCheckHandler() {} };
     } },
@@ -62,7 +63,8 @@ function harness(options = {}) {
     bookmarkStore: { readState: async () => ({ bookmarks: [], barVisible: true, stored: true }), write: async (_id, state) => structuredClone(state) },
     onBrowserSettingsChanged: (value) => settings.push(value),
   });
-  return { runtime, setups, settings, options: () => browserOptions, reloads: () => reloads };
+  return { runtime, setups, settings, options: () => browserOptions, reloads: () => reloads,
+    failResource: (details) => resourceError?.(details) };
 }
 
 const payload = (extra = {}) => ({ profileId: ID, deviceId: "test-device", name: "Test", lockToken: "t", fingerprint: FP,
@@ -113,5 +115,19 @@ test("облачные настройки восстанавливают выб�
   } }));
   assert.equal(h.setups[0].host, "10.0.0.2");
   assert.equal(h.options().getProxyFailover(), true);
+  await h.runtime.closeProfileWindow(ID);
+});
+
+test("серия сетевых сбоев ресурсов восстанавливает изображения и стили страницы", async () => {
+  const h = harness();
+  await h.runtime.launchProfileWindow(payload({ startUrl: "https://google.com/" }));
+  h.failResource({ webContentsId: 1, resourceType: "image", error: "net::ERR_CONNECTION_RESET" });
+  h.failResource({ webContentsId: 1, resourceType: "stylesheet", error: "net::ERR_TIMED_OUT" });
+  await new Promise((resolve) => setTimeout(resolve, 1300));
+  assert.equal(h.reloads(), 1, "повреждённая страница должна загрузиться заново без кэша");
+  h.failResource({ webContentsId: 1, resourceType: "image", error: "net::ERR_BLOCKED_BY_CLIENT" });
+  h.failResource({ webContentsId: 1, resourceType: "image", error: "net::ERR_BLOCKED_BY_CLIENT" });
+  await new Promise((resolve) => setTimeout(resolve, 1300));
+  assert.equal(h.reloads(), 1, "намеренную блокировку расширением нельзя превращать в цикл перезагрузки");
   await h.runtime.closeProfileWindow(ID);
 });

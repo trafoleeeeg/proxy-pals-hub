@@ -26,6 +26,7 @@ function harness() {
     isDestroyed() { return false; }
     async loadURL(url) { this.url = url; this.title = url === "about:blank" ? "" : new URL(url).hostname; this.emit("did-navigate", {}, url); }
     reload() {}
+    async capturePage() { return { isEmpty: () => false, toDataURL: () => "data:image/png;base64,AA==" }; }
     stop() {}
     focus() {}
     close() { this.destroyed = true; this.emit("destroyed"); }
@@ -152,14 +153,26 @@ test("browser publishes zoom percentage and hides the page behind bookmark manag
   h.browser.destroy();
 });
 
-test("page view yields space for shell popovers and extensions can be pinned", async () => {
+test("shell popovers show over a page snapshot instead of pushing the page down", async () => {
   const h = await harness().start();
-  await h.command({ action: "chrome-overlay-height", value: 420 });
-  assert.equal(h.views.at(-1).bounds.y, 420);
+  await h.command({ action: "overlay", value: true });
+  assert.equal(h.views.at(-1).bounds.y, CHROME_HEIGHT);
+  assert.equal(h.views.at(-1).visible, false);
+  assert.equal(h.stateEvents.at(-1).overlay, true);
+  assert.match(h.stateEvents.at(-1).pageSnapshot, /^data:image\/png;base64,/);
   await h.command({ action: "pin-extension", id: "aaaaaaaaaaaaaaaaaaaaaaaa", pinned: true });
   assert.equal(h.stateEvents.at(-1).extensions[0].pinned, true);
-  await h.command({ action: "chrome-overlay-height", value: 0 });
+  await h.command({ action: "overlay", value: false });
   assert.equal(h.views.at(-1).bounds.y, CHROME_HEIGHT);
+  assert.equal(h.views.at(-1).visible, true);
+  assert.equal(h.stateEvents.at(-1).pageSnapshot, "");
+  h.browser.destroy();
+});
+
+test("browser resolves a host in advance for the address bar", async () => {
+  const h = await harness().start();
+  await h.command({ action: "preconnect", host: "example.com" });
+  assert.equal(h.stateEvents.at(-1).overlay, false);
   h.browser.destroy();
 });
 
@@ -170,7 +183,9 @@ test("browser UI contains a dedicated bookmark manager, search and compact zoom 
   assert.match(source, /id="zoom-value"/);
   assert.match(source, /action: "show-bookmarks"/);
   assert.match(source, /id="pinned-extensions"/);
-  assert.match(source, /action: "chrome-overlay-height"/);
+  assert.match(source, /action: "overlay"/);
+  assert.match(source, /id="page-snapshot"/);
+  assert.match(source, /action: "preconnect"/);
   assert.match(source, /action: "pin-extension"/);
 });
 

@@ -28,7 +28,7 @@ function harness(options = {}) {
       Object.assign(this.webContents, {
         id: windows.length + 1,
         setUserAgent() {}, setWebRTCIPHandlingPolicy() {}, getWebRTCIPHandlingPolicy: () => "", setWindowOpenHandler() {},
-        stop() {}, setZoomLevel() {}, getURL: () => this.url || "", reloadIgnoringCache: () => { reloads++; },
+        stop() {}, setZoomLevel() {}, getURL: () => this.url || "", reload: () => { reloads++; },
       });
       this.webContents.debugger = new EventEmitter();
       Object.assign(this.webContents.debugger, { attach() {}, isAttached: () => true, detach() {}, sendCommand: async () => {} });
@@ -125,7 +125,7 @@ test("серия сетевых сбоев ресурсов восстанавл
   h.failResource({ webContentsId: 1, resourceType: "image", error: "net::ERR_CONNECTION_RESET" });
   h.failResource({ webContentsId: 1, resourceType: "stylesheet", error: "net::ERR_TIMED_OUT" });
   await new Promise((resolve) => setTimeout(resolve, 1300));
-  assert.equal(h.reloads(), 1, "повреждённая страница должна загрузиться заново без кэша");
+  assert.equal(h.reloads(), 1, "повреждённая страница должна загрузиться заново");
   h.failResource({ webContentsId: 1, resourceType: "image", error: "net::ERR_BLOCKED_BY_CLIENT" });
   h.failResource({ webContentsId: 1, resourceType: "image", error: "net::ERR_BLOCKED_BY_CLIENT" });
   await new Promise((resolve) => setTimeout(resolve, 1300));

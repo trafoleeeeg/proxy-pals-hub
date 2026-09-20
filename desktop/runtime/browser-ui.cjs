@@ -44,11 +44,12 @@ function renderer() {
     for (const popover of [bookmarkPopover, extensionsPopover, menu, manager, proxyPage]) if (popover !== except) popover.hidden = true;
     if (closesManager) void run({ action: "hide-bookmarks" });
     if (closesProxies) void run({ action: "hide-proxies" });
-    if (!except || except === manager || except === proxyPage) void run({ action: "chrome-overlay-height", value: 0 });
+    if (!except || except === manager || except === proxyPage) void run({ action: "overlay", value: false });
   };
+  // Панель показывается поверх снимка страницы: сама страница не двигается.
   const syncPopoverLayer = (popover) => {
-    if (!popover || popover.hidden || popover === manager || popover === proxyPage) { void run({ action: "chrome-overlay-height", value: 0 }); return; }
-    requestAnimationFrame(() => void run({ action: "chrome-overlay-height", value: Math.ceil(popover.getBoundingClientRect().bottom + 8) }));
+    const open = !!popover && !popover.hidden && popover !== manager && popover !== proxyPage;
+    void run({ action: "overlay", value: open });
   };
   const togglePopover = (popover, anchor) => {
     const show = popover.hidden;

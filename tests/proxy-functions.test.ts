@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // Bundle test doubles privately so other agents' tests keep their real modules.
 const source = fileURLToPath(new URL("../src/lib/proxies.functions.ts", import.meta.url));
@@ -33,7 +36,9 @@ const built = await Bun.build({
   }],
 });
 if (!built.success) throw new AggregateError(built.logs, "Unable to load proxy handlers");
-const api = await import(`data:text/javascript;base64,${Buffer.from(await built.outputs[0]!.text()).toString("base64")}`);
+const bundlePath = join(mkdtempSync(join(tmpdir(), "umbra-proxy-test-")), "bundle.js");
+writeFileSync(bundlePath, await built.outputs[0]!.text());
+const api = await import(pathToFileURL(bundlePath).href);
 
 const teamId = "11111111-1111-4111-8111-111111111111";
 const id = "22222222-2222-4222-8222-222222222222";

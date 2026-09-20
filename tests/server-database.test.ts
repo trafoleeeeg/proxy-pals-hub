@@ -43,6 +43,12 @@ beforeAll(async () => {
   `);
   const dir = fileURLToPath(new URL("../supabase/migrations/", import.meta.url));
   for (const file of (await readdir(dir)).filter((file) => file.endsWith(".sql")).sort()) {
+    if (file.startsWith("20260919215434_")) {
+      // Одноразовая миграция объединения команд привязана к реальным идентификаторам —
+      // создаём целевую команду и суперадмина, как в рабочей базе.
+      await db.query("insert into auth.users(id, email, email_confirmed_at) values ($1, $2, now())", ["8f9bf3e6-def2-47ac-938a-d37c7f6b33ff", "mafiatrafa@umbra.app"]);
+      await db.query("insert into public.teams(id, owner_id) values ($1, $2)", ["edab663b-a15f-4f9c-a914-fca4bce85d7e", "8f9bf3e6-def2-47ac-938a-d37c7f6b33ff"]);
+    }
     await db.exec(await readFile(`${dir}/${file}`, "utf8"));
   }
   for (const [id, email] of [[owner, "owner@example.test"], [member, "member@example.test"], [outsider, "outsider@example.test"]]) {

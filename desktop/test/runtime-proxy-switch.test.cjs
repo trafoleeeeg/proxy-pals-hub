@@ -26,6 +26,7 @@ function harness(options = {}) {
       this.destroyed = false;
       this.webContents = new EventEmitter();
       Object.assign(this.webContents, {
+        id: windows.length + 1,
         setUserAgent() {}, setWebRTCIPHandlingPolicy() {}, getWebRTCIPHandlingPolicy: () => "", setWindowOpenHandler() {},
         stop() {}, setZoomLevel() {}, getURL: () => this.url || "", reloadIgnoringCache: () => { reloads++; },
       });

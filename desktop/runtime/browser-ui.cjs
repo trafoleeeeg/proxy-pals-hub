@@ -295,6 +295,9 @@ function renderer() {
     document.title = state.proxiesOpen ? "Прокси — Umbra" : state.bookmarksOpen ? "Закладки — Umbra" : state.name + " — Umbra";
     if (document.activeElement !== address) address.value = state.proxiesOpen ? "umbra://proxies" : state.bookmarksOpen ? "umbra://bookmarks" : current?.url === "about:blank" ? "" : current?.url || "";
     showError(state.error || current?.error || "");
+    const snapshot = byId("page-snapshot");
+    if (state.overlay && state.pageSnapshot) { snapshot.src = state.pageSnapshot; snapshot.hidden = false; }
+    else if (!state.overlay) { snapshot.hidden = true; snapshot.removeAttribute("src"); }
     byId("back").disabled = !current?.canGoBack;
     byId("forward").disabled = !current?.canGoForward;
     const reload = byId("reload");

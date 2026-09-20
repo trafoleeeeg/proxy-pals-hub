@@ -189,8 +189,12 @@ test("browser keeps quick tab actions outside the slow command queue", () => {
 test("profile tabs apply fingerprint without a preliminary about:blank load", () => {
   const source = require("node:fs").readFileSync(require.resolve("../runtime/profile-runtime.cjs"), "utf8");
   const block = source.slice(source.indexOf("async function makeWindow"), source.indexOf("function launchProfileWindow"));
-  assert.match(block, /entry\.fingerprintDiagnostics = await configureFingerprint\(win\.webContents, entry\.fp\);\s*\} catch \(first\)/);
+  assert.match(block, /const fingerprintAttempt = configureFingerprint\(win\.webContents, entry\.fp\)/);
+  assert.match(block, /Promise\.race\(\[\s*fingerprintAttempt/);
   assert.ok(block.indexOf("configureFingerprint") < block.indexOf('await navigate(win, "about:blank")'),
     "отпечаток должен применяться до запасной загрузки about:blank");
+  assert.match(block, /win\.webContents\.loadURL\("about:blank"\)\.catch/);
+  assert.ok(!/await\s+win\.webContents\.loadURL\("about:blank"\)/.test(block),
+    "запуск пустой страницы не должен ожидаться перед отпечатком");
   assert.match(source, /await Promise\.all\(plan\.slice\(1\)\.map/);
 });

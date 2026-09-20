@@ -582,7 +582,9 @@ function createProfileRuntime(electron, options = {}) {
       const restoreSaved = saved.tabs.length > 0 && !hasExplicitStartUrl;
       const plan = restoreSaved ? saved.tabs : [url];
       await makeWindow(entry, plan[0], true);
-      for (const extra of plan.slice(1)) await makeWindow(entry, extra).catch(() => {});
+      // Восстановление вкладок идёт параллельно: порядок сохраняется, но окно
+      // профиля перестаёт ждать загрузки каждой страницы по очереди.
+      await Promise.all(plan.slice(1).map((extra) => makeWindow(entry, extra).catch(() => {})));
       const restoredTabs = [...entry.windows];
       const focusTab = restoredTabs[restoreSaved ? Math.min(saved.activeIndex, restoredTabs.length - 1) : 0];
       if (focusTab && !focusTab.isDestroyed()) focusTab.show?.();

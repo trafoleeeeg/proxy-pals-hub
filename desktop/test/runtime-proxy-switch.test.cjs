@@ -15,6 +15,7 @@ const proxies = () => ([
 
 function harness(options = {}) {
   const windows = [];
+  let reloads = 0;
   const setups = [];
   const settings = [];
   let browserOptions;
@@ -25,7 +26,7 @@ function harness(options = {}) {
       this.webContents = new EventEmitter();
       Object.assign(this.webContents, {
         setUserAgent() {}, setWebRTCIPHandlingPolicy() {}, getWebRTCIPHandlingPolicy: () => "", setWindowOpenHandler() {},
-        stop() {}, setZoomLevel() {},
+        stop() {}, setZoomLevel() {}, getURL: () => this.url || "", reloadIgnoringCache: () => { reloads++; },
       });
       this.webContents.debugger = new EventEmitter();
       Object.assign(this.webContents.debugger, { attach() {}, isAttached: () => true, detach() {}, sendCommand: async () => {} });
@@ -61,7 +62,7 @@ function harness(options = {}) {
     bookmarkStore: { readState: async () => ({ bookmarks: [], barVisible: true, stored: true }), write: async (_id, state) => structuredClone(state) },
     onBrowserSettingsChanged: (value) => settings.push(value),
   });
-  return { runtime, setups, settings, options: () => browserOptions };
+  return { runtime, setups, settings, options: () => browserOptions, reloads: () => reloads };
 }
 
 const payload = (extra = {}) => ({ profileId: ID, deviceId: "test-device", name: "Test", lockToken: "t", fingerprint: FP,
@@ -70,7 +71,7 @@ const payload = (extra = {}) => ({ profileId: ID, deviceId: "test-device", name:
 
 test("окно профиля получает список прокси без паролей и переключается на выбранный сервер", async () => {
   const h = harness();
-  await h.runtime.launchProfileWindow(payload());
+  await h.runtime.launchProfileWindow(payload({ startUrl: "https://google.com/" }));
   const list = h.options().getProxies();
   assert.equal(list.length, 2);
   assert.equal(JSON.stringify(list).includes("secret"), false);
@@ -79,15 +80,17 @@ test("окно профиля получает список прокси без 
   assert.equal(h.setups.at(-1).host, "10.0.0.2");
   assert.equal(h.options().getProxies()[1].active, true);
   assert.equal(h.settings.at(-1).activeProxyId, B);
+  assert.equal(h.reloads(), 1, "страница должна повторно запросить отменённые ресурсы через новый прокси");
   await h.runtime.closeProfileWindow(ID);
 });
 
 test("сбой нового прокси возвращает профиль на прежний сервер", async () => {
   const h = harness({ failProxy: "10.0.0.2" });
-  await h.runtime.launchProfileWindow(payload());
+  await h.runtime.launchProfileWindow(payload({ startUrl: "https://google.com/" }));
   await assert.rejects(h.options().switchProxy(B), /Не удалось переключить прокси/);
   assert.equal(h.setups.at(-1).host, "10.0.0.1");
   assert.equal(h.options().getProxies()[0].active, true);
+  assert.equal(h.reloads(), 1, "после возврата старого прокси страница должна восстановить отменённые ресурсы");
   await h.runtime.closeProfileWindow(ID);
 });
 

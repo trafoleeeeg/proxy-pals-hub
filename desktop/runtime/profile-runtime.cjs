@@ -466,9 +466,11 @@ function createProfileRuntime(electron, options = {}) {
       // запускается без await, чтобы рендерер существовал для CDP. Если
       // отладчик недоступен или не отвечает без документа, делаем запасной
       // заход через about:blank с ожиданием.
-      if (win.webContents.getURL() === "" && !win.webContents.isLoading()) {
-        win.webContents.loadURL("about:blank").catch(() => {});
-      }
+      try {
+        if (win.webContents.getURL() === "" && !win.webContents.isLoading()) {
+          win.webContents.loadURL("about:blank").catch(() => {});
+        }
+      } catch { /* рендерер появится при первой навигации */ }
       const fingerprintAttempt = configureFingerprint(win.webContents, entry.fp);
       let fingerprintTimer;
       try {

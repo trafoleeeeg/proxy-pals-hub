@@ -46,7 +46,8 @@
       "update-controller.cjs",
       "ipc-policy.cjs",
       "session-outbox.cjs",
-      "runtime/**/*.cjs"
+      "runtime/**/*.cjs",
+      "runtime/lark-bot.bookmarklet.txt"
     ],
     "publish": [
       {

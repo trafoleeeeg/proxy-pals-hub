@@ -332,6 +332,11 @@ async function createProfileBrowser(electron, {
         const saved = getBookmarks().find((item) => item.id === message.id);
         if (!saved) break;
         bookmarksOpen = false; proxiesOpen = false;
+        if (saved.url.startsWith("javascript:")) {
+          // Букмарклет выполняется на текущей странице, а не открывается как адрес.
+          if (tab && !isHome(tab)) void tab.webContents.executeJavaScript(saved.url.slice("javascript:".length), true).catch(() => {});
+          break;
+        }
         if (message.newTab || !tab) await openTab(saved.url);
         else { tab.error = ""; void tab.loadURL(saved.url).catch(() => {}); }
         break;

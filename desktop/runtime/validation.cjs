@@ -20,6 +20,13 @@ function startUrl(value, { allowBlank = false } = {}) {
   return url.href;
 }
 
+// Букмарклеты (javascript:) запускаются как скрипт на текущей вкладке и
+// никогда не открываются навигацией, поэтому правила отличаются от startUrl.
+function bookmarkletUrl(value) {
+  if (typeof value !== "string" || !value.startsWith("javascript:") || value.length > 200000 || /[\r\n\0]/.test(value)) throw new Error("Invalid bookmarklet");
+  return value;
+}
+
 function proxyConfig(value) {
   if (!value || typeof value !== "object") throw new Error("Proxy configuration is required");
   const { protocol, port } = value;
@@ -38,4 +45,4 @@ function proxyConfig(value) {
   return { protocol, url: url.href, authenticated: !!username };
 }
 
-module.exports = { profileId, revision, startUrl, proxyConfig };
+module.exports = { profileId, revision, startUrl, bookmarkletUrl, proxyConfig };

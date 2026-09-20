@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // Bundle test doubles privately so other agents' tests keep their real modules.
 const source = fileURLToPath(new URL("../src/lib/proxies.functions.ts", import.meta.url));

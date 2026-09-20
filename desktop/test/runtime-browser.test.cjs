@@ -176,7 +176,21 @@ test("browser UI contains a dedicated bookmark manager, search and compact zoom 
 
 test("browser keeps quick tab actions outside the slow command queue", () => {
   const source = require("node:fs").readFileSync(require.resolve("../runtime/browser.cjs"), "utf8");
-  assert.match(source, /\["close-tab", "navigate", "back", "forward", "reload"\]/);
+  assert.match(source, /const SERIALIZED = new Set\(\[/);
+  assert.match(source, /if \(!SERIALIZED\.has\(message\?\.action\)\) return runCommand\(message\);/);
+  for (const action of ["close-tab", "navigate", "back", "forward", "reload", "new", "select", "duplicate", "find"]) {
+    assert.ok(!new RegExp(`"${action}",`).test(source.slice(source.indexOf("const SERIALIZED"), source.indexOf("function runCommand"))),
+      `команда ${action} не должна попадать в очередь`);
+  }
   assert.match(source, /popup\.show\(\);\s*popup\.focus\(\);/);
   assert.match(source, /refitExtensionPopup\(popup\)/);
+});
+
+test("profile tabs apply fingerprint without a preliminary about:blank load", () => {
+  const source = require("node:fs").readFileSync(require.resolve("../runtime/profile-runtime.cjs"), "utf8");
+  const block = source.slice(source.indexOf("async function makeWindow"), source.indexOf("function launchProfileWindow"));
+  assert.match(block, /entry\.fingerprintDiagnostics = await configureFingerprint\(win\.webContents, entry\.fp\);\s*\} catch \(first\)/);
+  assert.ok(block.indexOf("configureFingerprint") < block.indexOf('await navigate(win, "about:blank")'),
+    "отпечаток должен применяться до запасной загрузки about:blank");
+  assert.match(source, /await Promise\.all\(plan\.slice\(1\)\.map/);
 });

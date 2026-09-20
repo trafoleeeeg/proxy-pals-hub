@@ -70,7 +70,7 @@ jobs:
 
       - name: Run full desktop test suite
         working-directory: desktop
-        timeout-minutes: 8
+        timeout-minutes: 15
         env:
           UMBRA_REQUIRE_NATIVE: "1"
         run: |

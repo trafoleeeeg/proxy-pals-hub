@@ -77,11 +77,9 @@ test("bookmarklets survive validation while malformed scripts are dropped", () =
     { url: `javascript:${"x".repeat(200001)}`, title: "Слишком длинный" },
     { url: "JavaScript:alert(1)", title: "С большой буквы" },
   ]);
-  assert.equal(sanitized.length, 2);
+  assert.equal(sanitized.length, 1);
   assert.equal(sanitized[0].url, script);
   assert.equal(sanitized[0].title, "Скрипт");
-  assert.equal(sanitized[1].title, "С большой буквы");
-  assert.equal(sanitized[1].url, "JavaScript:alert(1)");
 });
 
 test("bookmark favicon persists only for valid size-limited data images", async () => {

@@ -377,17 +377,25 @@ async function createProfileBrowser(electron, {
     }
     flushPublish();
   }
+  // В очередь попадают только команды, которые пишут сохранённое состояние
+  // (закладки, прокси, расширения, масштаб). Всё остальное — действия
+  // пользователя в интерфейсе — выполняется сразу, без ожидания фоновых задач.
+  const SERIALIZED = new Set([
+    "bookmark", "save-bookmark", "add-bookmark", "update-bookmark", "remove-bookmark",
+    "reorder-bookmarks", "toggle-bookmark-bar", "pin-extension",
+    "switch-proxy", "toggle-proxy-failover", "check-connection", "check-leaks",
+    "zoom-in", "zoom-out", "zoom-reset", "close-profile",
+  ]);
+  function runCommand(message) {
+    return command(message).then(() => ({})).catch(() => {
+      error = "Не удалось выполнить действие. Проверьте адрес и подключение прокси."; publish(); return { error };
+    });
+  }
   function dispatch(message) {
     // Switching existing tabs must not wait for a slow new tab or network check.
     if (message?.action === "select") { bookmarksOpen = false; proxiesOpen = false; select(tabs.get(message.id)); return Promise.resolve({}); }
-    if (["close-tab", "navigate", "back", "forward", "reload"].includes(message?.action)) {
-      return command(message).then(() => ({})).catch(() => {
-        error = "Не удалось выполнить действие. Проверьте адрес и подключение прокси."; publish(); return { error };
-      });
-    }
-    commandQueue = commandQueue.then(() => command(message)).then(() => ({})).catch(() => {
-      error = "Не удалось выполнить действие. Проверьте адрес и подключение прокси."; publish(); return { error };
-    });
+    if (!SERIALIZED.has(message?.action)) return runCommand(message);
+    commandQueue = commandQueue.then(() => runCommand(message));
     return commandQueue;
   }
   function focusAddress() {

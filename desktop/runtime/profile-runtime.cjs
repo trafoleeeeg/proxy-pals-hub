@@ -1,3 +1,4 @@
+const path = require("node:path");
 const { profileId, startUrl, revision } = require("./validation.cjs");
 const { createProfileBrowser } = require("./browser.cjs");
 const { createRuntimeProxy, blockSession } = require("./proxy.cjs");

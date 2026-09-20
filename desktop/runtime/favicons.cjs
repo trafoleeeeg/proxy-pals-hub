@@ -60,9 +60,31 @@ function iconSources(pageUrl) {
   return [`https://${host}/favicon.ico`, `https://icons.duckduckgo.com/ip3/${host}.ico`];
 }
 
-function createFaviconLoader({ net }, { fetchIcon = requestIcon, limit = 4 } = {}) {
-  const cache = new Map();
+// Значки хранятся между запусками профиля, иначе закладки и вкладки каждый раз
+// ждут повторной загрузки одних и тех же картинок.
+function readCache(fs, file) {
+  if (!file) return new Map();
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+    const entries = Object.entries(raw || {}).filter(([url, icon]) =>
+      typeof url === "string" && typeof icon === "string" && icon.startsWith("data:image/") && icon.length <= 200000);
+    return new Map(entries.slice(0, 500));
+  } catch { return new Map(); }
+}
+
+function createFaviconLoader({ net, fs = require("node:fs") }, { fetchIcon = requestIcon, limit = 4, cacheFile = "" } = {}) {
+  const cache = readCache(fs, cacheFile);
   const failed = new Set();
+  let saveTimer = null;
+  function persist() {
+    if (!cacheFile || saveTimer) return;
+    saveTimer = setTimeout(() => {
+      saveTimer = null;
+      try { fs.writeFileSync(cacheFile, JSON.stringify(Object.fromEntries([...cache].slice(-500))), "utf8"); }
+      catch { /* кэш значков не обязателен */ }
+    }, 1500);
+    saveTimer.unref?.();
+  }
   return {
     get: (url) => cache.get(url) || "",
     // Догружает значки только для тех закладок, у которых их ещё нет.
@@ -74,7 +96,7 @@ function createFaviconLoader({ net }, { fetchIcon = requestIcon, limit = 4 } = {
           for (const source of iconSources(url)) {
             try {
               const icon = await fetchIcon(net, ses, source);
-              if (icon) { cache.set(url, icon); return; }
+              if (icon) { cache.set(url, icon); persist(); return; }
             } catch { /* пробуем следующий источник */ }
           }
           failed.add(url);

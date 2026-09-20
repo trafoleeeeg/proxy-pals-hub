@@ -56,7 +56,10 @@ async function createProfileBrowser(electron, {
   const shellContents = shell.webContents;
   let activeId;
   let chromeHeight = CHROME_HEIGHT;
-  let overlayHeight = 0;
+  // Меню и всплывающие панели рисуются поверх снимка страницы, а не сдвигают
+  // её вниз: страница остаётся на месте, как в Chrome.
+  let overlayOpen = false;
+  let pageSnapshot = "";
   let ready = false;
   let error = "";
   let bookmarksOpen = false;
@@ -81,7 +84,8 @@ async function createProfileBrowser(electron, {
     const bookmarks = getBookmarks();
     const payload = { name, activeId, error, home: isHome(active()), info: getInfo(),
        bookmarks, bookmarksOpen, proxiesOpen, proxies: getProxies(), proxyFailover: getProxyFailover(), leaks: getLeaks(), leakChecking, bookmarkBarVisible: getBookmarkBarVisible(), extensions: getExtensions(), bookmarked: bookmarks.some((item) => item.url === currentUrl),
-       canRestoreTab: recentlyClosed.length > 0, find: active()?.find || null,
+      canRestoreTab: recentlyClosed.length > 0, find: active()?.find || null,
+       overlay: overlayOpen, pageSnapshot: overlayOpen ? pageSnapshot : "",
        zoomPercent: active() ? Math.round(100 * Math.pow(1.2, active().webContents.getZoomLevel())) : 100,
       tabs: tabOrder.map((id) => tabs.get(id)).filter((tab) => tab && !tab.isDestroyed()).map((tab) => ({
       id: tab.id, url: tab.webContents.getURL() || tab.url, title: tab.webContents.getTitle(), favicon: tab.favicon || "", error: tab.error,
@@ -107,13 +111,32 @@ async function createProfileBrowser(electron, {
     if (publishTimer) { clearTimeout(publishTimer); publishTimer = null; }
     sendState();
   }
+  // Снимок делается один раз при открытии панели: страница перестаёт
+  // показываться, но визуально остаётся на месте и не прыгает.
+  async function setOverlay(open) {
+    const next = open === true;
+    if (next === overlayOpen) return;
+    pageSnapshot = "";
+    if (next) {
+      const tab = active();
+      if (tab && !isHome(tab) && !bookmarksOpen && !proxiesOpen) {
+        try {
+          const image = await tab.webContents.capturePage?.();
+          if (image && !(image.isEmpty?.() === true)) pageSnapshot = image.toDataURL();
+        } catch { pageSnapshot = ""; }
+      }
+    }
+    overlayOpen = next;
+    layout();
+    flushPublish();
+  }
   function layout() {
     if (shell.isDestroyed()) return;
     const { width, height } = shell.getContentBounds();
     for (const tab of tabs.values()) {
-      const top = Math.max(chromeHeight, overlayHeight);
+      const top = chromeHeight;
       tab.view.setBounds({ x: 0, y: top, width: Math.max(1, width), height: Math.max(1, height - top) });
-       tab.view.setVisible(tab.id === activeId && !isHome(tab) && !bookmarksOpen && !proxiesOpen);
+       tab.view.setVisible(tab.id === activeId && !isHome(tab) && !bookmarksOpen && !proxiesOpen && !overlayOpen);
     }
     positionExtensionPopup();
   }
@@ -233,7 +256,7 @@ async function createProfileBrowser(electron, {
     }
     target.emit("close", { preventDefault() {} });
   }
-  const KEEPS_EXTENSION_POPUP = new Set(["open-extension", "state", "chrome-height", "chrome-overlay-height"]);
+  const KEEPS_EXTENSION_POPUP = new Set(["open-extension", "state", "chrome-height", "chrome-overlay-height", "overlay", "preconnect"]);
   async function command(message) {
     if (destroyed || !message || typeof message !== "object") return;
     error = "";
@@ -358,9 +381,22 @@ async function createProfileBrowser(electron, {
         openExtensionPopup(extension, Number(message.anchor));
         break;
       }
+      case "overlay": {
+        await setOverlay(message.value === true);
+        return;
+      }
       case "chrome-overlay-height": {
-        const next = Math.round(Number(message.value) || 0);
-        if (next >= 0 && next <= 720 && next !== overlayHeight) { overlayHeight = next; layout(); }
+        await setOverlay(Math.round(Number(message.value) || 0) > 0);
+        return;
+      }
+      // Заранее открываем соединение с сайтом, пока пользователь ещё вводит
+      // адрес или наводится на закладку — страница начинает грузиться быстрее.
+      case "preconnect": {
+        const host = String(message.host || "").toLowerCase();
+        if (/^[a-z\d][a-z\d.-]{2,253}$/.test(host) && host.includes(".")) {
+          try { void session.fromPartition(partition).resolveHost?.(host)?.catch?.(() => {}); }
+          catch { /* предзагрузка не обязательна */ }
+        }
         return;
       }
       case "chrome-height": {

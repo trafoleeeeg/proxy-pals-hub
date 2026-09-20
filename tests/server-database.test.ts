@@ -171,10 +171,14 @@ describe("real migrations and RLS", () => {
     })).rejects.toThrow("permission denied");
   });
 
-  test("a new user's workspace is created once and author deletion preserves shared profiles", async () => {
+  test("a new user without membership gets no workspace and author deletion preserves shared profiles", async () => {
     const fresh = "10000000-0000-4000-8000-000000000004";
     await db.query("insert into auth.users(id, email, email_confirmed_at) values ($1, 'fresh@example.test', now())", [fresh]);
+    // Рабочие пространства не создаются автоматически: доступ даёт только членство в команде.
+    await expect(asUser(fresh, "select public.ensure_workspace() as id")).rejects.toThrow("ещё не добавлена в команду");
+    await db.query("insert into public.team_members(team_id, user_id, role) values ($1, $2, 'member')", [team, fresh]);
     const first = await asUser(fresh, "select public.ensure_workspace() as id");
+    expect(first).toEqual([{ id: team }]);
     expect(await asUser(fresh, "select public.ensure_workspace() as id")).toEqual(first);
     const shared = "30000000-0000-4000-8000-000000000003";
     await db.query("insert into public.browser_profiles(id, team_id, name, created_by) values ($1, $2, 'Shared', $3)", [shared, team, fresh]);

@@ -275,6 +275,19 @@ function createProfileRuntime(electron, options = {}) {
     return found ? found.id : null;
   }
 
+  function reloadPagesAfterProxyChange(entry) {
+    for (const win of entry.windows) {
+      if (win.isDestroyed()) continue;
+      let current = "";
+      try { current = win.webContents.getURL?.() || win.url || ""; } catch { current = win.url || ""; }
+      if (!current || current === "about:blank") continue;
+      try {
+        if (typeof win.webContents.reloadIgnoringCache === "function") win.webContents.reloadIgnoringCache();
+        else win.webContents.reload?.();
+      } catch { entry.lastError = "Не удалось восстановить страницу после смены прокси"; }
+    }
+  }
+
   async function switchProxy(entry, id) {
     if (entry.state !== "running" || entry.closingRequested) throw new Error("Профиль не готов к смене прокси");
     const target = (entry.proxyPool || []).find((item) => item.id === id);
@@ -298,6 +311,10 @@ function createProfileRuntime(electron, options = {}) {
       entry.leaks = null;
       entry.connection = null;
       entry.checkedAt = null;
+      // Пока прокси переключается, fail-closed фильтр намеренно отменяет все
+      // запросы. Перезагрузка нужна, чтобы страницы повторно запросили стили,
+      // изображения и фоновые данные вместо оставшихся пустых блоков.
+      reloadPagesAfterProxyChange(entry);
       notifyBrowserSettings(entry);
       entry.browser?.publish?.();
       void checkConnection(entry);
@@ -309,6 +326,7 @@ function createProfileRuntime(electron, options = {}) {
         entry.proxyTarget = previousTarget;
         entry.activeProxyId = previousId;
         entry.proxyLabel = proxyLabel(previousTarget);
+        reloadPagesAfterProxyChange(entry);
       } catch {
         entry.proxyRuntime = null;
         blockSession(entry.ses);

@@ -84,7 +84,8 @@ async function createProfileBrowser(electron, {
     const bookmarks = getBookmarks();
     const payload = { name, activeId, error, home: isHome(active()), info: getInfo(),
        bookmarks, bookmarksOpen, proxiesOpen, proxies: getProxies(), proxyFailover: getProxyFailover(), leaks: getLeaks(), leakChecking, bookmarkBarVisible: getBookmarkBarVisible(), extensions: getExtensions(), bookmarked: bookmarks.some((item) => item.url === currentUrl),
-       canRestoreTab: recentlyClosed.length > 0, find: active()?.find || null,
+      canRestoreTab: recentlyClosed.length > 0, find: active()?.find || null,
+       overlay: overlayOpen, pageSnapshot: overlayOpen ? pageSnapshot : "",
        zoomPercent: active() ? Math.round(100 * Math.pow(1.2, active().webContents.getZoomLevel())) : 100,
       tabs: tabOrder.map((id) => tabs.get(id)).filter((tab) => tab && !tab.isDestroyed()).map((tab) => ({
       id: tab.id, url: tab.webContents.getURL() || tab.url, title: tab.webContents.getTitle(), favicon: tab.favicon || "", error: tab.error,
@@ -109,6 +110,25 @@ async function createProfileBrowser(electron, {
   function flushPublish() {
     if (publishTimer) { clearTimeout(publishTimer); publishTimer = null; }
     sendState();
+  }
+  // Снимок делается один раз при открытии панели: страница перестаёт
+  // показываться, но визуально остаётся на месте и не прыгает.
+  async function setOverlay(open) {
+    const next = open === true;
+    if (next === overlayOpen) return;
+    pageSnapshot = "";
+    if (next) {
+      const tab = active();
+      if (tab && !isHome(tab) && !bookmarksOpen && !proxiesOpen) {
+        try {
+          const image = await tab.webContents.capturePage?.();
+          if (image && !(image.isEmpty?.() === true)) pageSnapshot = image.toDataURL();
+        } catch { pageSnapshot = ""; }
+      }
+    }
+    overlayOpen = next;
+    layout();
+    flushPublish();
   }
   function layout() {
     if (shell.isDestroyed()) return;
@@ -236,7 +256,7 @@ async function createProfileBrowser(electron, {
     }
     target.emit("close", { preventDefault() {} });
   }
-  const KEEPS_EXTENSION_POPUP = new Set(["open-extension", "state", "chrome-height", "chrome-overlay-height"]);
+  const KEEPS_EXTENSION_POPUP = new Set(["open-extension", "state", "chrome-height", "chrome-overlay-height", "overlay", "preconnect"]);
   async function command(message) {
     if (destroyed || !message || typeof message !== "object") return;
     error = "";

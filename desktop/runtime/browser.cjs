@@ -381,9 +381,22 @@ async function createProfileBrowser(electron, {
         openExtensionPopup(extension, Number(message.anchor));
         break;
       }
+      case "overlay": {
+        await setOverlay(message.value === true);
+        return;
+      }
       case "chrome-overlay-height": {
-        const next = Math.round(Number(message.value) || 0);
-        if (next >= 0 && next <= 720 && next !== overlayHeight) { overlayHeight = next; layout(); }
+        await setOverlay(Math.round(Number(message.value) || 0) > 0);
+        return;
+      }
+      // Заранее открываем соединение с сайтом, пока пользователь ещё вводит
+      // адрес или наводится на закладку — страница начинает грузиться быстрее.
+      case "preconnect": {
+        const host = String(message.host || "").toLowerCase();
+        if (/^[a-z\d][a-z\d.-]{2,253}$/.test(host) && host.includes(".")) {
+          try { void session.fromPartition(partition).resolveHost?.(host)?.catch?.(() => {}); }
+          catch { /* предзагрузка не обязательна */ }
+        }
         return;
       }
       case "chrome-height": {

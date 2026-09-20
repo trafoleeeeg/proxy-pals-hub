@@ -461,10 +461,17 @@ function createProfileRuntime(electron, options = {}) {
       return { action: "deny" };
     });
     try {
-      // Start a renderer on an inert document before awaiting its CDP commands.
-      // No remote page can execute until all fingerprint commands have completed.
-      await navigate(win, "about:blank");
-      entry.fingerprintDiagnostics = await configureFingerprint(win.webContents, entry.fp);
+      // Отпечаток применяется к пустому рендереру до любой удалённой навигации.
+      // Загрузка about:blank больше не ожидается заранее: она добавляла целый
+      // цикл загрузки страницы на каждую вкладку. Если CDP недоступен без
+      // документа, делаем запасной заход через about:blank.
+      try {
+        entry.fingerprintDiagnostics = await configureFingerprint(win.webContents, entry.fp);
+      } catch (first) {
+        if (entry.closingRequested) throw first;
+        await navigate(win, "about:blank");
+        entry.fingerprintDiagnostics = await configureFingerprint(win.webContents, entry.fp);
+      }
       win.webContents.debugger.on("detach", () => {
         if (entry.closingRequested || win.closing || win.isDestroyed()) return;
         entry.lastError = "Отпечаток браузера отключился, профиль остановлен";
@@ -478,7 +485,6 @@ function createProfileRuntime(electron, options = {}) {
         else await navigate(win, url, loadOptions);
       }
       if (entry.closingRequested) throw new Error("Profile is closing");
-      if (options.show !== false) win.show();
       return win;
     } catch (error) {
       if (!primary) entry.lastError = launchErrorText(error.message);

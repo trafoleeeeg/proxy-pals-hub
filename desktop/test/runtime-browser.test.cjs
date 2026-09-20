@@ -198,3 +198,10 @@ test("profile tabs apply fingerprint without a preliminary about:blank load", ()
     "запуск пустой страницы не должен ожидаться перед отпечатком");
   assert.match(source, /await Promise\.all\(plan\.slice\(1\)\.map/);
 });
+
+test("canvas fingerprint protection never rewrites large visual canvases", () => {
+  const source = require("node:fs").readFileSync(require.resolve("../fingerprint-preload.cjs"), "utf8");
+  assert.match(source, /width \* height > 262144/);
+  assert.match(source, /index \+= 4093/);
+  assert.ok(!source.includes("index += 128"), "плотный шум создаёт видимые полосы на содержимом сайтов");
+});

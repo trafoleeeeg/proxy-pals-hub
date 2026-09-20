@@ -32,7 +32,13 @@ function applyDocumentFingerprint(fp) {
   if (fp.canvasNoise && globalThis.CanvasRenderingContext2D) {
     const originalGet = CanvasRenderingContext2D.prototype.getImageData;
     const perturb = (data, width, height) => {
-      for (let index = 0; index < data.length; index += 128) data[index] = Math.max(0, Math.min(255, data[index] + delta(fp.canvasNoise ^ width ^ height, index)));
+      // Fingerprint probes use small synthetic canvases. Never rewrite large
+      // canvases used by sites for photos, previews, maps or their interface:
+      // doing so creates visible stripes and can break image lazy-loading.
+      if (!width || !height || width * height > 262144) return;
+      for (let index = 0; index < data.length; index += 4093) {
+        data[index] = Math.max(0, Math.min(255, data[index] + delta(fp.canvasNoise ^ width ^ height, index)));
+      }
     };
     CanvasRenderingContext2D.prototype.getImageData = function (...args) {
       const result = originalGet.apply(this, args);
@@ -40,6 +46,7 @@ function applyDocumentFingerprint(fp) {
       return result;
     };
     const copy = (canvas) => {
+      if (!canvas.width || !canvas.height || canvas.width * canvas.height > 262144) return canvas;
       const cloned = document.createElement("canvas");
       cloned.width = canvas.width; cloned.height = canvas.height;
       if (canvas.width && canvas.height) {

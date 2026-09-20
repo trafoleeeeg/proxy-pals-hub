@@ -288,6 +288,64 @@ function createProfileRuntime(electron, options = {}) {
     }
   }
 
+  // Chromium can finish the main document even when a slow proxy has dropped
+  // several image, stylesheet or font requests. In that case the page looks
+  // "loaded", but remains full of empty placeholders until it is refreshed.
+  // Retry the affected tab once the burst of transient failures has settled.
+  function installResourceRecovery(entry) {
+    const request = entry.ses?.webRequest;
+    if (!request?.onErrorOccurred) return;
+    const recoverable = new Set([
+      "net::ERR_FAILED", "net::ERR_TIMED_OUT", "net::ERR_NETWORK_CHANGED",
+      "net::ERR_CONNECTION_CLOSED", "net::ERR_CONNECTION_RESET",
+      "net::ERR_CONNECTION_REFUSED", "net::ERR_CONNECTION_ABORTED",
+      "net::ERR_NAME_NOT_RESOLVED", "net::ERR_INTERNET_DISCONNECTED",
+      "net::ERR_CONNECTION_TIMED_OUT", "net::ERR_PROXY_CONNECTION_FAILED",
+      "net::ERR_EMPTY_RESPONSE",
+    ]);
+    const resourceTypes = new Set(["image", "stylesheet", "font", "media", "script", "xhr"]);
+    entry.resourceFailures = new Map();
+    entry.resourceRecovery = new Map();
+    request.onErrorOccurred({ urls: ["http://*/*", "https://*/*"] }, (details) => {
+      if (entry.state === "closing" || entry.closingRequested || !resourceTypes.has(details.resourceType)
+        || !recoverable.has(details.error)) return;
+      const id = details.webContentsId;
+      if (!Number.isInteger(id)) return;
+      const now = Date.now();
+      const previous = entry.resourceFailures.get(id);
+      const failures = !previous || now - previous.startedAt > 5000
+        ? { count: 1, startedAt: now }
+        : { count: previous.count + 1, startedAt: previous.startedAt };
+      entry.resourceFailures.set(id, failures);
+      if (failures.count < 2 || entry.resourceRecovery.has(id)) return;
+      const timer = setTimeout(() => {
+        entry.resourceRecovery.delete(id);
+        entry.resourceFailures.delete(id);
+        const win = [...entry.windows].find((candidate) => !candidate.isDestroyed() && candidate.webContents.id === id);
+        if (!win) return;
+        let current = "";
+        try { current = win.webContents.getURL?.() || win.url || ""; } catch { current = win.url || ""; }
+        if (!current || current === "about:blank") return;
+        const last = entry.resourceReloads?.get(current) || 0;
+        if (Date.now() - last < 60000) return;
+        entry.resourceReloads ||= new Map();
+        entry.resourceReloads.set(current, Date.now());
+        try {
+          if (typeof win.webContents.reloadIgnoringCache === "function") win.webContents.reloadIgnoringCache();
+          else win.webContents.reload?.();
+        } catch { entry.lastError = "Не удалось восстановить изображения и стили страницы"; }
+      }, 1200);
+      timer.unref?.();
+      entry.resourceRecovery.set(id, timer);
+    });
+  }
+
+  function uninstallResourceRecovery(entry) {
+    for (const timer of entry.resourceRecovery?.values() || []) clearTimeout(timer);
+    entry.resourceRecovery?.clear();
+    try { entry.ses?.webRequest?.onErrorOccurred?.(null); } catch { /* сессия уже закрывается */ }
+  }
+
   async function switchProxy(entry, id) {
     if (entry.state !== "running" || entry.closingRequested) throw new Error("Профиль не готов к смене прокси");
     const target = (entry.proxyPool || []).find((item) => item.id === id);
@@ -588,6 +646,7 @@ function createProfileRuntime(electron, options = {}) {
           entry.webrtcPolicy = SAFE_WEBRTC;
           try { entry.ses.setWebRTCIPHandlingPolicy?.(SAFE_WEBRTC); } catch { /* политика недоступна в этой сборке */ }
         }
+         installResourceRecovery(entry);
         entry.ses.setUserAgent(entry.fp.userAgent, entry.fp.languages.join(","));
         // Background permission requests cannot enable arbitrary device access.
         entry.ses.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
@@ -635,6 +694,7 @@ function createProfileRuntime(electron, options = {}) {
       } catch (error) {
         entry.state = "failed";
         unwatchCookies(entry);
+         uninstallResourceRecovery(entry);
         for (const win of entry.windows) if (!win.isDestroyed()) win.destroy();
         const warmedBrowser = await entry.browserPromise?.catch(() => null);
         entry.browser?.destroy();
@@ -665,6 +725,7 @@ function createProfileRuntime(electron, options = {}) {
       await entry.startPromise.catch(() => {});
       entry.state = "closing";
       unwatchCookies(entry);
+       uninstallResourceRecovery(entry);
       if (entry.ses) {
         blockSession(entry.ses);
         for (const win of entry.windows) if (!win.isDestroyed()) win.webContents.stop();

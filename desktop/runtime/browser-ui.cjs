@@ -265,6 +265,26 @@ function renderer() {
   byId("find-prev").addEventListener("click", () => void run({ action: "find", value: findInput.value, next: true, forward: false }));
   byId("find-close").addEventListener("click", closeFind);
   byId("manage-extensions").addEventListener("click", () => { extensionsPopover.hidden = true; syncPopoverLayer(); void run({ action: "manage-extensions" }); });
+  // Соединение с сайтом открывается заранее — пока адрес ещё набирают или
+  // курсор только наведён на закладку, — поэтому страница грузится быстрее.
+  let preconnectTimer;
+  let lastPreconnect = "";
+  const preconnect = (value) => {
+    let host = "";
+    try {
+      const text = String(value || "").trim();
+      if (!text || /\s/.test(text)) return;
+      host = /^[a-z][a-z\d+.-]*:\/\//i.test(text) ? new URL(text).hostname : text.split("/")[0];
+    } catch { return; }
+    if (!host || !host.includes(".") || host === lastPreconnect) return;
+    lastPreconnect = host;
+    void run({ action: "preconnect", host });
+  };
+  address.addEventListener("input", () => {
+    clearTimeout(preconnectTimer);
+    const value = address.value;
+    preconnectTimer = setTimeout(() => preconnect(value), 250);
+  });
   address.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && current) { address.value = current.url === "about:blank" ? "" : current.url; address.blur(); }
   });
@@ -379,6 +399,7 @@ function renderer() {
       const label = document.createElement("span"); label.textContent = bookmark.title || new URL(bookmark.url).hostname;
       button.append(favicon, label);
       button.title = bookmark.url; button.onclick = () => void run({ action: "open-bookmark", id: bookmark.id });
+      button.onmouseenter = () => preconnect(bookmark.url);
       button.onauxclick = (event) => { if (event.button === 1) void run({ action: "open-bookmark", id: bookmark.id, newTab: true }); };
       button.addEventListener("dragstart", () => { draggedBookmark = bookmark.id; });
       button.addEventListener("dragover", (event) => event.preventDefault());

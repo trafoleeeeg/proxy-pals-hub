@@ -47,7 +47,7 @@ function createProfileRuntime(electron, options = {}) {
   const tabStore = () => tabStoreRef ||= options.tabStore || createTabStore({ safeStorage, userData: app.getPath("userData") });
   const bookmarkStore = () => bookmarkStoreRef ||= options.bookmarkStore || createBookmarkStore({ safeStorage, userData: app.getPath("userData") });
   const extensionStore = options.extensionStore;
-  const favicons = options.faviconLoader || (electron.net ? createFaviconLoader({ net: electron.net }) : null);
+  const favicons = options.faviconLoader || (electron.net ? createFaviconLoader({ net: electron.net }, { cacheFile: path.join(app.getPath("userData"), "favicon-cache.json") }) : null);
 
   function status(entry) {
     return {
@@ -282,8 +282,7 @@ function createProfileRuntime(electron, options = {}) {
       try { current = win.webContents.getURL?.() || win.url || ""; } catch { current = win.url || ""; }
       if (!current || current === "about:blank") continue;
       try {
-        if (typeof win.webContents.reloadIgnoringCache === "function") win.webContents.reloadIgnoringCache();
-        else win.webContents.reload?.();
+        win.webContents.reload?.();
       } catch { entry.lastError = "Не удалось восстановить страницу после смены прокси"; }
     }
   }
@@ -331,8 +330,7 @@ function createProfileRuntime(electron, options = {}) {
         entry.resourceReloads ||= new Map();
         entry.resourceReloads.set(current, Date.now());
         try {
-          if (typeof win.webContents.reloadIgnoringCache === "function") win.webContents.reloadIgnoringCache();
-          else win.webContents.reload?.();
+          win.webContents.reload?.();
         } catch { entry.lastError = "Не удалось восстановить изображения и стили страницы"; }
       }, 1200);
       timer.unref?.();

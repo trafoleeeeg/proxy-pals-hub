@@ -462,16 +462,32 @@ function createProfileRuntime(electron, options = {}) {
     });
     try {
       // Отпечаток применяется к пустому рендереру до любой удалённой навигации.
-      // Загрузка about:blank больше не ожидается заранее: она добавляла целый
-      // цикл загрузки страницы на каждую вкладку. Если CDP недоступен без
-      // документа, делаем запасной заход через about:blank.
+      // Полная загрузка about:blank больше не ожидается: страница лишь
+      // запускается без await, чтобы рендерер существовал для CDP. Если
+      // отладчик недоступен или не отвечает без документа, делаем запасной
+      // заход через about:blank с ожиданием.
+      if (win.webContents.getURL() === "" && !win.webContents.isLoading()) {
+        win.webContents.loadURL("about:blank").catch(() => {});
+      }
+      const fingerprintAttempt = configureFingerprint(win.webContents, entry.fp);
+      let fingerprintTimer;
       try {
-        entry.fingerprintDiagnostics = await configureFingerprint(win.webContents, entry.fp);
+        entry.fingerprintDiagnostics = await Promise.race([
+          fingerprintAttempt,
+          new Promise((_, reject) => {
+            fingerprintTimer = setTimeout(() => reject(new Error("Fingerprint debugger timeout")), 5000);
+            fingerprintTimer.unref?.();
+          }),
+        ]);
       } catch (first) {
+        clearTimeout(fingerprintTimer);
         if (entry.closingRequested) throw first;
+        try { if (win.webContents.debugger.isAttached()) win.webContents.debugger.detach(); } catch { /* игнорируем */ }
         await navigate(win, "about:blank");
         entry.fingerprintDiagnostics = await configureFingerprint(win.webContents, entry.fp);
       }
+      clearTimeout(fingerprintTimer);
+      fingerprintAttempt.catch(() => {});
       win.webContents.debugger.on("detach", () => {
         if (entry.closingRequested || win.closing || win.isDestroyed()) return;
         entry.lastError = "Отпечаток браузера отключился, профиль остановлен";

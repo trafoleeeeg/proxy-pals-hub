@@ -43,7 +43,7 @@ async function createProfileBrowser(electron, {
   shellSession.setPermissionCheckHandler(() => false);
   const shell = new BrowserWindow({
     width: Math.min(fp.screen.width, 1600), height: Math.min(fp.screen.height + CHROME_HEIGHT, 1108),
-    minWidth: 600, minHeight: 400, title: name, backgroundColor: "#111217", show: false, autoHideMenuBar: true,
+    minWidth: 600, minHeight: 400, title: name, backgroundColor: "#111317", show: false, autoHideMenuBar: true,
     webPreferences: { session: shellSession, preload: path.join(__dirname, "browser-preload.cjs"), contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, devTools: false },
   });
   // Разворачиваем скрытое окно заранее, чтобы профиль появился сразу на весь

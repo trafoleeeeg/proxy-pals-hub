@@ -43,7 +43,7 @@ function profileClosed(payload) {
 function createWindow() {
   const window = new BrowserWindow({
     width: 1440, height: 900, minWidth: 900, minHeight: 620,
-    backgroundColor: "#111217", autoHideMenuBar: true, title: "Umbra", show: false,
+    backgroundColor: "#111317", autoHideMenuBar: true, title: "Umbra", show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true, sandbox: true, nodeIntegration: false,

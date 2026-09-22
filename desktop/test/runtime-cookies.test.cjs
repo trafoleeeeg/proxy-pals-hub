@@ -4,7 +4,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { createCookieStore, initializeCookies, restoreCookies } = require("../runtime/cookies.cjs");
+const { createCookieStore, initializeCookies, parseCookieImport, restoreCookies, applyImportedCookies } = require("../runtime/cookies.cjs");
 const { profileId, startUrl, proxyConfig } = require("../runtime/validation.cjs");
 const ID = "10000000-0000-4000-8000-000000000001";
 const OLD = "2026-01-01T00:00:00.000Z";
@@ -110,6 +110,49 @@ test("one Chromium-incompatible cookie does not block the whole profile", async 
   ]);
   assert.deepEqual(result, { restored: 1, skipped: 1 });
   assert.equal((await ses.cookies.get({}))[0].name, "working");
+});
+
+test("cookie import accepts JSON exports and Netscape files", () => {
+  const json = parseCookieImport(JSON.stringify({ cookies: [{
+    domain: ".example.test", name: "json-session", value: "secret", path: "/account",
+    secure: true, httpOnly: true, sameSite: "None", expirationDate: 2_000_000_000,
+  }] }));
+  assert.deepEqual(json[0], {
+    name: "json-session", value: "secret", domain: ".example.test", path: "/account",
+    hostOnly: false, secure: true, httpOnly: true, session: false,
+    expirationDate: 2_000_000_000, sameSite: "no_restriction",
+  });
+  const netscape = parseCookieImport([
+    "# Netscape HTTP Cookie File",
+    "#HttpOnly_.example.test\tTRUE\t/\tTRUE\t2000000000\tnet-session\t",
+  ].join("\n"));
+  assert.equal(netscape[0].name, "net-session");
+  assert.equal(netscape[0].value, "");
+  assert.equal(netscape[0].httpOnly, true);
+  assert.equal(netscape[0].hostOnly, false);
+});
+
+test("cookie import merges into the live session and reports rejected entries", async () => {
+  const ses = session([cookie("existing")]);
+  const originalSet = ses.cookies.set;
+  ses.cookies.set = async (details) => {
+    if (details.name === "rejected") throw new Error("invalid for Chromium");
+    return originalSet(details);
+  };
+  const result = await applyImportedCookies(ses, parseCookieImport(JSON.stringify([
+    { domain: "example.test", path: "/", name: "accepted", value: "1" },
+    { domain: "example.test", path: "/", name: "rejected", value: "2" },
+  ])));
+  assert.deepEqual(result, { imported: 1, skipped: 1 });
+  assert.equal((await ses.cookies.get({})).some((entry) => entry.value === "existing"), true);
+  assert.equal(ses.writes.at(-1).name, "accepted");
+});
+
+test("cookie import rejects empty, malformed and oversized input", () => {
+  for (const value of ["", "not a netscape row", "{}", JSON.stringify([{ domain: "", name: "a", value: "b" }])]) {
+    assert.throws(() => parseCookieImport(value));
+  }
+  assert.throws(() => parseCookieImport("x".repeat(5_000_001)), /5 МБ/);
 });
 
 test("encryption unavailable/basic_text fails closed", async () => {

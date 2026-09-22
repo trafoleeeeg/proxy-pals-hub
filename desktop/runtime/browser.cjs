@@ -20,6 +20,7 @@ function addressUrl(value) {
 
 async function createProfileBrowser(electron, {
   name, fp, partition, openTab, closeProfile, getInfo = () => ({}), checkConnection = async () => {}, show = true,
+  importCookies = async () => { throw new Error("Импорт cookies недоступен"); },
   getBookmarks = () => [], addBookmark = async () => {}, removeBookmark = async () => {}, getExtensions = () => [],
   updateBookmark = async () => {}, reorderBookmarks = async () => {}, getBookmarkBarVisible = () => true,
   setBookmarkBarVisible = async () => {}, setExtensionPinned = async () => {}, openExtensionManager = () => {}, onTabsChanged = () => {},
@@ -275,6 +276,7 @@ async function createProfileBrowser(electron, {
     // Любое другое действие закрывает окно расширения, как клик мимо popup в Chrome.
     if (!KEEPS_EXTENSION_POPUP.has(message.action)) closeExtensionPopup();
     const tab = active();
+    let response;
     switch (message.action) {
       case "state": break;
       case "new": bookmarksOpen = false; proxiesOpen = false; await openTab("about:blank"); focusAddress(); break;
@@ -318,6 +320,15 @@ async function createProfileBrowser(electron, {
         tabOrder = [...message.ids]; if (ready) onTabsChanged(); break;
       }
       case "close-profile": await closeProfile(); break;
+      case "import-cookies": {
+        try {
+          response = await importCookies(message.text);
+        } catch (failure) {
+          error = failure instanceof Error ? failure.message : "Не удалось импортировать cookies";
+          response = { error };
+        }
+        break;
+      }
       case "duplicate": {
         const url = tab?.webContents.getURL() || tab?.url || "about:blank";
         await openTab(url);
@@ -431,6 +442,7 @@ async function createProfileBrowser(electron, {
        default: throw new Error("Неизвестная команда браузера");
     }
     flushPublish();
+    return response;
   }
   // В очередь попадают только команды, которые пишут сохранённое состояние
   // (закладки, прокси, расширения, масштаб). Всё остальное — действия
@@ -439,10 +451,10 @@ async function createProfileBrowser(electron, {
     "bookmark", "save-bookmark", "add-bookmark", "update-bookmark", "remove-bookmark",
     "reorder-bookmarks", "toggle-bookmark-bar", "pin-extension",
     "switch-proxy", "toggle-proxy-failover", "check-connection", "check-leaks",
-    "zoom-in", "zoom-out", "zoom-reset", "close-profile",
+    "zoom-in", "zoom-out", "zoom-reset", "close-profile", "import-cookies",
   ]);
   function runCommand(message) {
-    return command(message).then(() => ({})).catch(() => {
+    return command(message).then((result) => result || {}).catch(() => {
       error = "Не удалось выполнить действие. Проверьте адрес и подключение прокси."; publish(); return { error };
     });
   }

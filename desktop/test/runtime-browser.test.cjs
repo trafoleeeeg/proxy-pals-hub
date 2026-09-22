@@ -10,6 +10,7 @@ function harness() {
   const views = [];
   let layoutCount = 0;
   let bookmarks = [];
+  const importedCookies = [];
   let extensions = [{ id: "aaaaaaaaaaaaaaaaaaaaaaaa", name: "Тест", version: "1.0", pinned: false }];
   class Contents extends EventEmitter {
     constructor() {
@@ -62,6 +63,7 @@ function harness() {
       openTab, closeProfile: async () => {}, show: false, onTabsChanged: () => changed.push(true),
       getBookmarks: () => bookmarks,
       getExtensions: () => extensions,
+      importCookies: async (text) => { importedCookies.push(text); return { imported: 2, skipped: 1 }; },
       setExtensionPinned: async (id, pinned) => { extensions = extensions.map((item) => item.id === id ? { ...item, pinned } : item); },
       addBookmark: async (bookmark) => { bookmarks = [...bookmarks, { id: "11111111-1111-4111-8111-111111111111", ...bookmark }]; },
     });
@@ -69,7 +71,7 @@ function harness() {
     await openTab("https://one.example/");
     await openTab("https://two.example/");
     const event = { sender: browser.shell.webContents, senderFrame: browser.shell.webContents.mainFrame };
-    return { browser, command: (message) => handler(event, message), stateEvents, changed, views, getBookmarks: () => bookmarks, layoutCount: () => layoutCount };
+    return { browser, command: (message) => handler(event, message), stateEvents, changed, views, getBookmarks: () => bookmarks, importedCookies, layoutCount: () => layoutCount };
   };
   return { start };
 }
@@ -100,6 +102,14 @@ test("browser chrome keeps the secure shell height and rejects malformed tab ord
   assert.equal(CHROME_HEIGHT, 90);
   const result = await h.command({ action: "reorder-tabs", ids: ["unknown"] });
   assert.match(result.error, /Не удалось/);
+  h.browser.destroy();
+});
+
+test("browser imports cookie text through the serialized profile command", async () => {
+  const h = await harness().start();
+  const result = await h.command({ action: "import-cookies", text: '[{"name":"session"}]' });
+  assert.deepEqual(result, { imported: 2, skipped: 1 });
+  assert.deepEqual(h.importedCookies, ['[{"name":"session"}]']);
   h.browser.destroy();
 });
 
@@ -187,6 +197,9 @@ test("browser UI contains a dedicated bookmark manager, search and compact zoom 
   assert.match(source, /id="page-snapshot"/);
   assert.match(source, /action: "preconnect"/);
   assert.match(source, /action: "pin-extension"/);
+  assert.match(source, /id="cookie-file"/);
+  assert.match(source, /data-local="cookie-import"/);
+  assert.match(source, /action: "import-cookies"/);
 });
 
 test("browser keeps quick tab actions outside the slow command queue", () => {

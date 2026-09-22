@@ -2,7 +2,7 @@ const path = require("node:path");
 const { profileId, startUrl, revision } = require("./validation.cjs");
 const { createProfileBrowser } = require("./browser.cjs");
 const { createRuntimeProxy, blockSession } = require("./proxy.cjs");
-const { createCookieStore, initializeCookies, canonicalCookies } = require("./cookies.cjs");
+const { createCookieStore, initializeCookies, canonicalCookies, parseCookieImport, applyImportedCookies } = require("./cookies.cjs");
 const { createTabStore, sanitizeTabs } = require("./tabs.cjs");
 const { createBookmarkStore, defaultBookmarks, sanitizeBookmarks } = require("./bookmarks.cjs");
 const { normalizeFingerprint, applyFingerprint } = require("./fingerprint.cjs");
@@ -170,6 +170,12 @@ function createProfileRuntime(electron, options = {}) {
         return pending;
       },
       closeProfile: () => closeProfileWindow(entry.profileId),
+      importCookies: async (text) => {
+        const cookies = parseCookieImport(text);
+        const result = await applyImportedCookies(entry.ses, cookies);
+        const saved = await snapshot(entry);
+        return { ...result, cookiesUpdatedAt: saved.cookiesUpdatedAt };
+      },
       onTabsChanged: () => recordTabs(entry),
       getBookmarks: () => allBookmarks(entry),
       getBookmarkBarVisible: () => entry.bookmarkBarVisible !== false,

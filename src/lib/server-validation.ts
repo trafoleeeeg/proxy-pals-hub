@@ -48,7 +48,10 @@ export const saveProfileSchema = z.object({
   id: uuidSchema.optional(), teamId: uuidSchema, name: text(200).trim().min(1),
   folder, tags, notes, proxyId: uuidSchema.nullable(), fingerprint: fingerprintSchema,
   statusId: uuidSchema.nullable().optional(), customFields: customFields.optional(),
-}).strict();
+  cookies: z.string().max(5_000_000).optional(),
+}).strict().superRefine((data, context) => {
+  if (data.id && data.cookies !== undefined) context.addIssue({ code: z.ZodIssueCode.custom, path: ["cookies"], message: "Cookies can only be supplied when creating a profile" });
+});
 export const bulkCreateSchema = z.object({
   teamId: uuidSchema, prefix: text(180).trim().min(1), count: z.number().int().min(1).max(200),
   folder, fingerprints: z.array(fingerprintSchema).min(1).max(200),

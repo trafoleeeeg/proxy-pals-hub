@@ -124,7 +124,9 @@ test("profile editor validates runtime settings and omits an empty optional URL"
   await openProfiles(page);
   await page.getByRole("button", { name: "Новый профиль", exact: true }).click();
   const dialog = page.getByRole("dialog");
+  const cookies = '[{"domain":".example.com","path":"/","name":"created","value":"synthetic"}]';
   await dialog.getByLabel("Название", { exact: true }).fill("Новый рабочий");
+  await dialog.getByLabel("Cookies при создании (JSON / Netscape)", { exact: true }).fill(cookies);
   await dialog.getByLabel("Стартовый адрес", { exact: true }).fill("https://example.com");
   await dialog.getByLabel("Стартовый адрес", { exact: true }).fill("");
   await dialog.getByLabel("Часовой пояс", { exact: true }).fill("wrong/zone");
@@ -137,6 +139,7 @@ test("profile editor validates runtime settings and omits an empty optional URL"
   await expect(dialog).toHaveCount(0);
   const saved = await calls(page, "saveProfile");
   expect(saved[0].fingerprint).not.toHaveProperty("startUrl");
+  expect(saved[0].cookies).toBe(cookies);
 });
 
 test("team bulk assignment grants and revokes the selected profiles", async ({ page }, info) => {

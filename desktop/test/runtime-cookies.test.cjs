@@ -74,16 +74,25 @@ test("encrypted snapshots retain session cookies and reject tampering without ov
   assert.deepEqual(await fs.readFile(filename), encrypted);
 });
 
-test("old/unversioned cloud cookies cannot replace newer local data; newer empty revision removes cookies", async () => {
-  let local = { cookies: [cookie("new")], cookiesUpdatedAt: NEW };
+test("confirmed cloud cookies override local cache while unversioned launches keep local data", async () => {
+  let local = { cookies: [cookie("local")], cookiesUpdatedAt: NEW };
   const store = { read: async () => local, write: async (_id, cookies, cookiesUpdatedAt) => { local = { cookies, cookiesUpdatedAt }; } };
-  for (const cookiesUpdatedAt of [OLD, NEW, null]) {
+  for (const cookiesUpdatedAt of [OLD, NEW]) {
+    local = { cookies: [cookie("local")], cookiesUpdatedAt: NEW };
     const ses = session();
-    const result = await initializeCookies(ses, store, { profileId: ID, cookies: JSON.stringify([cookie("old")]), cookiesUpdatedAt });
-    assert.equal((await ses.cookies.get({}))[0].value, "new");
-    assert.equal(result.source, "local");
+    const result = await initializeCookies(ses, store, { profileId: ID, cookies: JSON.stringify([cookie("cloud")]), cookiesUpdatedAt });
+    assert.equal((await ses.cookies.get({}))[0].value, "cloud");
+    assert.equal(result.source, "cloud");
   }
+
+  local = { cookies: [cookie("local")], cookiesUpdatedAt: NEW };
+  const unversioned = session();
+  const localResult = await initializeCookies(unversioned, store, { profileId: ID, cookies: JSON.stringify([cookie("cloud")]), cookiesUpdatedAt: null });
+  assert.equal((await unversioned.cookies.get({}))[0].value, "local");
+  assert.equal(localResult.source, "local");
+
   const ses = session([cookie("native")]);
+  local = { cookies: [cookie("local")], cookiesUpdatedAt: NEW };
   await initializeCookies(ses, store, { profileId: ID, cookies: "[]", cookiesUpdatedAt: "2026-03-01T00:00:00Z" });
   assert.deepEqual(await ses.cookies.get({}), []);
 });

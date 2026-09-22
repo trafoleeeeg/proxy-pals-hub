@@ -46,8 +46,9 @@ export const Route = createFileRoute("/_authenticated/app/")({
   ] }),
   component: ProfilesPage,
 });
-type Edit = { id?: string; name: string; folder: string; tags: string; notes: string; proxyId: string; fingerprint: Fingerprint; statusId: string | null; customFields: Record<string, string> };
+type Edit = { id?: string; name: string; folder: string; tags: string; notes: string; proxyId: string; fingerprint: Fingerprint; statusId: string | null; customFields: Record<string, string>; cookies?: string };
 const ALL = ALL_FOLDERS;
+const MAX_COOKIE_IMPORT_BYTES = 5_000_000;
 const DEFAULT_COLUMNS: FixedColumn[] = ["folder", "status", "proxy", "notes", "fingerprint", "updated", "created"];
 const dateTime = (value: string) => new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
 
@@ -108,6 +109,7 @@ function ProfilesWorkspace() {
   const visibleIds = rows.map((p) => p.id);
   const visibleSelected = visibleIds.filter((id) => selected.includes(id)).length;
   const cookiesProfile = profiles.data?.find((p) => p.id === cookiesId);
+  const editingCookiesBytes = new Blob([editing?.cookies ?? ""]).size;
   useEffect(() => {
     if (!profiles.data) return;
     const ids = new Set(profiles.data.map((p) => p.id));
@@ -127,8 +129,13 @@ function ProfilesWorkspace() {
     finally { setBusy(null); }
   }
   function save() {
-    if (!ws || !(editing?.id ? canEdit : canCreate) || !editing || !editing.name.trim() || fingerprintError(editing.fingerprint) || (editing.id && locked(editing.id))) return;
-    void perform("save", () => saveFn({ data: { ...editing, teamId: ws.teamId, fingerprint: profileFingerprintPayload(editing.fingerprint), tags: splitTags(editing.tags), proxyId: editing.proxyId === "none" ? null : editing.proxyId } }), () => setEditing(null));
+    if (!ws || !(editing?.id ? canEdit : canCreate) || !editing || !editing.name.trim() || editingCookiesBytes > MAX_COOKIE_IMPORT_BYTES || fingerprintError(editing.fingerprint) || (editing.id && locked(editing.id))) return;
+    const { cookies, ...profile } = editing;
+    void perform("save", () => saveFn({ data: {
+      ...profile, teamId: ws.teamId, fingerprint: profileFingerprintPayload(editing.fingerprint), tags: splitTags(editing.tags),
+      proxyId: editing.proxyId === "none" ? null : editing.proxyId,
+      ...(!editing.id && cookies?.trim() ? { cookies } : {}),
+    } }), () => setEditing(null));
   }
   const count = Number(bulkForm.count);
   const validCount = Number.isInteger(count) && count >= 1 && count <= 200;
@@ -136,7 +143,7 @@ function ProfilesWorkspace() {
     if (!ws || !canCreate || !validCount || !bulkForm.prefix.trim()) return;
     void perform("create", () => createMany({ data: { teamId: ws.teamId, prefix: bulkForm.prefix, count, folder: bulkForm.folder, fingerprints: Array.from({ length: count }, () => generateFingerprint()) } }), () => setBulkOpen(false));
   }
-  function newProfile() { setError(null); setEditing({ name: "Профиль " + ((profiles.data?.length ?? 0) + 1), folder: folder === ALL ? "" : folder, tags: "", notes: "", proxyId: "none", fingerprint: generateFingerprint(), statusId: null, customFields: {} }); }
+  function newProfile() { setError(null); setEditing({ name: "Профиль " + ((profiles.data?.length ?? 0) + 1), folder: folder === ALL ? "" : folder, tags: "", notes: "", proxyId: "none", fingerprint: generateFingerprint(), statusId: null, customFields: {}, cookies: "" }); }
   function patchProfile(profile: NonNullable<typeof profiles.data>[number], changes: Partial<Pick<Edit, "name" | "folder" | "notes" | "statusId" | "customFields">> & { tags?: string[] }) {
     if (!ws || !canEdit || locked(profile.id)) return;
     void perform("inline-" + profile.id, () => saveFn({ data: {
@@ -250,10 +257,25 @@ function ProfilesWorkspace() {
         <Label className="grid gap-2">Заметки<Textarea rows={2} value={editing.notes} onChange={(e) => setEditing({ ...editing, notes: e.target.value })} /></Label>
         <div className="space-y-2"><Label>Статус</Label><Select value={editing.statusId ?? "none"} onValueChange={(value) => setEditing({ ...editing, statusId: value === "none" ? null : value })}><SelectTrigger><SelectValue placeholder="Без статуса" /></SelectTrigger><SelectContent><SelectItem value="none">Без статуса</SelectItem>{(metadata.data?.statuses ?? []).map((status) => <SelectItem key={status.id} value={status.id}>{status.name}</SelectItem>)}</SelectContent></Select></div>
         {(metadata.data?.fields ?? []).map((field) => <Label key={field.id} className="grid gap-2">{field.name}<Input type={field.field_type === "number" ? "number" : field.field_type === "date" ? "date" : field.field_type === "url" ? "url" : "text"} value={editing.customFields[field.id] ?? ""} onChange={(event) => setEditing({ ...editing, customFields: { ...editing.customFields, [field.id]: event.target.value } })} /></Label>)}
+        {!editing.id && <div className="space-y-2 rounded-md border border-border p-3">
+          <div><Label htmlFor="new-profile-cookies">Cookies при создании (JSON / Netscape)</Label><p className="mt-1 text-xs text-muted-foreground">Будут зашифрованы и применены при первом запуске профиля.</p></div>
+          <Label className="grid gap-2">Файл cookies<Input type="file" accept=".json,.txt,application/json,text/plain" onChange={async (event) => {
+            const file = event.target.files?.[0]; event.target.value = "";
+            if (!file) return;
+            if (file.size > MAX_COOKIE_IMPORT_BYTES) { setError("Файл cookies больше 5 МБ."); return; }
+            try {
+              const cookies = await file.text();
+              setEditing((current) => current && !current.id ? { ...current, cookies } : current);
+              setError(null);
+            } catch { setError("Не удалось прочитать файл cookies."); }
+          }} /></Label>
+          <Textarea id="new-profile-cookies" rows={5} className="font-mono text-xs" value={editing.cookies ?? ""} onChange={(event) => setEditing({ ...editing, cookies: event.target.value })} placeholder={'[{"domain":".example.com","name":"session","value":"..."}] или Netscape cookies'} />
+          {editingCookiesBytes > MAX_COOKIE_IMPORT_BYTES && <p role="alert" className="text-xs text-destructive">Cookies больше 5 МБ.</p>}
+        </div>}
         <ProfileFingerprint value={editing.fingerprint} onChange={(fingerprint) => setEditing({ ...editing, fingerprint })} disabled={!!busy} country={proxies.data?.find((p) => p.id === editing.proxyId)?.country} />
       </fieldset>}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-      <DialogFooter><Button variant="outline" disabled={!!busy} onClick={() => setEditing(null)}>Отмена</Button><Button disabled={!(editing?.id ? canEdit : canCreate) || !!busy || !editing?.name.trim() || !!(editing && fingerprintError(editing.fingerprint)) || !!(editing?.id && locked(editing.id))} onClick={save}>{busy === "save" ? "Сохранение…" : "Сохранить"}</Button></DialogFooter>
+      <DialogFooter><Button variant="outline" disabled={!!busy} onClick={() => setEditing(null)}>Отмена</Button><Button disabled={!(editing?.id ? canEdit : canCreate) || !!busy || !editing?.name.trim() || editingCookiesBytes > MAX_COOKIE_IMPORT_BYTES || !!(editing && fingerprintError(editing.fingerprint)) || !!(editing?.id && locked(editing.id))} onClick={save}>{busy === "save" ? "Сохранение…" : "Сохранить"}</Button></DialogFooter>
     </DialogContent></Dialog>
     <Dialog open={bulkOpen} onOpenChange={(open) => { if (!busy) setBulkOpen(open); }}><DialogContent className="w-[calc(100%-2rem)]"><DialogHeader><DialogTitle>Создать несколько профилей</DialogTitle><DialogDescription>У каждого профиля будет отдельный отпечаток.</DialogDescription></DialogHeader>
       <fieldset disabled={!!busy} className="space-y-3"><Label className="grid gap-2">Название-основа<Input value={bulkForm.prefix} onChange={(e) => setBulkForm({ ...bulkForm, prefix: e.target.value })} /></Label><Label className="grid gap-2">Количество, 1–200<Input type="number" min={1} max={200} step={1} value={bulkForm.count} onChange={(e) => setBulkForm({ ...bulkForm, count: e.target.value })} /></Label><Label className="grid gap-2">Папка<Input value={bulkForm.folder} onChange={(e) => setBulkForm({ ...bulkForm, folder: e.target.value })} /></Label></fieldset>

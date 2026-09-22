@@ -19,6 +19,7 @@ if (process.versions.electron) {
   const { createProfileRuntime } = require("../runtime/profile-runtime.cjs");
   const { applyFingerprint } = require("../runtime/fingerprint.cjs");
   const { createCookieStore } = require("../runtime/cookies.cjs");
+  const { defaultBookmarks } = require("../runtime/bookmarks.cjs");
   const { createRuntimeProxy } = require("../runtime/proxy.cjs");
   const { createProxyChecker, requestJson } = require("../runtime/proxy-probe.cjs");
   const { listen, mockSocks } = require("./runtime-proxy-fixtures.cjs");
@@ -290,7 +291,7 @@ if (process.versions.electron) {
     await waitUntil(() => shell.webContents.executeJavaScript("document.querySelectorAll('#bookmarks-bar .bookmark').length").catch(() => 0));
     const bookmarkState = await shell.webContents.executeJavaScript("({count:document.querySelectorAll('#bookmarks-bar .bookmark').length,hidden:document.getElementById('bookmarks-bar').hidden,titles:[...document.querySelectorAll('#bookmarks-bar .bookmark span')].map((el)=>el.textContent)})");
     assert.equal(bookmarkState.hidden, false);
-    assert.equal(bookmarkState.count, 8);
+    assert.equal(bookmarkState.count, defaultBookmarks().length + 1);
     assert.equal(bookmarkState.titles[0], "fb acc");
     assert.ok(bookmarkState.titles.includes("Локальная закладка"));
     await shell.webContents.executeJavaScript("document.getElementById('menu-button').click(); document.querySelector('[data-action=toggle-bookmark-bar]').click()");

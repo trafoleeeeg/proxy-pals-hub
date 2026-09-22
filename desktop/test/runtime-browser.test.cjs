@@ -14,7 +14,7 @@ function harness() {
   let extensions = [{ id: "aaaaaaaaaaaaaaaaaaaaaaaa", name: "Тест", version: "1.0", pinned: false }];
   class Contents extends EventEmitter {
     constructor() {
-      super(); this.url = "about:blank"; this.title = ""; this.loading = false;
+      super(); this.url = "about:blank"; this.title = ""; this.loading = false; this.reloads = 0;
       this.session = { fetch: async () => { throw new Error("offline fixture"); } };
       this.navigationHistory = { canGoBack: () => false, canGoForward: () => false, goBack() {}, goForward() {} };
       this.mainFrame = {};
@@ -26,7 +26,7 @@ function harness() {
     isLoading() { return this.loading; }
     isDestroyed() { return false; }
     async loadURL(url) { this.url = url; this.title = url === "about:blank" ? "" : new URL(url).hostname; this.emit("did-navigate", {}, url); }
-    reload() {}
+    reload() { this.reloads++; }
     async capturePage() { return { isEmpty: () => false, toDataURL: () => "data:image/png;base64,AA==" }; }
     stop() {}
     focus() {}
@@ -110,6 +110,7 @@ test("browser imports cookie text through the serialized profile command", async
   const result = await h.command({ action: "import-cookies", text: '[{"name":"session"}]' });
   assert.deepEqual(result, { imported: 2, skipped: 1 });
   assert.deepEqual(h.importedCookies, ['[{"name":"session"}]']);
+  assert.deepEqual(h.views.map((view) => view.webContents.reloads), [1, 1]);
   h.browser.destroy();
 });
 

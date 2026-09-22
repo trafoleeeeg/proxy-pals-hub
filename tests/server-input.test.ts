@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { encryptSecret, decryptSecret } from "../src/lib/crypto.server";
 import { parseCookieImport } from "../src/lib/server-cookies";
-import { bulkCreateSchema, bulkUpdateSchema, fingerprintSchema, launchSchema } from "../src/lib/server-validation";
+import { bulkCreateSchema, bulkUpdateSchema, fingerprintSchema, launchSchema, saveProfileSchema } from "../src/lib/server-validation";
 import { generateFingerprint } from "../src/lib/fingerprint";
 
 const previousKey = process.env.APP_ENCRYPTION_KEY;
@@ -62,5 +62,14 @@ describe("server input validation", () => {
     expect(bulkCreateSchema.safeParse({ teamId: id, prefix: "A", count: 2, folder: "", fingerprints: [generateFingerprint("US")] }).success).toBe(false);
     expect(bulkUpdateSchema.safeParse({ teamId: id, ids: [id, id], changes: { folder: "Ready" } }).success).toBe(false);
     expect(bulkUpdateSchema.safeParse({ teamId: id, ids: [id], changes: {} }).success).toBe(false);
+  });
+  test("cookies are accepted only for atomic profile creation", () => {
+    const id = "10000000-0000-4000-8000-000000000001";
+    const input = {
+      teamId: id, name: "With cookies", folder: "", tags: [], notes: "", proxyId: null,
+      fingerprint: generateFingerprint("US"), statusId: null, customFields: {}, cookies: '[{"name":"session","value":"synthetic","domain":"example.test"}]',
+    };
+    expect(saveProfileSchema.safeParse(input).success).toBe(true);
+    expect(saveProfileSchema.safeParse({ ...input, id }).success).toBe(false);
   });
 });

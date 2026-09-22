@@ -219,12 +219,16 @@ async function initializeCookies(ses, store, payload) {
   const cloudRevision = revision(payload.cookiesUpdatedAt);
   let selected;
   let source;
-  if (local && (!cloudRevision || Date.parse(cloudRevision) <= Date.parse(local.cookiesUpdatedAt))) {
-    selected = local;
-    source = "local";
-  } else if (local || cloudRevision) {
+  // Серверная версия является подтверждённой: профиль нельзя открыть повторно,
+  // пока предыдущая локальная сессия не синхронизирована. Поэтому явный
+  // облачный снимок (включая импорт из панели или другого ПК) всегда важнее
+  // локального кэша. Сравнение часов разных компьютеров здесь ненадёжно.
+  if (cloudRevision) {
     selected = { cookies: parseCookies(payload.cookies ?? "[]"), cookiesUpdatedAt: cloudRevision };
     source = "cloud";
+  } else if (local) {
+    selected = local;
+    source = "local";
   } else {
     const existing = await ses.cookies.get({});
     selected = { cookies: existing.length ? existing : parseCookies(payload.cookies ?? "[]"), cookiesUpdatedAt: null };

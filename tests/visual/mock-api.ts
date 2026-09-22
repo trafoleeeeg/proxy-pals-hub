@@ -71,7 +71,9 @@ export const bulkUpdateProfiles = api("bulkUpdateProfiles", (data) => {
 export const bulkDeleteProfiles = api("bulkDeleteProfiles", (data) => { fixture.profiles = fixture.profiles.filter((row) => row.teamId !== data.teamId || !data.ids.includes(row.id)); return { deleted: data.ids.length }; });
 export const saveProfile = api("saveProfile", (data) => {
   const existing = fixture.profiles.find((profile) => profile.id === data.id);
-  const profile = { ...data, id: data.id ?? crypto.randomUUID(), proxy_id: data.proxyId, lock: null, created_at: now, updated_at: now };
+  const { cookies, ...profileData } = data;
+  const profile = { ...profileData, id: data.id ?? crypto.randomUUID(), proxy_id: data.proxyId, lock: null, created_at: now, updated_at: now };
+  if (!data.id && typeof cookies === "string" && cookies.trim()) fixture.cookies = cookies;
   if (existing) Object.assign(existing, profile); else fixture.profiles.push(profile);
   return { id: profile.id };
 });

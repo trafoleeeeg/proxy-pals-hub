@@ -103,9 +103,16 @@ export const saveProfile = createServerFn({ method: "POST" })
       return { id: updated.id };
     }
 
+    let cookiesEnc: string | undefined;
+    if (data.cookies?.trim()) {
+      const cookies = parseCookieImport(data.cookies);
+      const { encryptSecret } = await import("./crypto.server");
+      cookiesEnc = encryptSecret(JSON.stringify(cookies));
+    }
+
     const { data: row, error } = await context.supabase
       .from("browser_profiles")
-      .insert({ ...payload, team_id: data.teamId, created_by: context.userId })
+      .insert({ ...payload, team_id: data.teamId, created_by: context.userId, ...(cookiesEnc ? { cookies_enc: cookiesEnc } : {}) })
       .select("id")
       .single();
     if (error) throw new Error(error.message);

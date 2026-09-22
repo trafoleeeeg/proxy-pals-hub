@@ -11,6 +11,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cookiesToNetscape } from "./profile-model";
 
+const MAX_COOKIE_IMPORT_BYTES = 5_000_000;
+
 export function ProfileCookies({ profileId, name, isOwner, locked, onClose, onSaved }: {
   profileId: string; name: string; isOwner: boolean; locked: boolean; onClose: () => void; onSaved: () => void;
 }) {
@@ -64,15 +66,15 @@ export function ProfileCookies({ profileId, name, isOwner, locked, onClose, onSa
         <Label className="grid gap-2">Файл cookies<Input type="file" accept=".json,.txt,application/json,text/plain" disabled={!allowed || busy} onChange={async (e) => {
           const file = e.target.files?.[0]; e.target.value = "";
           if (!file) return;
-          if (file.size > 2 * 1024 * 1024) { setError("Файл превышает 2 МБ."); return; }
+          if (file.size > MAX_COOKIE_IMPORT_BYTES) { setError("Файл превышает 5 МБ."); return; }
           setBusy(true); setError(null); setConfirmed(false);
           try { setText(await file.text()); } catch { setError("Не удалось прочитать файл."); }
           finally { setBusy(false); }
         }} /></Label>
         <div className="grid min-w-0 gap-2"><Label htmlFor={contentId}>Содержимое</Label><Textarea id={contentId} rows={7} value={text} autoComplete="off" spellCheck={false} disabled={!allowed || busy} onChange={(e) => { setText(e.target.value); setConfirmed(false); }} className="font-mono text-xs" /></div>
-        {new Blob([text]).size > 2 * 1024 * 1024 && <p role="alert" className="text-sm text-destructive">Содержимое превышает 2 МБ.</p>}
+        {new Blob([text]).size > MAX_COOKIE_IMPORT_BYTES && <p role="alert" className="text-sm text-destructive">Содержимое превышает 5 МБ.</p>}
         <label className="flex items-start gap-2 text-sm"><Checkbox checked={confirmed} disabled={!allowed || busy} onCheckedChange={(v) => setConfirmed(v === true)} /> Заменить облачные cookies профиля содержимым импорта</label>
-        <Button disabled={!allowed || busy || !confirmed || !text.trim() || new Blob([text]).size > 2 * 1024 * 1024} onClick={importCookies}><Upload className="size-4" />{busy ? "Выполняется…" : "Импортировать"}</Button>
+        <Button disabled={!allowed || busy || !confirmed || !text.trim() || new Blob([text]).size > MAX_COOKIE_IMPORT_BYTES} onClick={importCookies}><Upload className="size-4" />{busy ? "Выполняется…" : "Импортировать"}</Button>
       </section>
       <section className="space-y-3 border-t border-border pt-3">
         <h3 className="text-sm font-medium">Экспорт облачных cookies</h3>

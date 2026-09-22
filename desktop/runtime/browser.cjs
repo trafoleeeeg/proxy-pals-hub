@@ -323,6 +323,13 @@ async function createProfileBrowser(electron, {
       case "import-cookies": {
         try {
           response = await importCookies(message.text);
+          // Уже загруженный документ не повторяет HTTP-запрос сам по себе,
+          // поэтому без reload сайт продолжал показывать прежнюю авторизацию.
+          for (const open of tabs.values()) {
+            if (!open.isDestroyed() && !isHome(open)) {
+              try { open.webContents.reload(); } catch { /* cookie уже сохранён; вкладку можно обновить вручную */ }
+            }
+          }
         } catch (failure) {
           error = failure instanceof Error ? failure.message : "Не удалось импортировать cookies";
           response = { error };

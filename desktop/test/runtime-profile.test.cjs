@@ -115,6 +115,17 @@ test("saved tabs win over the profile home page unless launch requests an explic
   await h.runtime.closeAllProfiles();
 });
 
+test("live cookie import is encrypted locally before it is reported as complete", async () => {
+  const h = harness();
+  await h.runtime.launchProfileWindow(payload());
+  const result = await h.browserConfig.importCookies(JSON.stringify([{ domain: "example.test", path: "/", name: "imported", value: "secret" }]));
+  assert.equal(result.imported, 1);
+  assert.equal(result.skipped, 0);
+  assert.ok(result.cookiesUpdatedAt);
+  assert.equal(h.records.get(ID).cookies.some((entry) => entry.name === "imported" && entry.value === "secret"), true);
+  await h.runtime.closeAllProfiles();
+});
+
 test("hidden profile browser stays hidden without maximizing", async () => {
   const calls = [];
   class Shell extends EventEmitter {

@@ -104,8 +104,11 @@ export const saveProfile = createServerFn({ method: "POST" })
     }
 
     let cookiesEnc: string | undefined;
+    let importedCookies = 0;
     if (data.cookies?.trim()) {
       const cookies = parseCookieImport(data.cookies);
+      if (!cookies.length) throw new Error("В импорте нет cookies");
+      importedCookies = cookies.length;
       const { encryptSecret } = await import("./crypto.server");
       cookiesEnc = encryptSecret(JSON.stringify(cookies));
     }
@@ -117,7 +120,7 @@ export const saveProfile = createServerFn({ method: "POST" })
       .single();
     if (error) throw new Error(error.message);
     await writeAudit(context, data.teamId, "profile.created", row.id);
-    return { id: row.id };
+    return { id: row.id, importedCookies };
   });
 
 export const bulkCreateProfiles = createServerFn({ method: "POST" })
@@ -199,6 +202,7 @@ export const importProfileCookies = createServerFn({ method: "POST" })
     // Cookies остаются секретом владельца: администратор их не выгружает и не подменяет.
     await requireProfile(context, data.profileId, "owner");
     const cookies = parseCookieImport(data.text);
+    if (!cookies.length) throw new Error("В импорте нет cookies");
     const { encryptSecret } = await import("./crypto.server");
     await callServerRpc(context.supabase, "import_profile_cookies", {
       _profile_id: data.profileId, _cookies_enc: encryptSecret(JSON.stringify(cookies)),

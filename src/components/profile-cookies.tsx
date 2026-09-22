@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Download, Upload } from "lucide-react";
 import { importProfileCookies, exportProfileCookies } from "@/lib/profiles.functions";
@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cookiesToNetscape } from "./profile-model";
+import { parseCookieImport } from "@/lib/server-cookies";
 
 const MAX_COOKIE_IMPORT_BYTES = 5_000_000;
 
@@ -26,14 +27,22 @@ export function ProfileCookies({ profileId, name, isOwner, locked, onClose, onSa
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const allowed = isOwner && !locked;
+  const bytes = new Blob([text]).size;
+  const preview = useMemo(() => {
+    if (!text.trim() || bytes > MAX_COOKIE_IMPORT_BYTES) return null;
+    try {
+      const cookies = parseCookieImport(text);
+      return { count: cookies.length, expired: cookies.filter((cookie) => cookie.expirationDate != null && cookie.expirationDate <= Date.now() / 1000).length, error: false };
+    } catch { return { count: 0, expired: 0, error: true }; }
+  }, [text, bytes]);
 
   async function importCookies() {
-    if (!allowed || !confirmed || busy || !text.trim()) return;
+    if (!allowed || !confirmed || busy || !text.trim() || !preview || preview.error || preview.count === preview.expired) return;
     setBusy(true); setError(null); setMessage("");
     try {
       const result = await importFn({ data: { profileId, text } });
       setText(""); setConfirmed(false);
-      setMessage(`Импортировано cookies: ${result.imported}`); onSaved();
+      setMessage(`В облако сохранено cookies: ${result.imported}. Запустите профиль и проверьте число реально установленных cookies на стартовой странице.`); onSaved();
     } catch { setError("Импорт не выполнен. Проверьте JSON или Netscape, доступ владельца и блокировку профиля."); }
     finally { setBusy(false); }
   }
@@ -58,7 +67,7 @@ export function ProfileCookies({ profileId, name, isOwner, locked, onClose, onSa
   }
 
   return <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose(); }}><DialogContent className="max-h-[90dvh] w-[calc(100%-2rem)] overflow-y-auto sm:max-w-xl">
-    <DialogHeader className="min-w-0 pr-5"><DialogTitle className="break-all leading-snug tracking-normal">Cookies: {name}</DialogTitle><DialogDescription>Облачная синхронизация включает только cookies. Local Storage хранится на этом компьютере.</DialogDescription></DialogHeader>
+    <DialogHeader className="min-w-0 pr-5"><DialogTitle className="break-all leading-snug tracking-normal">Cookies: {name}</DialogTitle><DialogDescription>Облачная синхронизация включает только cookies. Local Storage хранится на этом компьютере. Некоторые сайты дополнительно проверяют IP, устройство или другие данные сессии — одних cookies может не хватить для входа.</DialogDescription></DialogHeader>
     {!isOwner ? <p role="alert" className="text-sm text-muted-foreground">Импорт и экспорт доступны только владельцу.</p> : <>
       <section className="space-y-3 border-t border-border pt-3">
         <h3 className="text-sm font-medium">Импорт JSON / Netscape</h3>
@@ -72,9 +81,11 @@ export function ProfileCookies({ profileId, name, isOwner, locked, onClose, onSa
           finally { setBusy(false); }
         }} /></Label>
         <div className="grid min-w-0 gap-2"><Label htmlFor={contentId}>Содержимое</Label><Textarea id={contentId} rows={7} value={text} autoComplete="off" spellCheck={false} disabled={!allowed || busy} onChange={(e) => { setText(e.target.value); setConfirmed(false); }} className="font-mono text-xs" /></div>
-        {new Blob([text]).size > MAX_COOKIE_IMPORT_BYTES && <p role="alert" className="text-sm text-destructive">Содержимое превышает 5 МБ.</p>}
+        {bytes > MAX_COOKIE_IMPORT_BYTES && <p role="alert" className="text-sm text-destructive">Содержимое превышает 5 МБ.</p>}
+        {preview?.error && <p role="alert" className="text-sm text-destructive">Формат cookies не распознан. Нужен JSON-массив, объект с полем cookies или файл Netscape.</p>}
+        {preview && !preview.error && <p role="status" className="text-xs text-muted-foreground">Распознано: {preview.count} · истекли: {preview.expired} · пригодны для установки: {preview.count - preview.expired}{preview.count === preview.expired ? ". Нужны действующие cookies." : ""}</p>}
         <label className="flex items-start gap-2 text-sm"><Checkbox checked={confirmed} disabled={!allowed || busy} onCheckedChange={(v) => setConfirmed(v === true)} /> Заменить облачные cookies профиля содержимым импорта</label>
-        <Button disabled={!allowed || busy || !confirmed || !text.trim() || new Blob([text]).size > MAX_COOKIE_IMPORT_BYTES} onClick={importCookies}><Upload className="size-4" />{busy ? "Выполняется…" : "Импортировать"}</Button>
+        <Button disabled={!allowed || busy || !confirmed || !preview || preview.error || preview.count === preview.expired || bytes > MAX_COOKIE_IMPORT_BYTES} onClick={importCookies}><Upload className="size-4" />{busy ? "Выполняется…" : "Импортировать"}</Button>
       </section>
       <section className="space-y-3 border-t border-border pt-3">
         <h3 className="text-sm font-medium">Экспорт облачных cookies</h3>

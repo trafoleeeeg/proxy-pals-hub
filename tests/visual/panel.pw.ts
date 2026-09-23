@@ -124,6 +124,12 @@ test("profile editor validates runtime settings and omits an empty optional URL"
   await openProfiles(page);
   await page.getByRole("button", { name: "Новый профиль", exact: true }).click();
   const dialog = page.getByRole("dialog");
+  const privacyMode = dialog.getByRole("switch", { name: "Агрессивная блокировка API" });
+  await expect(privacyMode).not.toBeChecked();
+  await expect(dialog.getByText(/реальные GPU и шрифты/)).toBeVisible();
+  await privacyMode.click();
+  await expect(privacyMode).toBeChecked();
+  await privacyMode.click();
   const cookies = '[{"domain":".example.com","path":"/","name":"created","value":"synthetic"}]';
   await dialog.getByLabel("Название", { exact: true }).fill("Новый рабочий");
   await dialog.getByLabel("Cookies при создании (JSON / Netscape)", { exact: true }).fill(cookies);
@@ -139,7 +145,21 @@ test("profile editor validates runtime settings and omits an empty optional URL"
   await expect(dialog).toHaveCount(0);
   const saved = await calls(page, "saveProfile");
   expect(saved[0].fingerprint).not.toHaveProperty("startUrl");
+  expect(saved[0].fingerprint.aggressivePrivacyMode).toBe(false);
   expect(saved[0].cookies).toBe(cookies);
+});
+
+test("editing a legacy profile keeps aggressive API blocking until explicitly disabled", async ({ page }) => {
+  await openProfiles(page);
+  await page.evaluate(() => { delete window.fixture.profiles[0]!.fingerprint.aggressivePrivacyMode; });
+  await page.getByRole("button", { name: "Обновить список" }).click();
+  await page.getByRole("button", { name: "Действия Рабочий профиль" }).click();
+  await page.getByRole("menuitem", { name: "Изменить" }).click();
+  const dialog = page.getByRole("dialog");
+  const privacyMode = dialog.getByRole("switch", { name: "Агрессивная блокировка API" });
+  await expect(privacyMode).toBeChecked();
+  await dialog.getByRole("button", { name: "Сохранить", exact: true }).click();
+  expect((await calls(page, "saveProfile"))[0].fingerprint.aggressivePrivacyMode).toBe(true);
 });
 
 test("team bulk assignment grants and revokes the selected profiles", async ({ page }, info) => {

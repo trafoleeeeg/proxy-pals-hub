@@ -12,7 +12,8 @@ describe("desktop fingerprint presets", () => {
         expect(fingerprintSchema.parse(fp)).toEqual(fp);
         expect(fp.timezone).toBe("Europe/Berlin");
         expect(fp.languages[0]).toBe("de-DE");
-        expect(fp.webrtc).toBe("disabled");
+        expect(fp.webrtc).toBe("proxy");
+        expect(fp.aggressivePrivacyMode).toBe(false);
         if (os === "macos") {
           expect(fp.platform).toBe("MacIntel");
           expect(fp.architecture).toBe("arm");
@@ -28,10 +29,15 @@ describe("desktop fingerprint presets", () => {
       }
     });
   }
-  test("older Windows profiles without architecture stay valid", () => {
-    const { architecture: _, ...fp } = generateFingerprint();
-    expect(fingerprintSchema.safeParse(fp).success).toBe(true);
+  test("older Windows profiles without architecture or privacy mode stay valid", () => {
+    const { architecture: _, aggressivePrivacyMode: __, ...fp } = generateFingerprint();
+    expect(fingerprintSchema.parse(fp).aggressivePrivacyMode).toBe(true);
     expect(fingerprintError(fp)).toBeNull();
+  });
+  test("strict mode is accepted and non-boolean privacy modes are rejected", () => {
+    const fp = generateFingerprint();
+    expect(fingerprintSchema.safeParse({ ...fp, aggressivePrivacyMode: true }).success).toBe(true);
+    expect(fingerprintSchema.safeParse({ ...fp, aggressivePrivacyMode: "false" }).success).toBe(false);
   });
   test("editor rejects mixed platform and UA values", () => {
     const mac = generateFingerprint(null, "macos");

@@ -60,3 +60,29 @@ test("session header guard removes host hints and rejects unapproved service wor
   fp.hardwarePermissions = { "https://allowed.test": ["workers"] };
   assert.ok(request("https://allowed.test/sw.js", { "Service-Worker": "script" }).requestHeaders);
 });
+
+test("normal mode permits service workers without a per-origin exception while still rewriting host headers", () => {
+  let listener;
+  const ses = { webRequest: { onBeforeSendHeaders: (handler) => { listener = handler; } } };
+  const fp = normalizeFingerprint({
+    aggressivePrivacyMode: false,
+    os: "macos",
+    languages: ["de-DE", "de"],
+    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/152.0.0.0",
+  });
+  installSessionPrivacy(ses, fp);
+  let response;
+  listener({
+    url: "https://ordinary.test/sw.js",
+    requestHeaders: {
+      "Service-Worker": "script",
+      "user-agent": "Host Electron/44",
+      "sec-ch-ua-platform": '"Windows"',
+      "sec-ch-ua-unknown": '"host"',
+    },
+  }, (result) => { response = result; });
+  assert.notEqual(response.cancel, true);
+  assert.equal(response.requestHeaders["User-Agent"], fp.userAgent);
+  assert.equal(response.requestHeaders["sec-ch-ua-platform"], '"macOS"');
+  assert.equal(response.requestHeaders["sec-ch-ua-unknown"], undefined);
+});

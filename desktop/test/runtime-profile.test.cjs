@@ -20,6 +20,7 @@ function harness() {
   const tabRecords = new Map();
   const bookmarkRecords = new Map();
   const privacyRecords = new Map();
+  const storageClears = [];
   let browserConfig;
   class Window extends EventEmitter {
     constructor(options) {
@@ -60,7 +61,7 @@ function harness() {
       const cookies = new EventEmitter();
       let data = [];
       Object.assign(cookies, { get: async () => data, set: async (cookie) => { data.push({ ...cookie, domain: cookie.domain || new URL(cookie.url).hostname, session: true, hostOnly: !cookie.domain }); }, flushStore: async () => { if (flushGate) await flushGate.promise; }, update: (value) => { data = value; cookies.emit("changed"); } });
-      const ses = { cookies, webRequest: { onBeforeRequest() {} }, getUserAgent: () => "Chrome/144.0.0.0", setUserAgent() {}, flushStorageData() {}, closeAllConnections: async () => {}, clearStorageData: async (options) => { if (!options?.storages || options.storages.includes("cookies")) data = []; },
+      const ses = { cookies, webRequest: { onBeforeRequest() {} }, getUserAgent: () => "Chrome/144.0.0.0", setUserAgent() {}, flushStorageData() {}, closeAllConnections: async () => {}, clearStorageData: async (options) => { storageClears.push(options); if (!options?.storages || options.storages.includes("cookies")) data = []; },
         setPermissionRequestHandler(handler) { this.permissionRequest = handler; },
         setPermissionCheckHandler(handler) { this.permissionCheck = handler; },
         setDevicePermissionHandler(handler) { this.devicePermission = handler; },
@@ -93,10 +94,34 @@ function harness() {
     },
     privacyStore: { readPermissions: async (id) => privacyRecords.get(id) || {}, writePermissions: async (id, rules) => { privacyRecords.set(id, structuredClone(rules)); } },
   });
-  return { runtime, windows, sessions, records, tabRecords, bookmarkRecords, get browserConfig() { return browserConfig; }, get configured() { return configured; }, get disposed() { return disposed; }, setFlushGate: (gate) => { flushGate = gate; }, setNavigationGate: (gate) => { navigationGate = gate; }, setSnapshotFailure: (value) => { snapshotFailure = value; } };
+  return { runtime, windows, sessions, records, tabRecords, bookmarkRecords, storageClears, get browserConfig() { return browserConfig; }, get configured() { return configured; }, get disposed() { return disposed; }, setFlushGate: (gate) => { flushGate = gate; }, setNavigationGate: (gate) => { navigationGate = gate; }, setSnapshotFailure: (value) => { snapshotFailure = value; } };
 }
 
 const payload = () => ({ profileId: ID, deviceId: "test-device", name: "Test", lockToken: "test-lock-token", fingerprint: FP, cookies: "[]", cookiesUpdatedAt: null, proxy: null, startUrl: "https://example.test" });
+
+test("strict startup clears stale service workers while normal startup preserves them", async () => {
+  for (const aggressivePrivacyMode of [undefined, true]) {
+    const h = harness();
+    const launch = payload();
+    if (aggressivePrivacyMode !== undefined) launch.fingerprint = { ...FP, aggressivePrivacyMode };
+    await h.runtime.launchProfileWindow(launch);
+    assert.deepEqual(h.storageClears.filter((item) => item?.storages?.includes("serviceworkers")), [{ storages: ["serviceworkers"] }]);
+    assert.equal(h.browserConfig.getPrivacy("https://example.test/").mode, "strict");
+    await h.runtime.closeAllProfiles();
+  }
+  const normal = harness();
+  await normal.runtime.launchProfileWindow({ ...payload(), fingerprint: { ...FP, aggressivePrivacyMode: false } });
+  assert.deepEqual(normal.storageClears.filter((item) => item?.storages?.includes("serviceworkers")), [], "normal mode must not remove existing site service workers");
+  assert.deepEqual(normal.browserConfig.getPrivacy("https://example.test/"), {
+    origin: "https://example.test", mode: "normal", allowed: true,
+    permissions: ["gpu", "canvas", "audio", "workers"],
+  });
+  const normalSession = normal.sessions.get(`persist:profile-${ID}`);
+  assert.equal(normalSession.permissionCheck(null, "local-fonts", "https://example.test"), false, "normal mode does not silently grant access to host fonts");
+  await assert.rejects(normal.browserConfig.setPrivacy("https://example.test", ["workers"]), /обычном режиме/);
+  assert.ok(normal.runtime.getRunningProfile(ID), "rejecting an inapplicable per-site setting must leave the profile running");
+  await normal.runtime.closeAllProfiles();
+});
 
 test("privacy consent closes profile durably and applies to one origin after restart", async () => {
   const h = harness();
@@ -117,6 +142,16 @@ test("privacy consent closes profile durably and applies to one origin after res
   await h.browserConfig.setPrivacy("https://example.test", []);
   await h.runtime.launchProfileWindow(payload());
   assert.equal(h.browserConfig.getPrivacy("https://example.test").allowed, false);
+  await h.browserConfig.setPrivacy("https://example.test", ["fonts"]);
+  await h.runtime.launchProfileWindow(payload());
+  assert.equal(ses.permissionCheck(null, "local-fonts", "https://example.test"), true);
+  assert.equal(ses.permissionCheck(null, "local-fonts", "https://sub.example.test"), false);
+  assert.equal(ses.permissionCheck(null, "camera", "https://example.test"), false);
+  let granted;
+  ses.permissionRequest(null, "local-fonts", (result) => { granted = result; }, { requestingUrl: "https://example.test/path" });
+  assert.equal(granted, true);
+  ses.permissionRequest(null, "local-fonts", (result) => { granted = result; }, { requestingUrl: "https://sub.example.test/path" });
+  assert.equal(granted, false);
   await h.runtime.closeAllProfiles();
 });
 

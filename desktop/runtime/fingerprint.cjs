@@ -5,6 +5,7 @@ const WEBRTC_POLICY = "disable_non_proxied_udp";
 
 function hasCapability(fp, origin, capability) {
   if (!origin || origin === "null") return false;
+  if (fp.aggressivePrivacyMode === false) return true;
   if (fp.hardwarePermissions) return fp.hardwarePermissions[origin]?.includes(capability) === true;
   return fp.hardwareOrigins?.includes(origin) === true; // Legacy local policy.
 }
@@ -41,6 +42,9 @@ function installSessionPrivacy(ses, fp) {
 
 function normalizeFingerprint(raw = {}, defaultUA, runtimeChrome = process.versions.chrome) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Invalid fingerprint");
+  // Profiles created before the mode existed retain the previous strict policy.
+  const aggressivePrivacyMode = raw.aggressivePrivacyMode === undefined ? true : raw.aggressivePrivacyMode;
+  if (typeof aggressivePrivacyMode !== "boolean") throw new Error("Invalid fingerprint privacy mode");
   const integer = (value, fallback, min, max) => {
     if (value == null) return fallback;
     if (!Number.isInteger(value) || value < min || value > max) throw new Error("Invalid fingerprint dimensions");
@@ -74,7 +78,7 @@ function normalizeFingerprint(raw = {}, defaultUA, runtimeChrome = process.versi
   const renderer = raw.gpu?.renderer ?? raw.webgl_renderer;
   if ([vendor, renderer].some((value) => value != null && (typeof value !== "string" || value.length > 1024))) throw new Error("Invalid fingerprint GPU");
   return {
-    userAgent, platform, os, osVersion, architecture, languages, timezone,
+    userAgent, platform, os, osVersion, architecture, languages, timezone, aggressivePrivacyMode,
     screen: {
       width: integer(raw.screen?.width ?? raw.screen_width, 1280, 320, 16384),
       height: integer(raw.screen?.height ?? raw.screen_height, 800, 200, 16384),
@@ -195,11 +199,11 @@ async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
     uaLocaleTimezone: "cdp", documentOverrides: "main-world-javascript",
     screenMetrics: "cdp-screen-and-dpr", hardwareConcurrency: "cdp-and-prototype",
     webRTCPolicy: wc.getWebRTCIPHandlingPolicy(),
-    canvasNoise: fp.canvasNoise ? "document-2d-readback-and-html-canvas-serialization-only" : "disabled",
-    audioNoise: fp.audioNoise ? "document-analyser-and-copyFromChannel-only" : "disabled",
+    canvasNoise: fp.aggressivePrivacyMode === false ? "disabled-in-normal-mode" : fp.canvasNoise ? "document-2d-readback-and-html-canvas-serialization-only" : "disabled",
+    audioNoise: fp.aggressivePrivacyMode === false ? "disabled-in-normal-mode" : fp.audioNoise ? "document-analyser-and-copyFromChannel-only" : "disabled",
     unsupportedControls: ["fontsPreset", "webglNoise"],
-    hardwarePolicy: "blocked-by-default-with-explicit-local-origin-exceptions",
-    limitations: ["No custom browser kernel or undetectability guarantee", "Shared/service workers are blocked by default; site exceptions expose their native identity", "Compatibility exceptions expose native GPU, audio and canvas characteristics", "Installed fonts can still affect CSS layout", "JavaScript privacy restrictions are observable", "Native WebRTC policy restricts non-proxied UDP", "Popup opener and form POST are unsupported", "Navigation history is not restored after restart"],
+    hardwarePolicy: fp.aggressivePrivacyMode === false ? "normal-native-hardware-apis" : "blocked-by-default-with-explicit-local-origin-exceptions",
+    limitations: ["No custom browser kernel or undetectability guarantee", fp.aggressivePrivacyMode === false ? "Normal mode exposes native GPU, canvas, audio, fonts and background workers; they can reveal host hardware and disagree with the declared fingerprint" : "Shared/service workers are blocked by default; site exceptions expose their native identity", "Compatibility exceptions expose native GPU, audio and canvas characteristics", "Installed fonts can still affect CSS layout", "JavaScript privacy restrictions are observable", "Native WebRTC policy restricts non-proxied UDP", "Popup opener and form POST are unsupported", "Navigation history is not restored after restart"],
   };
 }
 

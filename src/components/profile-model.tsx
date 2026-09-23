@@ -33,7 +33,8 @@ export function fingerprintError(fp: Fingerprint): string | null {
 
 export function profileFingerprintPayload(fp: Fingerprint): Fingerprint {
   const { startUrl, ...settings } = fp;
-  return startUrl?.trim() ? { ...settings, startUrl: startUrl.trim() } : settings;
+  const normalized = { ...settings, aggressivePrivacyMode: settings.aggressivePrivacyMode ?? true };
+  return startUrl?.trim() ? { ...normalized, startUrl: startUrl.trim() } : normalized;
 }
 
 export function cookiesToNetscape(json: string): string {

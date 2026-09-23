@@ -37,6 +37,7 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 export const Route = createFileRoute("/_authenticated/app/")({
@@ -93,7 +94,7 @@ function ProfilesWorkspace() {
   const [editing, setEditing] = useState<Edit | null>(null);
   const cookieStatus = useQuery({ queryKey: ["profile-cookie-status", editing?.id], queryFn: () => cookieStatusFn({ data: { profileId: editing!.id! } }), enabled: !!editing?.id && owner });
   const [bulkOpen, setBulkOpen] = useState(false);
-  const [bulkForm, setBulkForm] = useState({ prefix: "Профиль", count: "10", folder: MAIN_FOLDER, os: "windows" as FingerprintOS });
+  const [bulkForm, setBulkForm] = useState({ prefix: "Профиль", count: "10", folder: MAIN_FOLDER, os: "windows" as FingerprintOS, aggressivePrivacyMode: false });
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [metadataOpen, setMetadataOpen] = useState(false);
@@ -163,7 +164,7 @@ function ProfilesWorkspace() {
   const validCount = Number.isInteger(count) && count >= 1 && count <= 200;
   function bulkCreate() {
     if (!ws || !canCreate || !validCount || !bulkForm.prefix.trim()) return;
-    void perform("create", () => createMany({ data: { teamId: ws.teamId, prefix: bulkForm.prefix, count, folder: bulkForm.folder, fingerprints: Array.from({ length: count }, () => generateFingerprint(null, bulkForm.os)) } }), () => setBulkOpen(false));
+    void perform("create", () => createMany({ data: { teamId: ws.teamId, prefix: bulkForm.prefix, count, folder: bulkForm.folder, fingerprints: Array.from({ length: count }, () => ({ ...generateFingerprint(null, bulkForm.os), aggressivePrivacyMode: bulkForm.aggressivePrivacyMode })) } }), () => setBulkOpen(false));
   }
   function newProfile() { setError(null); setEditing({ name: "Профиль " + ((profiles.data?.length ?? 0) + 1), folder, tags: "", notes: "", proxyId: "none", fingerprint: generateFingerprint(), statusId: null, customFields: {}, cookies: "" }); }
   function patchProfile(profile: NonNullable<typeof profiles.data>[number], changes: Partial<Pick<Edit, "name" | "folder" | "notes" | "statusId" | "customFields">> & { tags?: string[] }) {
@@ -199,7 +200,7 @@ function ProfilesWorkspace() {
         {editMode && <Button variant="outline" size="sm" onClick={resetWidths}>Ширина колонок по умолчанию</Button>}
         {editMode && <ColumnSettings visible={visibleColumns} onChange={setVisibleColumns} fields={metadata.data?.fields ?? []} visibleFields={visibleFields} onFieldChange={setVisibleFields} />}
         <Button size="icon" variant="outline" title="Обновить список" aria-label="Обновить список" disabled={profiles.isFetching} onClick={() => profiles.refetch()}><RefreshCw className={profiles.isFetching ? "size-4 animate-spin" : "size-4"} /></Button>
-        {canCreate && <><Button variant="outline" disabled={!!busy} onClick={() => { setError(null); setBulkOpen(true); }}><Plus className="size-4" />Создать пачкой</Button><Button disabled={!!busy} onClick={newProfile}><Plus className="size-4" />Новый профиль</Button></>}
+        {canCreate && <><Button variant="outline" disabled={!!busy} onClick={() => { setError(null); setBulkForm((current) => ({ ...current, aggressivePrivacyMode: false })); setBulkOpen(true); }}><Plus className="size-4" />Создать пачкой</Button><Button disabled={!!busy} onClick={newProfile}><Plus className="size-4" />Новый профиль</Button></>}
       </div>
     </div>
     <div className="flex w-full flex-wrap gap-2">
@@ -323,6 +324,7 @@ function ProfilesWorkspace() {
       <fieldset disabled={!!busy} className="space-y-3"><Label className="grid gap-2">Название-основа<Input value={bulkForm.prefix} onChange={(e) => setBulkForm({ ...bulkForm, prefix: e.target.value })} /></Label><Label className="grid gap-2">Количество, 1–200<Input type="number" min={1} max={200} step={1} value={bulkForm.count} onChange={(e) => setBulkForm({ ...bulkForm, count: e.target.value })} /></Label><div className="space-y-2"><Label>Папка</Label><Select value={bulkForm.folder} disabled={folderList.isPending} onValueChange={(value) => setBulkForm({ ...bulkForm, folder: value })}><SelectTrigger aria-label="Папка новых профилей"><SelectValue placeholder="Выберите папку" /></SelectTrigger><SelectContent>{folderNames.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent></Select></div></fieldset>
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       <div className="space-y-2"><Label htmlFor="bulk-profile-os">Операционная система</Label><Select disabled={!!busy} value={bulkForm.os} onValueChange={(os) => setBulkForm({ ...bulkForm, os: os as FingerprintOS })}><SelectTrigger id="bulk-profile-os"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="windows">Windows</SelectItem><SelectItem value="macos">macOS · Apple Silicon</SelectItem></SelectContent></Select></div>
+      <div className="space-y-2 rounded-md border border-border p-3"><div className="flex items-center justify-between gap-3"><Label htmlFor="bulk-profile-aggressive-privacy">Агрессивная блокировка API</Label><Switch id="bulk-profile-aggressive-privacy" checked={bulkForm.aggressivePrivacyMode} onCheckedChange={(checked) => setBulkForm({ ...bulkForm, aggressivePrivacyMode: checked })} disabled={!!busy} /></div><p className="text-xs text-muted-foreground">{bulkForm.aggressivePrivacyMode ? "Строгий режим ограничивает аппаратные API. Сайты могут заметить недоступность функций." : "Обычный режим снимает агрессивную блокировку API. В стандартном Electron доступные API могут раскрыть реальные GPU и шрифты устройства; согласованная подмена уровня Octo здесь не гарантируется."}</p></div>
       <DialogFooter><Button variant="outline" disabled={!!busy} onClick={() => setBulkOpen(false)}>Отмена</Button><Button disabled={!canCreate || !!busy || !validCount || !bulkForm.prefix.trim()} onClick={bulkCreate}>{busy === "create" ? "Создание…" : "Создать"}</Button></DialogFooter>
     </DialogContent></Dialog>
   </div>;

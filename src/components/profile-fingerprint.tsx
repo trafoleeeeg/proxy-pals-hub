@@ -1,28 +1,42 @@
+import { useId } from "react";
 import { RefreshCw } from "lucide-react";
 import { generateFingerprint, type Fingerprint, type FingerprintOS } from "@/lib/fingerprint";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { fingerprintError } from "./profile-model";
 
 export function ProfileFingerprint({ value, onChange, disabled = false, country }: {
   value: Fingerprint; onChange: (fp: Fingerprint) => void; disabled?: boolean; country?: string | null | undefined;
 }) {
   const error = fingerprintError(value);
+  const privacyModeId = useId();
+  const aggressivePrivacyMode = value.aggressivePrivacyMode ?? true;
   function changeOS(os: FingerprintOS) {
     if (os === value.os) return;
     onChange({ ...generateFingerprint(country, os), language: value.language, languages: value.languages,
-      timezone: value.timezone, ...(value.startUrl ? { startUrl: value.startUrl } : {}), webrtc: value.webrtc, doNotTrack: value.doNotTrack });
+      timezone: value.timezone, ...(value.startUrl ? { startUrl: value.startUrl } : {}), webrtc: value.webrtc, doNotTrack: value.doNotTrack,
+      aggressivePrivacyMode });
   }
   return <fieldset disabled={disabled} className="min-w-0 space-y-3 border-t border-border pt-4">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <h3 className="text-sm font-medium">Отпечаток {value.os === "macos" ? "macOS" : "Windows"}</h3>
-      <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => onChange({ ...generateFingerprint(country, value.os), ...(value.startUrl ? { startUrl: value.startUrl } : {}), webrtc: value.webrtc })}>
+      <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => onChange({ ...generateFingerprint(country, value.os), ...(value.startUrl ? { startUrl: value.startUrl } : {}), webrtc: value.webrtc, aggressivePrivacyMode })}>
         <RefreshCw className="size-4" /> Новый отпечаток
       </Button>
     </div>
     <p className="text-xs text-muted-foreground">User-Agent и Client Hints согласуются с ОС профиля и установленным Chromium. Подмена шрифтов и шум WebGL не поддерживаются; Web Workers и отдельные фреймы могут отличаться. Отпечаток macOS на Windows не эмулирует настоящее устройство Mac и не гарантирует нераспознаваемость.</p>
+    <div className="space-y-2 rounded-md border border-border p-3">
+      <div className="flex items-center justify-between gap-3">
+        <Label htmlFor={privacyModeId}>Агрессивная блокировка API</Label>
+        <Switch id={privacyModeId} checked={aggressivePrivacyMode} onCheckedChange={(checked) => onChange({ ...value, aggressivePrivacyMode: checked })} disabled={disabled} />
+      </div>
+      <p className="text-xs text-muted-foreground">{aggressivePrivacyMode
+        ? "Строгий режим ограничивает аппаратные API. Сайты могут заметить недоступность функций."
+        : "Обычный режим снимает агрессивную блокировку API. В стандартном Electron доступные API могут раскрыть реальные GPU и шрифты устройства; согласованная подмена уровня Octo здесь не гарантируется."}</p>
+    </div>
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       <div className="grid gap-2"><Label htmlFor="profile-os">Операционная система</Label><Select disabled={disabled} value={value.os} onValueChange={(os) => changeOS(os as FingerprintOS)}>
         <SelectTrigger id="profile-os"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="windows">Windows</SelectItem><SelectItem value="macos">macOS · Apple Silicon</SelectItem></SelectContent>

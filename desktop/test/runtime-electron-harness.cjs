@@ -195,10 +195,13 @@ if (process.versions.electron) {
     assert.ok(auth.a > 0 && auth.b > 0);
     const ses = session.fromPartition(`persist:profile-${ID}`);
     const shell = profileShell(ses);
-    const win = profileTabs(ses)[0];
+    const homeView = profileTabs(ses)[0];
+    const win = profileTabs(ses).find((view) => view !== homeView);
+    assert.ok(win);
     assert.equal(shell.isVisible(), false);
     shell.show();
     await shell.webContents.executeJavaScript("window.profileBrowser.command({action:'state'})");
+    assert.equal(await shell.webContents.executeJavaScript("document.querySelectorAll('#tabs .pinned-home').length"), 1);
     assert.equal(await win.webContents.executeJavaScript("document.documentElement.dataset.umbraExtension"), "loaded");
     assert.equal(runtime.getRunningProfile(ID).diagnostics.extensions.loaded, 1);
     await extensionStore.remove(extension.id);
@@ -243,9 +246,9 @@ if (process.versions.electron) {
     }
 
     await win.webContents.executeJavaScript(`window.open('https://localhost:${local.port}/popup')`, true);
-    await waitUntil(() => runtime.getRunningProfile(ID).tabCount === 2);
+    await waitUntil(() => runtime.getRunningProfile(ID).tabCount === 3);
     assert.equal(runtime.getRunningProfile(ID).windowCount, 1);
-    const popup = profileTabs(ses).find((item) => item !== win);
+    const popup = profileTabs(ses).find((item) => item !== homeView && item !== win);
     await waitUntil(() => popup.webContents.getURL().endsWith("/popup") && !popup.webContents.isLoading());
     assert.equal(shell.isVisible(), true);
     assert.equal(popup.webContents.getLastWebPreferences().preload, preferences.preload);
@@ -253,13 +256,13 @@ if (process.versions.electron) {
     assert.equal((await popup.webContents.executeJavaScript("firstDocument")).timezone, "Asia/Tokyo");
 
     await shell.webContents.executeJavaScript("document.getElementById('new').click()");
-    try { await waitUntil(() => runtime.getRunningProfile(ID).tabCount === 3); }
+    try { await waitUntil(() => runtime.getRunningProfile(ID).tabCount === 4); }
     catch (failure) {
       const profile = runtime.getRunningProfile(ID);
       const toolbar = await shell.webContents.executeJavaScript("({bridge:typeof window.profileBrowser,ready:document.readyState,error:document.getElementById('error')?.textContent || '',tabs:document.querySelectorAll('#tabs .tab').length})").catch(() => null);
       throw new Error(`${failure.message}: ${JSON.stringify({ profile, toolbar })}`);
     }
-    const fresh = profileTabs(ses).find((view) => view !== win && view !== popup);
+    const fresh = profileTabs(ses).find((view) => view !== homeView && view !== win && view !== popup);
     const freshContents = fresh.webContents;
     await waitUntil(() => !fresh.webContents.isLoading());
     try {
@@ -302,11 +305,11 @@ if (process.versions.electron) {
     await waitUntil(() => !fresh.webContents.isLoading());
     assert.ok(fresh.webContents.getURL().endsWith("/second-page"));
     await shell.webContents.executeJavaScript("document.querySelector('.tab:last-child .tab-close').click()");
-    await waitUntil(() => runtime.getRunningProfile(ID).tabCount === 2);
+    await waitUntil(() => runtime.getRunningProfile(ID).tabCount === 3);
     assert.equal(freshContents.isDestroyed(), true);
     assert.equal(runtime.getRunningProfile(ID).state, "running");
     await shell.webContents.executeJavaScript("document.getElementById('menu-button').click(); document.getElementById('restore-menu').click()");
-    await waitUntil(() => runtime.getRunningProfile(ID).tabCount === 3);
+    await waitUntil(() => runtime.getRunningProfile(ID).tabCount === 4);
 
     const bad = payload(WRONG); bad.proxy.password = "wrong";
     await assert.rejects(runtime.launchProfileWindow(bad));

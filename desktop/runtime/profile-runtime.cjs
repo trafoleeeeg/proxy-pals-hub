@@ -89,7 +89,7 @@ function createProfileRuntime(electron, options = {}) {
   function openTabUrls(entry) {
     const urls = [];
     for (const win of entry.windows) {
-      if (win.isDestroyed()) continue;
+      if (win.isDestroyed() || win === entry.homeTab) continue;
       let current = "";
       try { current = win.webContents.getURL(); } catch { current = ""; }
       urls.push(current || win.url || "about:blank");
@@ -100,7 +100,6 @@ function createProfileRuntime(electron, options = {}) {
   function persistTabs(entry) {
     const state = entry.browser?.getTabSnapshot?.();
     const tabs = state?.tabs || openTabUrls(entry);
-    if (!tabs.length) return Promise.resolve();
     entry.tabQueue = (entry.tabQueue || Promise.resolve())
       .catch(() => {})
       .then(() => tabStore().write(entry.profileId, tabs, state?.activeIndex || 0))
@@ -499,13 +498,14 @@ function createProfileRuntime(electron, options = {}) {
 
   // Новая вкладка открывается сразу: загрузка страницы продолжается в фоне и
   // больше не задерживает очередь команд окна профиля.
-  async function makeWindow(entry, url, primary = false, loadOptions = {}, defer = !primary) {
+  async function makeWindow(entry, url, primary = false, loadOptions = {}, defer = !primary, activate = true) {
     if (entry.closingRequested) throw new Error("Профиль закрывается");
     entry.browserPromise ||= createBrowser(electron, browserOptions(entry));
     entry.browser = await entry.browserPromise;
     entry.primary = entry.browser.shell;
     if (entry.closingRequested) throw new Error("Профиль закрывается");
-    const win = entry.browser.createTab();
+    const win = entry.browser.createTab({ pinnedHome: primary, activate });
+    if (primary) entry.homeTab = win;
     entry.windows.add(win);
     win.on("close", (event) => {
       event.preventDefault();
@@ -583,7 +583,7 @@ function createProfileRuntime(electron, options = {}) {
         closeProfileWindow(entry.profileId).catch(() => {});
       });
       if (entry.closingRequested) throw new Error("Profile is closing");
-      if (options.show !== false) win.show();
+      if (options.show !== false && activate) win.show();
       if (url !== "about:blank") {
         if (defer) void navigate(win, url, loadOptions).catch(() => { entry.lastError = "Не удалось открыть страницу"; });
         else await navigate(win, url, loadOptions);
@@ -686,13 +686,13 @@ function createProfileRuntime(electron, options = {}) {
         }
       const saved = await tabStore().read(id).catch(() => ({ tabs: [], activeIndex: 0 }));
       const restoreSaved = saved.tabs.length > 0 && !hasExplicitStartUrl;
-      const plan = restoreSaved ? saved.tabs : [url];
-      await makeWindow(entry, plan[0], true);
-      // Восстановление вкладок идёт параллельно: порядок сохраняется, но окно
-      // профиля перестаёт ждать загрузки каждой страницы по очереди.
-      await Promise.all(plan.slice(1).map((extra) => makeWindow(entry, extra).catch(() => {})));
-      const restoredTabs = [...entry.windows];
-      const focusTab = restoredTabs[restoreSaved ? Math.min(saved.activeIndex, restoredTabs.length - 1) : 0];
+      const plan = restoreSaved ? saved.tabs : (url === "about:blank" ? [] : [url]);
+      await makeWindow(entry, "about:blank", true);
+      // Первую внешнюю страницу дожидаемся, как и раньше; остальные
+      // восстанавливаются параллельно, без перестановки вкладок.
+      if (plan.length) await makeWindow(entry, plan[0], false, {}, false, hasExplicitStartUrl);
+      await Promise.all(plan.slice(1).map((extra) => makeWindow(entry, extra, false, {}, true, false).catch(() => {})));
+      const focusTab = hasExplicitStartUrl && plan.length ? [...entry.windows][1] : entry.homeTab;
       if (focusTab && !focusTab.isDestroyed()) focusTab.show?.();
         entry.browser?.markReady?.();
         entry.state = "running";

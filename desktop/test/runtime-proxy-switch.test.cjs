@@ -65,6 +65,7 @@ function harness(options = {}) {
     onBrowserSettingsChanged: (value) => settings.push(value),
   });
   return { runtime, setups, settings, options: () => browserOptions, reloads: () => reloads,
+    pageId: () => windows.find((win) => win.url === "https://google.com/")?.webContents.id,
     failResource: (details) => resourceError?.(details) };
 }
 
@@ -122,12 +123,13 @@ test("облачные настройки восстанавливают выб�
 test("серия сетевых сбоев ресурсов восстанавливает изображения и стили страницы", async () => {
   const h = harness();
   await h.runtime.launchProfileWindow(payload({ startUrl: "https://google.com/" }));
-  h.failResource({ webContentsId: 1, resourceType: "image", error: "net::ERR_CONNECTION_RESET" });
-  h.failResource({ webContentsId: 1, resourceType: "stylesheet", error: "net::ERR_TIMED_OUT" });
+  const pageId = h.pageId();
+  h.failResource({ webContentsId: pageId, resourceType: "image", error: "net::ERR_CONNECTION_RESET" });
+  h.failResource({ webContentsId: pageId, resourceType: "stylesheet", error: "net::ERR_TIMED_OUT" });
   await new Promise((resolve) => setTimeout(resolve, 1300));
   assert.equal(h.reloads(), 1, "повреждённая страница должна загрузиться заново");
-  h.failResource({ webContentsId: 1, resourceType: "image", error: "net::ERR_BLOCKED_BY_CLIENT" });
-  h.failResource({ webContentsId: 1, resourceType: "image", error: "net::ERR_BLOCKED_BY_CLIENT" });
+  h.failResource({ webContentsId: pageId, resourceType: "image", error: "net::ERR_BLOCKED_BY_CLIENT" });
+  h.failResource({ webContentsId: pageId, resourceType: "image", error: "net::ERR_BLOCKED_BY_CLIENT" });
   await new Promise((resolve) => setTimeout(resolve, 1300));
   assert.equal(h.reloads(), 1, "намеренную блокировку расширением нельзя превращать в цикл перезагрузки");
   await h.runtime.closeProfileWindow(ID);

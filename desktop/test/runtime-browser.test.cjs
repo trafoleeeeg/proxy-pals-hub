@@ -57,7 +57,7 @@ function harness() {
     await tab.loadURL(url);
     return tab;
   };
-  const start = async () => {
+  const start = async ({ withHome = false } = {}) => {
     browser = await createProfileBrowser(electron, {
       name: "Тест", fp: { screen: { width: 1280, height: 720 } }, partition: "persist:test",
       openTab, closeProfile: async () => {}, show: false, onTabsChanged: () => changed.push(true),
@@ -68,6 +68,11 @@ function harness() {
       addBookmark: async (bookmark) => { bookmarks = [...bookmarks, { id: "11111111-1111-4111-8111-111111111111", ...bookmark }]; },
     });
     browser.markReady();
+    if (withHome) {
+      const home = browser.createTab({ pinnedHome: true });
+      home.on("close", () => home.destroy());
+      await home.loadURL("about:blank");
+    }
     await openTab("https://one.example/");
     await openTab("https://two.example/");
     const event = { sender: browser.shell.webContents, senderFrame: browser.shell.webContents.mainFrame };
@@ -94,6 +99,42 @@ test("browser commands reorder tabs, preserve active tab and restore a closed ta
   assert.deepEqual(h.browser.getTabSnapshot().tabs, ["https://one.example/", "https://two.example/"]);
   assert.equal(h.browser.getTabSnapshot().activeIndex, 1);
   assert.ok(h.changed.length > 0);
+  h.browser.destroy();
+});
+
+test("pinned home remains first and bookmark navigation opens a separate active tab", async () => {
+  const h = await harness().start({ withHome: true });
+  const homeId = h.stateEvents.at(-1).tabs[0].id;
+  assert.equal(h.stateEvents.at(-1).tabs[0].pinnedHome, true);
+  await h.command({ action: "home" });
+  assert.equal(h.stateEvents.at(-1).activeId, homeId);
+  const background = h.browser.createTab({ activate: false });
+  assert.equal(h.stateEvents.at(-1).activeId, homeId, "восстановление вкладки не уводит со стартовой");
+  background.destroy();
+  await h.command({ action: "add-bookmark", url: "https://facebook.example/", title: "Facebook" });
+  await h.command({ action: "open-bookmark", id: h.getBookmarks()[0].id });
+  assert.equal(h.stateEvents.at(-1).tabs.length, 4);
+  assert.equal(h.stateEvents.at(-1).tabs[0].id, homeId);
+  assert.equal(h.stateEvents.at(-1).tabs.filter((tab) => tab.pinnedHome).length, 1);
+  assert.equal(h.stateEvents.at(-1).tabs.at(-1).url, "https://facebook.example/");
+  assert.equal(h.stateEvents.at(-1).activeId, h.stateEvents.at(-1).tabs.at(-1).id);
+  assert.deepEqual(h.browser.getTabSnapshot().tabs, ["https://one.example/", "https://two.example/", "https://facebook.example/"]);
+  await h.command({ action: "close-tab", id: homeId });
+  assert.equal(h.stateEvents.at(-1).tabs.length, 4);
+  const reverseIds = h.stateEvents.at(-1).tabs.map((tab) => tab.id).reverse();
+  assert.ok((await h.command({ action: "reorder-tabs", ids: reverseIds })).error);
+  assert.equal(h.stateEvents.at(-1).tabs[0].id, homeId);
+  await h.command({ action: "home" });
+  await h.command({ action: "navigate", value: "https://search.example/" });
+  assert.equal(h.stateEvents.at(-1).tabs.filter((tab) => tab.pinnedHome).length, 1);
+  assert.equal(h.stateEvents.at(-1).tabs.at(-1).url, "https://search.example/");
+  await h.command({ action: "new" });
+  assert.equal(h.stateEvents.at(-1).home, true);
+  assert.equal(h.stateEvents.at(-1).tabs.at(-1).pinnedHome, false);
+  const count = h.stateEvents.at(-1).tabs.length;
+  await h.command({ action: "open-bookmark", id: h.getBookmarks()[0].id });
+  assert.equal(h.stateEvents.at(-1).tabs.length, count, "обычная новая вкладка открывает закладку в себе");
+  assert.equal(h.stateEvents.at(-1).tabs.at(-1).url, "https://facebook.example/");
   h.browser.destroy();
 });
 

@@ -36,6 +36,19 @@ test("unsupported and malformed addresses are dropped", () => {
   assert.equal(sanitizeTabs(new Array(80).fill("https://x.example/")).length, 32);
 });
 
+test("legacy snapshots discard the old blank home while new snapshots retain ordinary blank tabs", async () => {
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "umbra-tabs-legacy-"));
+  const folder = path.join(userData, "profile-tab-snapshots");
+  fs.mkdirSync(folder, { recursive: true });
+  fs.writeFileSync(path.join(folder, ID + ".bin"), safeStorage.encryptString(JSON.stringify({
+    version: 1, profileId: ID, tabs: ["about:blank", "https://one.example/", "about:blank", "https://two.example/"], activeIndex: 0,
+  })));
+  const store = createTabStore({ safeStorage, userData });
+  assert.deepEqual((await store.read(ID)).tabs, ["https://one.example/", "https://two.example/"]);
+  await store.write(ID, ["about:blank", "https://one.example/"], 0);
+  assert.deepEqual((await store.read(ID)).tabs, ["about:blank", "https://one.example/"]);
+});
+
 test("missing OS encryption keeps tabs out of plain files", async () => {
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), "umbra-tabs-plain-"));
   const store = createTabStore({ safeStorage: { isEncryptionAvailable: () => false }, userData });

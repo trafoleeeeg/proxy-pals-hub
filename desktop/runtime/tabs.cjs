@@ -38,8 +38,10 @@ function createTabStore({ safeStorage, userData }) {
       } catch { return { tabs: [], activeIndex: 0 }; }
       try {
         const data = JSON.parse(safeStorage.decryptString(encrypted));
-        if (data.version !== 1 || data.profileId !== profileId(id)) return { tabs: [], activeIndex: 0 };
-        const tabs = sanitizeTabs(data.tabs);
+        if (![1, 2].includes(data.version) || data.profileId !== profileId(id)) return { tabs: [], activeIndex: 0 };
+        // Version 1 included the old, replaceable about:blank home page in the
+        // snapshot. Version 2 stores only ordinary tabs; their blanks are real.
+        const tabs = sanitizeTabs(data.tabs).filter((url) => data.version !== 1 || url !== "about:blank");
         const activeIndex = Number.isInteger(data.activeIndex) && data.activeIndex >= 0 && data.activeIndex < tabs.length ? data.activeIndex : 0;
         return { tabs, activeIndex };
       } catch { return { tabs: [], activeIndex: 0 }; }
@@ -48,7 +50,7 @@ function createTabStore({ safeStorage, userData }) {
       if (!available()) return;
       const list = sanitizeTabs(tabs);
       const payload = JSON.stringify({
-        version: 1, profileId: profileId(id), tabs: list,
+        version: 2, profileId: profileId(id), tabs: list,
         activeIndex: Number.isInteger(activeIndex) && activeIndex >= 0 && activeIndex < list.length ? activeIndex : 0,
       });
       if (Buffer.byteLength(payload) > MAX_BYTES) return;

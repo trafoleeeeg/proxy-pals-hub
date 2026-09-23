@@ -11,7 +11,7 @@ const statusColor: Record<string, string> = {
 import { toast } from "sonner";
 import { useWorkspace } from "@/lib/useWorkspace";
 import { parseCookieImport } from "@/lib/server-cookies";
-import { ALL_FOLDERS, useProfileFolder } from "@/lib/useProfileFolder";
+import { MAIN_FOLDER, useProfileFolder } from "@/lib/useProfileFolder";
 import { listProfiles, saveProfile, cloneProfile, bulkCreateProfiles } from "@/lib/profiles.functions";
 import { listProxies } from "@/lib/proxies.functions";
 import { listFolders } from "@/lib/folders.functions";
@@ -20,6 +20,7 @@ import { useDesktopProfileLifecycle } from "@/hooks/useDesktopProfileLifecycle";
 import { generateFingerprint, describeFingerprint, type Fingerprint } from "@/lib/fingerprint";
 import { ProfileFingerprint } from "@/components/profile-fingerprint";
 import { ProfileCookies } from "@/components/profile-cookies";
+import { ProfileDragHandle } from "@/components/profile-dnd";
 import { ProfileBulkDialog, type BulkAction } from "@/components/profile-bulk";
 import { ProfileProxyCell, useProxyOps } from "@/components/profile-proxy";
 import { ColumnSettings, InlineText, MetadataManager, NotesCell, ResizableHead, StatusCell, useColumnWidths, type FixedColumn } from "@/components/profile-table-tools";
@@ -49,7 +50,6 @@ export const Route = createFileRoute("/_authenticated/app/")({
   component: ProfilesPage,
 });
 type Edit = { id?: string; name: string; folder: string; tags: string; notes: string; proxyId: string; fingerprint: Fingerprint; statusId: string | null; customFields: Record<string, string>; cookies?: string };
-const ALL = ALL_FOLDERS;
 const MAX_COOKIE_IMPORT_BYTES = 5_000_000;
 const DEFAULT_COLUMNS: FixedColumn[] = ["folder", "status", "proxy", "notes", "fingerprint", "updated", "created"];
 const dateTime = (value: string) => new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
@@ -84,13 +84,13 @@ function ProfilesWorkspace() {
   const foldersFn = useServerFn(listFolders);
   const folderList = useQuery({ queryKey: ["folders", ws?.teamId], queryFn: () => { if (!ws) throw new Error("Команда не загружена"); return foldersFn({ data: { teamId: ws.teamId } }); }, enabled: !!ws });
   const [search, setSearch] = useState("");
-  const { folder } = useProfileFolder();
+  const { folder, setFolder } = useProfileFolder();
   const [selected, setSelected] = useState<string[]>([]);
   const [action, setAction] = useState<{ mode: BulkAction; ids: string[] } | null>(null);
   const [cookiesId, setCookiesId] = useState<string | null>(null);
   const [editing, setEditing] = useState<Edit | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
-  const [bulkForm, setBulkForm] = useState({ prefix: "Профиль", count: "10", folder: "" });
+  const [bulkForm, setBulkForm] = useState({ prefix: "Профиль", count: "10", folder: MAIN_FOLDER });
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [metadataOpen, setMetadataOpen] = useState(false);
@@ -106,8 +106,15 @@ function ProfilesWorkspace() {
   const running = useMemo(() => new Set(runtime.running.map((p) => p.profileId)), [runtime.running]);
   const pending = useMemo(() => new Set([...runtime.pending, ...runtime.busy]), [runtime.pending, runtime.busy]);
   const locked = (id: string) => running.has(id) || pending.has(id) || !!profiles.data?.find((p) => p.id === id)?.lock;
-  const rows = (profiles.data ?? []).filter((p) => (folder === ALL || p.folder === folder) && (p.name + " " + p.folder + " " + p.tags.join(" ")).toLowerCase().includes(search.toLowerCase()));
-  const folderNames = [...new Set([...(folderList.data ?? []).map((row) => row.name), ...(profiles.data ?? []).map((p) => p.folder).filter(Boolean)])].sort((a, b) => a.localeCompare(b, "ru"));
+  useEffect(() => {
+    if (ws?.scope !== "owner" && folder === MAIN_FOLDER && folderList.data?.length) setFolder(folderList.data[0]!.name);
+  }, [ws?.scope, folder, folderList.data, setFolder]);
+  useEffect(() => {
+    if (ws?.scope !== "owner" && bulkForm.folder === MAIN_FOLDER && folderList.data?.length)
+      setBulkForm((value) => ({ ...value, folder: folderList.data![0]!.name }));
+  }, [ws?.scope, bulkForm.folder, folderList.data]);
+  const rows = (profiles.data ?? []).filter((p) => (p.folder === folder || (folder === MAIN_FOLDER && !p.folder)) && (p.name + " " + p.folder + " " + p.tags.join(" ")).toLowerCase().includes(search.toLowerCase()));
+  const folderNames = (folderList.data ?? []).map((row) => row.name);
   const visibleIds = rows.map((p) => p.id);
   const visibleSelected = visibleIds.filter((id) => selected.includes(id)).length;
   const cookiesProfile = profiles.data?.find((p) => p.id === cookiesId);
@@ -155,7 +162,7 @@ function ProfilesWorkspace() {
     if (!ws || !canCreate || !validCount || !bulkForm.prefix.trim()) return;
     void perform("create", () => createMany({ data: { teamId: ws.teamId, prefix: bulkForm.prefix, count, folder: bulkForm.folder, fingerprints: Array.from({ length: count }, () => generateFingerprint()) } }), () => setBulkOpen(false));
   }
-  function newProfile() { setError(null); setEditing({ name: "Профиль " + ((profiles.data?.length ?? 0) + 1), folder: folder === ALL ? "" : folder, tags: "", notes: "", proxyId: "none", fingerprint: generateFingerprint(), statusId: null, customFields: {}, cookies: "" }); }
+  function newProfile() { setError(null); setEditing({ name: "Профиль " + ((profiles.data?.length ?? 0) + 1), folder, tags: "", notes: "", proxyId: "none", fingerprint: generateFingerprint(), statusId: null, customFields: {}, cookies: "" }); }
   function patchProfile(profile: NonNullable<typeof profiles.data>[number], changes: Partial<Pick<Edit, "name" | "folder" | "notes" | "statusId" | "customFields">> & { tags?: string[] }) {
     if (!ws || !canEdit || locked(profile.id)) return;
     void perform("inline-" + profile.id, () => saveFn({ data: {
@@ -220,7 +227,7 @@ function ProfilesWorkspace() {
     </div>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {permissionsError && <p role="alert" className="text-sm text-destructive">Не удалось загрузить ваши права. Обновите страницу и повторите попытку.</p>}
-    {ws?.scope === "member" && folderList.isSuccess && !folderList.data.length && <p role="status" className="text-sm text-warning">Вам пока не открыта ни одна папка с профилями. Владелец может выдать доступ в разделе «Команда» → «Папки».</p>}
+    {ws?.scope === "member" && folderList.isSuccess && !folderList.data.length && <p role="status" className="text-sm text-warning">Вам пока не открыта ни одна папка с профилями. Владелец может выдать доступ в разделе «Папки».</p>}
     {profiles.isError && <p role="alert" className="text-sm text-destructive">Не удалось обновить профили. <Button size="sm" variant="outline" onClick={() => profiles.refetch()}>Повторить</Button></p>}
     {proxies.isError && <p role="alert" className="text-sm text-warning">Прокси недоступны. <Button size="sm" variant="outline" onClick={() => proxies.refetch()}>Повторить</Button></p>}
     <div className="min-h-[480px] overflow-hidden border-y border-border">
@@ -234,7 +241,7 @@ function ProfilesWorkspace() {
           const processing = runtime.busy.includes(profile.id);
           const proxy = proxies.data?.find((p) => p.id === profile.proxy_id);
           const busyBy = !active && profile.lock ? (profile.lock.name || profile.lock.email || "другой сотрудник") : null;
-          return <ContextMenu key={profile.id}><ContextMenuTrigger asChild><TableRow data-state={selected.includes(profile.id) ? "selected" : undefined} draggable={canEdit && !locked(profile.id)} onDragStart={(event) => { event.dataTransfer.setData("application/x-umbra-profile", profile.id); event.dataTransfer.effectAllowed = "move"; }}>
+          return <ContextMenu key={profile.id}><ContextMenuTrigger asChild><TableRow data-state={selected.includes(profile.id) ? "selected" : undefined}>
             {manage && <TableCell><Checkbox aria-label={"Выбрать " + profile.name} checked={selected.includes(profile.id)} onCheckedChange={(v) => setSelected((current) => toggleVisibleSelection(current, [profile.id], v === true))} /></TableCell>}
             <TableCell><Button variant={active ? "outline" : "default"} size="icon" title={active ? "Закрыть профиль" : busyBy ? `Профиль занят: ${busyBy}` : runtime.available ? "Запустить профиль" : "Запуск в приложении Windows"} aria-label={busyBy ? `Профиль ${profile.name} занят: ${busyBy}` : (active ? "Закрыть " : "Запустить ") + profile.name} disabled={!runtime.available || !runtime.ready || runtime.restoring || processing || (!active && locked(profile.id))} onClick={() => { void (active ? runtime.stop(profile.id) : runtime.start(profile.id)).catch((e: Error) => toast.error(e.message)); }}>{processing ? <RefreshCw className="size-4 animate-spin" /> : active ? <Square className="size-4" /> : busyBy ? <LockKeyhole className="size-4" /> : <Play className="size-4" />}</Button></TableCell>
             {manage && <TableCell><DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="size-7" title="Действия с профилем" aria-label={"Действия " + profile.name}><MoreVertical className="size-4" /></Button></DropdownMenuTrigger><DropdownMenuContent align="start" className="w-44">
@@ -243,8 +250,8 @@ function ProfilesWorkspace() {
               <DropdownMenuItem disabled={!!busy} onSelect={() => setCookiesId(profile.id)}><Cookie className="size-4" />Cookies</DropdownMenuItem>
               <DropdownMenuItem disabled={!canDelete || !!busy || locked(profile.id)} onSelect={() => setAction({ mode: "delete", ids: [profile.id] })}><Trash2 className="size-4 text-destructive" />Удалить</DropdownMenuItem>
             </DropdownMenuContent></DropdownMenu></TableCell>}
-            <TableCell style={cellStyle("name")} className="max-w-36">{editMode ? <InlineText value={profile.name} placeholder="Название" disabled={!canEdit || !!busy || locked(profile.id)} onSave={(name) => patchProfile(profile, { name })} /> : <span className="block truncate font-medium" title={busyBy ? `${profile.name} — занят: ${busyBy}` : profile.name}>{profile.name}{busyBy && <span className="ml-1 text-[11px] font-normal text-warning">занят</span>}</span>}</TableCell>
-            {shown("folder") && <TableCell style={cellStyle("folder")} className="max-w-28">{editMode ? <InlineText value={profile.folder} placeholder="Без папки" disabled={!canEdit || !!busy || locked(profile.id)} onSave={(value) => patchProfile(profile, { folder: value })} /> : <span className="block truncate text-muted-foreground" title={profile.folder || "Без папки"}>{profile.folder || "—"}</span>}</TableCell>}
+            <TableCell style={cellStyle("name")} className="max-w-36"><div className="flex items-center">{canEdit && <ProfileDragHandle id={profile.id} name={profile.name} disabled={!!busy || locked(profile.id)} />}{editMode ? <InlineText value={profile.name} placeholder="Название" disabled={!canEdit || !!busy || locked(profile.id)} onSave={(name) => patchProfile(profile, { name })} /> : <span className="block truncate font-medium" title={busyBy ? `${profile.name} — занят: ${busyBy}` : profile.name}>{profile.name}{busyBy && <span className="ml-1 text-[11px] font-normal text-warning">занят</span>}</span>}</div></TableCell>
+            {shown("folder") && <TableCell style={cellStyle("folder")} className="max-w-28"><span className="block truncate text-muted-foreground" title={profile.folder || MAIN_FOLDER}>{profile.folder || MAIN_FOLDER}</span></TableCell>}
                         {shown("status") && <TableCell style={cellStyle("status")} className="max-w-32"><StatusCell statusId={profile.status_id} statuses={metadata.data?.statuses ?? []} disabled={!canEdit || !!busy || locked(profile.id)} canCreate={!!canEdit} onSelect={(statusId) => patchProfile(profile, { statusId })} onCreate={createStatus} /></TableCell>}
             {shown("proxy") && <TableCell style={cellStyle("proxy")} className="text-xs">{profile.proxy_id && !proxy ? <span className="text-warning">Прокси недоступен</span> : <ProfileProxyCell proxy={proxy} ops={proxyOps} compact />}</TableCell>}
             {shown("notes") && <TableCell style={cellStyle("notes")} className="max-w-40"><NotesCell value={profile.notes} disabled={!canEdit || !!busy || locked(profile.id)} onSave={(notes) => patchProfile(profile, { notes })} /></TableCell>}
@@ -260,7 +267,7 @@ function ProfilesWorkspace() {
             <ContextMenuItem disabled={!canDelete || !!busy || locked(profile.id)} onSelect={() => setAction({ mode: "delete", ids: [profile.id] })}><Trash2 className="size-4" />В корзину</ContextMenuItem>
           </ContextMenuContent></ContextMenu>;
         })}
-        {!profiles.isPending && !profiles.isError && !rows.length && <TableRow><TableCell colSpan={columnCount} className="py-10 text-center text-sm text-muted-foreground">{search || folder !== ALL ? "По выбранным фильтрам профилей нет" : "Профилей пока нет"}</TableCell></TableRow>}
+        {!profiles.isPending && !profiles.isError && !rows.length && <TableRow><TableCell colSpan={columnCount} className="py-10 text-center text-sm text-muted-foreground">{search ? "По выбранным фильтрам профилей нет" : "В этой папке пока нет профилей"}</TableCell></TableRow>}
       </TableBody></Table>
       </div>
     </div>
@@ -272,7 +279,7 @@ function ProfilesWorkspace() {
       <DialogHeader><DialogTitle>{editing?.id ? "Изменить профиль" : "Новый профиль"}</DialogTitle><DialogDescription>Настройки профиля Windows</DialogDescription></DialogHeader>
       {editing && <fieldset disabled={!!busy} className="space-y-3">
         <Label className="grid gap-2">Название<Input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></Label>
-        <div className="grid gap-3 sm:grid-cols-2"><Label className="grid gap-2">Папка<Input value={editing.folder} onChange={(e) => setEditing({ ...editing, folder: e.target.value })} /></Label><Label className="grid gap-2">Метки через запятую<Input value={editing.tags} onChange={(e) => setEditing({ ...editing, tags: e.target.value })} /></Label></div>
+        <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label>Папка</Label><Select value={editing.folder || MAIN_FOLDER} disabled={folderList.isPending} onValueChange={(value) => setEditing({ ...editing, folder: value })}><SelectTrigger aria-label="Папка профиля"><SelectValue placeholder="Выберите папку" /></SelectTrigger><SelectContent>{folderNames.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent></Select></div><Label className="grid gap-2">Метки через запятую<Input value={editing.tags} onChange={(e) => setEditing({ ...editing, tags: e.target.value })} /></Label></div>
         <div className="space-y-2"><Label>Прокси</Label><Select disabled={!!busy || proxies.isPending || proxies.isError} value={editing.proxyId} onValueChange={(proxyId) => setEditing({ ...editing, proxyId })}><SelectTrigger aria-label="Прокси профиля"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">Без прокси</SelectItem>{(proxies.data ?? []).map((proxy) => <SelectItem key={proxy.id} value={proxy.id}>{proxy.label} · {proxy.host}:{proxy.port}</SelectItem>)}</SelectContent></Select></div>
         <Label className="grid gap-2">Заметки<Textarea rows={2} value={editing.notes} onChange={(e) => setEditing({ ...editing, notes: e.target.value })} /></Label>
         <div className="space-y-2"><Label>Статус</Label><Select value={editing.statusId ?? "none"} onValueChange={(value) => setEditing({ ...editing, statusId: value === "none" ? null : value })}><SelectTrigger><SelectValue placeholder="Без статуса" /></SelectTrigger><SelectContent><SelectItem value="none">Без статуса</SelectItem>{(metadata.data?.statuses ?? []).map((status) => <SelectItem key={status.id} value={status.id}>{status.name}</SelectItem>)}</SelectContent></Select></div>
@@ -300,7 +307,7 @@ function ProfilesWorkspace() {
       <DialogFooter><Button variant="outline" disabled={!!busy} onClick={() => setEditing(null)}>Отмена</Button><Button disabled={!(editing?.id ? canEdit : canCreate) || !!busy || !editing?.name.trim() || editingCookiesBytes > MAX_COOKIE_IMPORT_BYTES || !!cookiePreview?.error || !!(cookiePreview && cookiePreview.count === cookiePreview.expired) || !!(editing && fingerprintError(editing.fingerprint)) || !!(editing?.id && locked(editing.id))} onClick={save}>{busy === "save" ? "Сохранение…" : "Сохранить"}</Button></DialogFooter>
     </DialogContent></Dialog>
     <Dialog open={bulkOpen} onOpenChange={(open) => { if (!busy) setBulkOpen(open); }}><DialogContent className="w-[calc(100%-2rem)]"><DialogHeader><DialogTitle>Создать несколько профилей</DialogTitle><DialogDescription>У каждого профиля будет отдельный отпечаток.</DialogDescription></DialogHeader>
-      <fieldset disabled={!!busy} className="space-y-3"><Label className="grid gap-2">Название-основа<Input value={bulkForm.prefix} onChange={(e) => setBulkForm({ ...bulkForm, prefix: e.target.value })} /></Label><Label className="grid gap-2">Количество, 1–200<Input type="number" min={1} max={200} step={1} value={bulkForm.count} onChange={(e) => setBulkForm({ ...bulkForm, count: e.target.value })} /></Label><Label className="grid gap-2">Папка<Input value={bulkForm.folder} onChange={(e) => setBulkForm({ ...bulkForm, folder: e.target.value })} /></Label></fieldset>
+      <fieldset disabled={!!busy} className="space-y-3"><Label className="grid gap-2">Название-основа<Input value={bulkForm.prefix} onChange={(e) => setBulkForm({ ...bulkForm, prefix: e.target.value })} /></Label><Label className="grid gap-2">Количество, 1–200<Input type="number" min={1} max={200} step={1} value={bulkForm.count} onChange={(e) => setBulkForm({ ...bulkForm, count: e.target.value })} /></Label><div className="space-y-2"><Label>Папка</Label><Select value={bulkForm.folder} disabled={folderList.isPending} onValueChange={(value) => setBulkForm({ ...bulkForm, folder: value })}><SelectTrigger aria-label="Папка новых профилей"><SelectValue placeholder="Выберите папку" /></SelectTrigger><SelectContent>{folderNames.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent></Select></div></fieldset>
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       <DialogFooter><Button variant="outline" disabled={!!busy} onClick={() => setBulkOpen(false)}>Отмена</Button><Button disabled={!canCreate || !!busy || !validCount || !bulkForm.prefix.trim()} onClick={bulkCreate}>{busy === "create" ? "Создание…" : "Создать"}</Button></DialogFooter>
     </DialogContent></Dialog>

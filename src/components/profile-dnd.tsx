@@ -27,7 +27,7 @@ const detectDropTarget: CollisionDetection = (args) => {
   // keep reporting the dragged row instead of the row underneath it.
   const folderHit = pointerHits.filter(({ id }) => String(id).startsWith("folder:") || String(id).startsWith("folder-page:"));
   if (folderHit.length) return folderHit;
-  const profiles = args.droppableContainers.filter(({ id }) => String(id).startsWith("profile:"));
+  const profiles = args.droppableContainers.filter(({ id }) => String(id).startsWith("profile:") && id !== args.active.id);
   if (!profiles.length) return [];
   if (args.pointerCoordinates) {
     const rects = profiles.map(({ id }) => args.droppableRects.get(id)).filter((rect) => rect != null);
@@ -84,6 +84,7 @@ export function ProfileDndProvider({ children }: { children: ReactNode }) {
     const source = String(event.active.id);
     const target = String(event.over.id);
     if (source.startsWith("profile:") && target.startsWith("profile:") && can("profile.edit")) {
+      if (event.delta.x === 0 && event.delta.y === 0) return;
       if (reorderPending.current) return;
       const key = ["profiles", ws.teamId];
       const previous = qc.getQueryData<ProfileRow[]>(key);

@@ -210,6 +210,25 @@ export const importProfileCookies = createServerFn({ method: "POST" })
     return { imported: cookies.length };
   });
 
+/** Only metadata is returned to the editor; cookie names and values stay server-side. */
+export const getProfileCookieStatus = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth]).inputValidator(profileIdSchema)
+  .handler(async ({ data, context }) => {
+    await requireProfile(context, data.profileId, "owner");
+    const { data: row, error } = await context.supabase.from("browser_profiles")
+      .select("cookies_enc, cookies_updated_at").eq("id", data.profileId).single();
+    if (error) throw new Error("Не удалось проверить cookies профиля");
+    if (!row.cookies_enc) return { total: 0, usable: 0, updatedAt: null };
+    const { decryptSecret } = await import("./crypto.server");
+    const cookies = parseCookieImport(decryptSecret(row.cookies_enc));
+    const now = Date.now() / 1000;
+    return {
+      total: cookies.length,
+      usable: cookies.filter((cookie) => !cookie.expirationDate || cookie.expirationDate > now).length,
+      updatedAt: row.cookies_updated_at,
+    };
+  });
+
 export const exportProfileCookies = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth]).inputValidator(profileIdSchema)
   .handler(async ({ data, context }) => {

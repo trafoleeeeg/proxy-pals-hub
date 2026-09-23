@@ -11,6 +11,7 @@ node_modules
 dist
 dist-ssr
 .output
+public/geoip/
 .vinxi
 .tanstack/**
 .nitro
@@ -30,3 +31,4 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+

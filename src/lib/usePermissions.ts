@@ -23,7 +23,8 @@ export function usePermissions(teamId: string | undefined) {
     queryFn: () => fetchPermissions({ data: { teamId: teamId! } }),
     enabled: !!teamId,
     staleTime: 60_000,
+    refetchOnWindowFocus: "always",
   });
   const can = (key: PermissionKey) => query.data?.[key] === true;
-  return { can, scope: query.data?.scope ?? null, isPending: query.isPending, permissions: query.data };
+  return { can, scope: query.data?.scope ?? null, isPending: query.isPending, isError: query.isError, permissions: query.data };
 }

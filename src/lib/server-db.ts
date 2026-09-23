@@ -10,6 +10,8 @@ type MigrationFunctions = {
   import_profile_cookies: Rpc<{ _profile_id: string; _cookies_enc: string }, string>;
   bulk_mutate_profiles: Rpc<{ _team_id: string; _profile_ids: string[]; _operation: "update" | "delete"; _changes: Json }, number>;
   set_folder_access: Rpc<{ _team_id: string; _folder: string; _user_id: string; _granted: boolean }, boolean>;
+  rename_team_folder: Rpc<{ _team_id: string; _folder_id: string; _name: string }, boolean>;
+  delete_team_folder: Rpc<{ _team_id: string; _folder_id: string }, boolean>;
   transfer_profiles: Rpc<{ _team_id: string; _profile_ids: string[]; _folder: string; _user_id: null }, number>;
   set_member_permissions: Rpc<{ _team_id: string; _user_id: string; _create: boolean; _edit: boolean; _delete: boolean; _proxy: boolean; _folders: boolean; _proxies: boolean; _bookmarks: boolean }, boolean>;
   remove_team_member: Rpc<{ _team_id: string; _user_id: string }, boolean>;
@@ -65,12 +67,14 @@ export type TeamScope = "owner" | "manager" | "member";
 // Владелец управляет командой и секретами, администратор — профилями и прокси,
 // участник работает только с назначенными профилями.
 export async function teamScope(context: ServerContext, teamId: string): Promise<TeamScope | null> {
-  const { data: team } = await context.supabase.from("teams").select("owner_id").eq("id", teamId).maybeSingle();
+  const { data: team, error: teamError } = await context.supabase.from("teams").select("owner_id").eq("id", teamId).maybeSingle();
+  if (teamError) throw new Error("Не удалось проверить доступ к команде: " + teamError.message);
   if (!team) return null;
   if (team.owner_id === context.userId) return "owner";
   if (await isSuperadmin(context)) return "owner";
-  const { data: member } = await context.supabase.from("team_members").select("scope")
+  const { data: member, error: memberError } = await context.supabase.from("team_members").select("scope")
     .eq("team_id", teamId).eq("user_id", context.userId).maybeSingle();
+  if (memberError) throw new Error("Не удалось проверить участие в команде: " + memberError.message);
   if (!member) return null;
   return (member as { scope?: string }).scope === "manager" ? "manager" : "member";
 }
@@ -100,7 +104,8 @@ export async function memberPermissions(context: ServerContext, teamId: string):
     return { ...NO_PERMISSIONS, scope, ...Object.fromEntries(PERMISSION_KEYS.map((key) => [key, true])) } as PermissionMap & { scope: TeamScope };
   }
   const table = context.supabase.from("member_permissions" as never);
-  const { data } = await table.select("*").eq("team_id", teamId).eq("user_id", context.userId).maybeSingle();
+  const { data, error } = await table.select("*").eq("team_id", teamId).eq("user_id", context.userId).maybeSingle();
+  if (error) throw new Error("Не удалось загрузить права сотрудника: " + error.message);
   const row = (data ?? {}) as Record<string, boolean | undefined>;
   const map = Object.fromEntries(PERMISSION_KEYS.map((key) => [key, row[PERMISSION_COLUMNS[key]] === true])) as PermissionMap;
   return { ...map, scope };
@@ -117,16 +122,18 @@ export async function requireFolderAccess(context: ServerContext, teamId: string
   const scope = await teamScope(context, teamId);
   if (!scope) throw new Error("Нет доступа к команде");
   if (scope !== "member") return;
-  const { data } = await context.supabase.from("folder_access").select("folder")
+  const { data, error } = await context.supabase.from("folder_access").select("folder")
     .eq("team_id", teamId).eq("folder", folder).eq("user_id", context.userId).maybeSingle();
+  if (error) throw new Error("Не удалось проверить доступ к папке: " + error.message);
   if (!data) throw new Error("Эта папка вам недоступна");
 }
 
 export async function accessibleFolders(context: ServerContext, teamId: string): Promise<string[] | null> {
   const scope = await teamScope(context, teamId);
   if (scope !== "member") return null;
-  const { data } = await context.supabase.from("folder_access").select("folder")
+  const { data, error } = await context.supabase.from("folder_access").select("folder")
     .eq("team_id", teamId).eq("user_id", context.userId);
+  if (error) throw new Error("Не удалось загрузить доступные папки: " + error.message);
   return [...new Set((data ?? []).map((row) => row.folder as string))];
 }
 

@@ -19,7 +19,7 @@ import {
   revokeEmployeeAccess,
   deleteEmployeeAccount,
 } from "@/lib/team.functions";
-import { PERMISSION_LABELS, PERMISSION_ORDER, EMPTY_PERMISSIONS, type PermissionKey } from "@/lib/usePermissions";
+import { PERMISSION_LABELS, PERMISSION_ORDER, EMPTY_PERMISSIONS, usePermissions, type PermissionKey } from "@/lib/usePermissions";
 import { listFolderAccess, setFolderAccess, listFolders, createFolder, renameFolder, deleteFolder } from "@/lib/folders.functions";
 import { listPresence } from "@/lib/presence.functions";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -38,6 +38,7 @@ export const Route = createFileRoute("/_authenticated/app/team")({
 export function TeamPage() {
   const workspace = useWorkspace();
   const ws = workspace.data;
+  const { can } = usePermissions(ws?.teamId);
   const qc = useQueryClient();
   const members = useServerFn(listMembers);
   const invite = useServerFn(createInvite);
@@ -69,6 +70,7 @@ export function TeamPage() {
 
   const isOwner = ws?.role === "owner";
   const canManage = !!ws?.canManage;
+  const canManageFolders = can("folder.manage");
 
   const team = useQuery({
     queryKey: ["team", ws?.teamId],
@@ -91,7 +93,7 @@ export function TeamPage() {
   const folderList = useQuery({
     queryKey: ["folders", ws?.teamId],
     queryFn: () => foldersFn({ data: { teamId: ws!.teamId } }),
-    enabled: !!ws?.teamId && canManage,
+    enabled: !!ws?.teamId && (canManage || canManageFolders),
   });
 
   const presence = useQuery({
@@ -211,6 +213,27 @@ export function TeamPage() {
 
   if (workspace.isPending) return <p role="status" className="text-sm text-muted-foreground">Загрузка команды…</p>;
   if (workspace.isError) return <p role="alert" className="text-sm text-destructive">Команда недоступна. <Button variant="outline" onClick={() => workspace.refetch()}>Повторить</Button></p>;
+
+  if (!canManage && canManageFolders) {
+    return <div className="max-w-3xl space-y-4">
+      <div><h1 className="text-2xl font-semibold">Папки команды</h1><p className="mt-1 text-sm text-muted-foreground">Вы можете управлять папками. Доступ к профилям в них выдаётся владельцем отдельно.</p></div>
+      <div className="flex flex-wrap gap-2">
+        <Input aria-label="Название новой папки" placeholder="Название новой папки" className="max-w-xs" value={newFolder} onChange={(event) => setNewFolder(event.target.value)} />
+        <Button disabled={!newFolder.trim() || createFolderMut.isPending} onClick={() => createFolderMut.mutate()}>Создать папку</Button>
+      </div>
+      {folderList.isPending && <p role="status" className="text-sm">Загрузка папок…</p>}
+      {folderList.isError && <p role="alert" className="text-sm text-destructive">Не удалось загрузить папки. <Button variant="outline" onClick={() => folderList.refetch()}>Повторить</Button></p>}
+      <div className="rounded-lg border border-border bg-card">
+        {(folderList.data ?? []).map((row) => <div key={row.id} className="flex items-center gap-2 border-b border-border p-3 last:border-0">
+          <span className="min-w-0 flex-1 truncate text-sm">{row.name}{row.isDefault && <span className="ml-2 text-xs text-muted-foreground">основная</span>}</span>
+          {!row.virtual && !row.isDefault && <>
+            <Button size="sm" variant="ghost" disabled={renameFolderMut.isPending} onClick={() => { const name = window.prompt("Новое название папки", row.name)?.trim(); if (name && name !== row.name) renameFolderMut.mutate({ id: row.id, name }); }}>Переименовать</Button>
+            <Button size="sm" variant="ghost" disabled={deleteFolderMut.isPending} onClick={() => { if (window.confirm(`Удалить папку «${row.name}»? Профили перейдут в основную.`)) deleteFolderMut.mutate(row.id); }}><Trash2 className="size-4" />Удалить</Button>
+          </>}
+        </div>)}
+      </div>
+    </div>;
+  }
 
   if (!canManage) {
     return (

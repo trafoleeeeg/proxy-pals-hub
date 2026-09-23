@@ -62,6 +62,33 @@ beforeAll(async () => {
 afterAll(async () => { await db?.close(); });
 
 describe("real migrations and RLS", () => {
+  test("granular team rights work for an ordinary employee, not only a manager", async () => {
+    await expect(asUser(member, "update public.proxies set label = 'denied' where id = $1 returning id", [proxy])).resolves.toEqual([]);
+    await expect(asUser(member, "select public.save_team_bookmark_defaults($1, '[]'::jsonb, true)", [team])).rejects.toThrow("Недостаточно прав");
+    await asUser(owner, "select public.set_member_permissions($1, $2, true, true, false, false, true, true, true)", [team, member]);
+    const rights = await asUser<{ can_manage_proxies: boolean; can_manage_bookmarks: boolean }>(member,
+      "select can_manage_proxies, can_manage_bookmarks from public.member_permissions where team_id = $1 and user_id = $2", [team, member]);
+    expect(rights).toEqual([{ can_manage_proxies: true, can_manage_bookmarks: true }]);
+    expect(await asUser(member, "update public.proxies set label = 'employee' where id = $1 returning id", [proxy])).toEqual([{ id: proxy }]);
+    const createdFolder = await asUser<{ id: string; name: string }>(member,
+      "insert into public.profile_folders(team_id, name) values ($1, 'Employee folder') returning id, name", [team]);
+    expect(createdFolder[0]!.name).toBe("Employee folder");
+    await asUser(owner, "update public.browser_profiles set folder = 'Employee folder' where id = $1", [profile]);
+    await asUser(owner, "select public.set_folder_access($1, 'Employee folder', $2, true)", [team, member]);
+    await asUser(member, "select public.rename_team_folder($1, $2, 'Renamed folder')", [team, createdFolder[0]!.id]);
+    expect((await db.query<{ folder: string }>("select folder from public.browser_profiles where id = $1", [profile])).rows[0]!.folder).toBe("Renamed folder");
+    expect((await db.query<{ folder: string }>("select folder from public.folder_access where team_id = $1 and user_id = $2", [team, member])).rows[0]!.folder).toBe("Renamed folder");
+    await asUser(member, "select public.delete_team_folder($1, $2)", [team, createdFolder[0]!.id]);
+    expect((await db.query<{ folder: string }>("select folder from public.browser_profiles where id = $1", [profile])).rows[0]!.folder).toBe("Основная");
+    expect(await asUser(member, "insert into public.profile_statuses(team_id, name, color) values ($1, 'Employee status', 'primary') returning name", [team])).toEqual([{ name: "Employee status" }]);
+    expect(await asUser(member, "insert into public.profile_field_definitions(team_id, name, field_type) values ($1, 'Employee field', 'text') returning name", [team])).toEqual([{ name: "Employee field" }]);
+    const saved = await asUser<{ value: { teamId: string } }>(member,
+      "select public.save_team_bookmark_defaults($1, '[]'::jsonb, true) as value", [team]);
+    expect(saved[0]!.value.teamId).toBe(team);
+    await asUser(owner, "select public.set_member_permissions($1, $2, false, false, false, false, false, false, false)", [team, member]);
+    expect(await asUser(member, "update public.proxies set label = 'denied' where id = $1 returning id", [proxy])).toEqual([]);
+  });
+
   test("team bookmarks are shared with members but cannot cross team boundaries", async () => {
     const bookmarks = JSON.stringify([{ id: profile, title: "Почта", url: "https://mail.example.test/" }]);
     await asUser(owner, "select public.save_team_bookmark_defaults($1, $2::jsonb, true)", [team, bookmarks]);
@@ -145,7 +172,10 @@ describe("real migrations and RLS", () => {
 
   test("removing a member revokes profile access and running lease atomically", async () => {
     const old = await acquire(member);
+    await asUser(owner, "select public.set_member_permissions($1, $2, false, false, false, false, false, true, false)", [team, member]);
     await asUser(owner, "select public.remove_team_member($1, $2)", [team, member]);
+    expect((await db.query("select user_id from public.member_permissions where team_id = $1 and user_id = $2", [team, member])).rows).toHaveLength(0);
+    expect(await asUser(member, "select id from public.proxies where id = $1", [proxy])).toEqual([]);
     expect(await asUser(member, "select id from public.browser_profiles")).toHaveLength(0);
     expect((await db.query("select * from public.profile_locks where profile_id = $1", [profile])).rows).toHaveLength(0);
     await expect(mutate(old.lockToken, "close", "revoked-cookies", member)).rejects.toThrow("No profile access");

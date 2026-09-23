@@ -9,6 +9,7 @@ import { desktop, type InstalledExtension } from "@/lib/desktop";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useWorkspace } from "@/lib/useWorkspace";
+import { usePermissions } from "@/lib/usePermissions";
 import { getBookmarkDefaults, saveBookmarkDefaults } from "@/lib/bookmark-defaults.functions";
 import type { BookmarkDefaults } from "@/lib/bookmark-defaults";
 
@@ -67,7 +68,8 @@ function BookmarkDefaultsManager() {
     if (!query.data || dirty) return;
     setRows(query.data.bookmarks);
   }, [dirty, query.data]);
-  const canManage = ws?.canManage === true;
+  const { can, isError: permissionsError } = usePermissions(ws?.teamId);
+  const canManage = can("bookmarks.manage");
   function change(id: string, field: "title" | "url", value: string) {
     setRows((current) => current.map((item) => item.id === id ? { ...item, [field]: value } : item));
     setDirty(true);
@@ -97,6 +99,7 @@ function BookmarkDefaultsManager() {
     } finally { setBusy(false); }
   }
   return <section className="space-y-4 border-y border-border py-5">
+    {permissionsError && <p role="alert" className="text-sm text-destructive">Не удалось загрузить ваши права. Обновите страницу и повторите попытку.</p>}
     <div className="flex flex-wrap items-center gap-3">
       <div><h2 className="flex items-center gap-2 font-semibold"><Bookmark className="size-4" />Общие закладки</h2><p className="mt-1 text-sm text-muted-foreground">Эта панель показывается во всех профилях команды. Личные закладки профиля сохраняются отдельно.</p></div>
       {canManage && <div className="ml-auto flex gap-2"><Button variant="outline" disabled={busy || rows.length >= 64} onClick={add}><Plus className="size-4" />Добавить ссылку</Button><Button disabled={busy || !dirty} onClick={() => { void persist(); }}>{busy ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}Сохранить</Button></div>}

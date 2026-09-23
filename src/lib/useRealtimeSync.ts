@@ -36,4 +36,3 @@ export function useRealtimeSync(teamId: string | undefined) {
     };
   }, [qc, teamId]);
 }
-

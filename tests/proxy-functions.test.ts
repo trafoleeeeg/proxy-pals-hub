@@ -330,13 +330,12 @@ describe("proxy check persistence and deletion", () => {
     } finally { network.mockRestore(); }
   });
 
-  test.each([{}, { country: undefined, city: undefined }, { country: "", city: "" }])("success preserves omitted locale %j", async (locale) => {
+  test.each([{}, { country: undefined, city: undefined }, { country: "", city: "" }])("a new IP clears stale country until geolocation completes %j", async (locale) => {
     const f = fixture();
     await invoke("recordProxyCheck", { ...target, ok: true, ip: "2001:db8::1", latency: 0, ...locale }, f);
     const update = mutations(f)[0]!;
-    expect(update.payload).not.toHaveProperty("country");
-    expect(update.payload).not.toHaveProperty("city");
-    expect(f.tables.proxies[0]).toMatchObject({ country: "DE", city: "Berlin", last_check_ok: true, last_check_ip: "2001:db8::1", last_check_latency_ms: 0, last_check_error: null });
+    expect(update.payload).toMatchObject({ country: null, city: null });
+    expect(f.tables.proxies[0]).toMatchObject({ country: null, city: null, last_check_ok: true, last_check_ip: "2001:db8::1", last_check_latency_ms: 0, last_check_error: null });
     expect(update.filters).toContainEqual(["team_id", teamId]);
     expect(update.filters).toContainEqual(["id", id]);
   });

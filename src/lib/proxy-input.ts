@@ -230,6 +230,33 @@ export function parseProxyLine(line: string, defaultProtocol: ProxyProtocol = "h
   throw new Error("Ожидается host:port[:login:password]; IPv6 укажите в квадратных скобках");
 }
 
+/** A single proxy with an optional rotation link, as supplied by mobile-proxy vendors. */
+export function parseProxyBundle(value: unknown): (ProxyFields & { rotationUrl: string }) | null {
+  if (typeof value !== "string" || encoder.encode(value).length > PROXY_LIMITS.importBytes) return null;
+  const lines = value.trim().split(/\r\n|\n|\r/).map((line) => line.trim()).filter(Boolean);
+  if (!lines.length || lines.length > 2) return null;
+  const prefixed = /^(socks5|https?|socks)\s*:\s+(.*)$/i.exec(lines[0]!);
+  const protocol = prefixed ? (prefixed[1]!.toLowerCase() === "socks" ? "socks5" : prefixed[1]!.toLowerCase()) as ProxyProtocol : "http";
+  const endpoint = prefixed ? prefixed[2]! : lines[0]!;
+  let rotationUrl = "";
+  if (lines[1]) {
+    const linked = /^\[https:\/\/[^\]]+\]\((https:\/\/[^)]+)\)$/.exec(lines[1]);
+    const link = (linked?.[1] ?? lines[1]).replace(/\\([&_])/g, "$1");
+    if (!/^https:\/\//i.test(link)) return null;
+    // Two ordinary proxy URLs in a bulk import must not become a proxy plus
+    // a rotation link merely because the second one uses HTTPS.
+    if (!prefixed && /^https:\/\/[^/?#]+\/?$/.test(link)) return null;
+    rotationUrl = validateRotationUrl(link, false);
+  }
+  try {
+    const proxy = parseProxyLine(endpoint, protocol);
+    return { ...proxy, rotationUrl };
+  } catch {
+    if (prefixed || lines[1]) throw new Error("Не удалось распознать адрес прокси. Проверьте формат host:port:login:password");
+    return null;
+  }
+}
+
 export function parseProxyImport(text: unknown, protocol: ProxyProtocol = "http"): {
   rows: ProxyFields[]; issues: ProxyImportIssue[];
 } {

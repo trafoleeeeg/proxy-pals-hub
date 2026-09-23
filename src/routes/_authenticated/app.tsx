@@ -119,11 +119,13 @@ function AppShell() {
   return <div className="flex h-screen overflow-hidden bg-background">
     <aside className={"flex shrink-0 flex-col border-r border-sidebar-border bg-sidebar transition-[width] " + (collapsed ? "w-14" : "w-56")}>
       <div className={"flex h-14 items-center gap-2 border-b border-sidebar-border " + (collapsed ? "justify-center" : "px-3")}>
-        <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground">U</span>
+        {collapsed ? <Button variant="ghost" size="icon" className="group relative size-9" title="Развернуть меню" aria-label="Развернуть меню" onClick={() => toggleCollapsed()}>
+          <span className="flex size-6 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground transition-opacity group-hover:opacity-0 group-focus-visible:opacity-0">U</span>
+          <PanelLeftOpen className="absolute size-5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
+        </Button> : <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground">U</span>}
         {!collapsed && <><span className="text-sm font-semibold">Umbra</span>
           <Button variant="ghost" size="icon" className="ml-auto size-7" title="Свернуть меню" aria-label="Свернуть меню" onClick={() => toggleCollapsed()}><PanelLeftClose className="size-4" /></Button></>}
       </div>
-      {collapsed && <Button variant="ghost" size="icon" className="mx-auto mt-2 size-8" title="Развернуть меню" aria-label="Развернуть меню" onClick={() => toggleCollapsed()}><PanelLeftOpen className="size-4" /></Button>}
       <nav className="scroll-thin flex flex-1 flex-col gap-1 overflow-y-auto p-2">{NAV.map((item) => {
         const active = item.exact ? pathname === item.to || pathname === "/app/" : pathname.startsWith(item.to);
         const Icon = item.icon;

@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useRef, useState } from "react";
+import { useRef, useState, type ClipboardEvent } from "react";
 import { Activity, CheckCheck, ClipboardPaste, Clock3, Link2, Loader2, Pencil, Plus, RotateCw, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "@/lib/useWorkspace";
@@ -9,8 +9,9 @@ import { usePermissions } from "@/lib/usePermissions";
 import { listProxies, saveProxy, deleteProxy, importProxies, checkProxy, proxyForCheck, recordProxyCheck, rotateProxyIp } from "@/lib/proxies.functions";
 import {
   PROXY_LIMITS, ProxyCheckQueue, parseProxyPort, performDesktopProxyCheck,
-  proxyAddress, validateProxyInput, normalizeProxyCheck,
+  proxyAddress, validateProxyInput, normalizeProxyCheck, parseProxyBundle,
 } from "@/lib/proxy-input";
+import { countryFlag } from "@/lib/country-flag";
 import { confirmRotation } from "@/lib/proxy-rotation";
 import type { PasswordAction, ProxyImportIssue, ProxyProtocol, RotationAction } from "@/lib/proxy-input";
 import { desktop } from "@/lib/desktop";
@@ -72,12 +73,50 @@ export function ProxiesPage() {
     if (!ws?.teamId) throw new Error("Команда ещё загружается");
     return ws.teamId;
   };
+  async function readClipboard() {
+    const bridge = desktop();
+    return bridge?.readProxyClipboard ? bridge.readProxyClipboard() : navigator.clipboard.readText();
+  }
+  function fillFromBundle(text: string): boolean {
+    const parsed = parseProxyBundle(text);
+    if (!parsed) return false;
+    setForm((current) => ({
+      ...current, label: current.label || parsed.label, protocol: parsed.protocol,
+      host: parsed.host, port: String(parsed.port), username: parsed.username, password: parsed.password,
+      country: "", passwordAction: parsed.password ? "replace" : "clear",
+      rotationUrl: parsed.rotationUrl,
+      rotationAction: parsed.rotationUrl ? "replace" : current.id ? "preserve" : "clear",
+    }));
+    toast.success("Поля прокси заполнены. Проверьте их и нажмите «Сохранить».");
+    return true;
+  }
+  function pasteIntoForm(event: ClipboardEvent<HTMLFormElement>) {
+    const text = event.clipboardData.getData("text");
+    try {
+      if (fillFromBundle(text)) event.preventDefault();
+    } catch (error) {
+      event.preventDefault();
+      toast.error(error instanceof Error ? error.message : "Не удалось распознать прокси");
+    }
+  }
+  async function pasteIntoFormFromClipboard() {
+    try {
+      const text = await readClipboard();
+      if (!text) { toast.info("Буфер обмена пуст"); return; }
+      if (!fillFromBundle(text)) toast.error("В буфере не найден адрес прокси");
+    } catch (error) {
+      toast.error(error instanceof Error && error.message.startsWith("Не удалось распознать") ? error.message : "Не удалось прочитать настройки прокси из буфера");
+    }
+  }
   async function pasteImport() {
     try {
-      const bridge = desktop();
-      const value = bridge?.readProxyClipboard ? await bridge.readProxyClipboard() : await navigator.clipboard.readText();
+      const value = await readClipboard();
       if (!value) { toast.info("Буфер обмена пуст"); return; }
       if (new TextEncoder().encode(value).length > PROXY_LIMITS.importBytes) throw new Error();
+      const parsed = parseProxyBundle(value);
+      if (parsed && (parsed.rotationUrl || /^\s*(?:socks5|https?|socks)\s*:\s+/i.test(value))) {
+        fillFromBundle(value); setImportOpen(false); setOpen(true); return;
+      }
       setImportText(value);
       setImportIssues([]);
       importMut.reset();
@@ -248,6 +287,18 @@ export function ProxiesPage() {
           <Label htmlFor="proxy-import-text">Список прокси</Label>
           <Textarea id="proxy-import-text" rows={10} value={importText} maxLength={PROXY_LIMITS.importBytes}
             disabled={importMut.isPending} spellCheck={false} autoComplete="off"
+            onPaste={(event) => {
+              const text = event.clipboardData.getData("text");
+              try {
+                const parsed = parseProxyBundle(text);
+                if (parsed && (parsed.rotationUrl || /^\s*(?:socks5|https?|socks)\s*:\s+/i.test(text))) {
+                  event.preventDefault(); fillFromBundle(text); setImportOpen(false); setOpen(true);
+                }
+              } catch (error) {
+                event.preventDefault();
+                toast.error(error instanceof Error ? error.message : "Не удалось распознать прокси");
+              }
+            }}
             onChange={(event) => { setImportText(event.target.value); setImportIssues([]); importMut.reset(); }}
             placeholder={"socks5://user:pass@[2001:db8::1]:1080\nproxy.example:8080:user:pass"}
             className="mono text-xs" aria-invalid={!!importIssues.length || importMut.isError} />
@@ -264,7 +315,11 @@ export function ProxiesPage() {
       <Dialog open={open} onOpenChange={closeForm}>
         <DialogContent className="max-h-[90dvh] overflow-y-auto">
           <DialogHeader><DialogTitle>{form.id ? "Редактирование прокси" : "Новый прокси"}</DialogTitle></DialogHeader>
-          <form onSubmit={(event) => { event.preventDefault(); if (!saveMut.isPending) saveMut.mutate(); }}>
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border p-3 text-sm">
+            <span className="text-muted-foreground">Вставьте строку прокси и ссылку смены IP в любое поле — поля заполнятся сами.</span>
+            <Button type="button" variant="outline" size="sm" disabled={saveMut.isPending} onClick={() => void pasteIntoFormFromClipboard()}><ClipboardPaste className="size-4" />Вставить из буфера</Button>
+          </div>
+          <form onPaste={pasteIntoForm} onSubmit={(event) => { event.preventDefault(); if (!saveMut.isPending) saveMut.mutate(); }}>
             <fieldset disabled={saveMut.isPending} className="grid min-w-0 gap-4 sm:grid-cols-2">
               <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="proxy-label">Название</Label>
@@ -280,11 +335,6 @@ export function ProxiesPage() {
                     <SelectItem value="socks5">SOCKS5</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="proxy-country">Страна</Label>
-                <Input id="proxy-country" value={form.country} maxLength={2} placeholder="DE"
-                  onChange={(event) => setForm({ ...form, country: event.target.value })} />
               </div>
               <div className="min-w-0 space-y-2">
                 <Label htmlFor="proxy-host">Адрес</Label>
@@ -344,21 +394,20 @@ export function ProxiesPage() {
         <Table>
           <TableHeader><TableRow>
             <TableHead>Название</TableHead><TableHead>Тип</TableHead><TableHead>Адрес</TableHead>
-            <TableHead>Страна</TableHead><TableHead>Проверка и IP</TableHead><TableHead>Смена IP</TableHead><TableHead><span className="sr-only">Действия</span></TableHead>
+            <TableHead>Проверка и IP</TableHead><TableHead>Смена IP</TableHead><TableHead><span className="sr-only">Действия</span></TableHead>
           </TableRow></TableHeader>
           <TableBody>
             {(proxies.data ?? []).map((proxy) => <TableRow key={proxy.id}>
               <TableCell className="max-w-52 break-words font-medium">{proxy.label}</TableCell>
               <TableCell className="mono text-xs uppercase">{proxy.protocol}</TableCell>
               <TableCell className="mono max-w-64 break-all text-xs">{proxyAddress(proxy.host, proxy.port)}</TableCell>
-              <TableCell className="mono text-xs">{proxy.country ?? "—"}</TableCell>
               <TableCell className="min-w-36 max-w-72">
                 {checking.has(proxy.id) ? <span role="status" className="flex items-center gap-2 text-xs">
                   <Loader2 className="size-3 animate-spin" />Проверяется
                 </span> : proxy.last_check_ok === true ? <Badge className="bg-primary/15 text-primary">работает</Badge>
                   : proxy.last_check_ok === false ? <Badge variant="destructive">ошибка</Badge>
                   : <span className="text-xs text-muted-foreground">не проверялся</span>}
-                {proxy.last_check_ip && <div className="mono mt-1 break-all text-xs">{proxy.last_check_ip}
+                {proxy.last_check_ip && <div className="mono mt-1 break-all text-xs">{countryFlag(proxy.country) && <span title={`Страна выхода: ${proxy.country}`} className="mr-1.5 font-sans text-base" aria-label={`Страна выхода: ${proxy.country}`}>{countryFlag(proxy.country)}</span>}{proxy.last_check_ip}
                   {proxy.last_check_latency_ms != null ? ` · ${proxy.last_check_latency_ms} мс` : ""}</div>}
                 {(checkErrors[proxy.id] || proxy.last_check_error) && <p role="status" className="mt-1 break-words text-xs text-destructive">
                   {checkErrors[proxy.id] || proxy.last_check_error}
@@ -398,7 +447,7 @@ export function ProxiesPage() {
               </TableCell>
             </TableRow>)}
             {(proxies.isPending || proxies.isError || !proxies.data?.length) && <TableRow>
-              <TableCell colSpan={7} className="py-10 text-center text-sm text-muted-foreground">
+              <TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
                 {proxies.isPending ? "Загрузка прокси..." : proxies.isError ? "Не удалось загрузить прокси" : "Пока нет ни одного прокси"}
                 {proxies.isError && <Button variant="ghost" onClick={() => { void proxies.refetch(); }}>Повторить</Button>}
               </TableCell>

@@ -1,12 +1,14 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { DndContext, DragOverlay, KeyboardSensor, PointerSensor, pointerWithin, useDraggable, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
-import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+import { DndContext, DragOverlay, KeyboardSensor, PointerSensor, pointerWithin, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { arrayMove, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { GripVertical } from "lucide-react";
-import { useState, type ComponentProps, type ReactNode } from "react";
+import { createContext, useContext, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { toast } from "sonner";
 import { reorderFolders, type FolderRow } from "@/lib/folders.functions";
-import { bulkUpdateProfiles } from "@/lib/profiles.functions";
+import { bulkUpdateProfiles, reorderProfiles, type ProfileRow } from "@/lib/profiles.functions";
+import { reorderProfileRows } from "@/lib/profile-order";
 import { usePermissions } from "@/lib/usePermissions";
 import { MAIN_FOLDER } from "@/lib/useProfileFolder";
 import { useWorkspace } from "@/lib/useWorkspace";
@@ -16,19 +18,28 @@ export const folderDragId = (id: string) => `folder:${id}`;
 export const folderPageDragId = (id: string) => `folder-page:${id}`;
 export const profileDragId = (id: string) => `profile:${id}`;
 
+type HandleProps = Pick<ReturnType<typeof useSortable>, "attributes" | "listeners" | "setActivatorNodeRef"> & { disabled: boolean; name: string };
+const DragHandleContext = createContext<HandleProps | null>(null);
+
 export function ProfileDragRow({ id, name, disabled, children, ...props }: { id: string; name: string; disabled: boolean } & ComponentProps<typeof TableRow>) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
-    id: profileDragId(id), disabled, data: { label: name, kind: "profile" },
+  const { attributes, listeners, setActivatorNodeRef, setNodeRef, transform, transition, isDragging, isOver } = useSortable({
+    id: profileDragId(id), disabled: { draggable: disabled, droppable: false }, data: { label: name, kind: "profile" },
   });
-  return <TableRow ref={setNodeRef} {...props} {...attributes} {...listeners}
-    role="row" aria-roledescription="Перетаскиваемый профиль"
-    aria-label={`Профиль ${name}. Зажмите строку и перенесите в папку`}
-    className={`${props.className ?? ""} ${disabled ? "" : "cursor-grab active:cursor-grabbing"} ${isDragging ? "opacity-35" : ""}`}
-    style={{ ...props.style, touchAction: "pan-y" }}>{children}</TableRow>;
+  return <DragHandleContext.Provider value={{ attributes, listeners, setActivatorNodeRef, disabled, name }}>
+    <TableRow ref={setNodeRef} {...props}
+      className={`${props.className ?? ""} ${isDragging ? "opacity-35" : ""} ${isOver ? "bg-primary/10" : ""}`}
+      style={{ ...props.style, transform: CSS.Transform.toString(transform), transition }}>{children}</TableRow>
+  </DragHandleContext.Provider>;
 }
 
 export function ProfileDragHandle() {
-  return <span aria-hidden="true" className="mr-1 inline-flex size-6 shrink-0 items-center justify-center text-muted-foreground"><GripVertical className="size-4" /></span>;
+  const handle = useContext(DragHandleContext);
+  if (!handle || handle.disabled) return null;
+  return <button type="button" ref={handle.setActivatorNodeRef} {...handle.attributes} {...handle.listeners}
+    aria-label={`Перетащить профиль ${handle.name} вверх, вниз или в папку`}
+    title="Перетащить профиль вверх, вниз или в другую папку"
+    className="mr-1 inline-flex size-6 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary active:cursor-grabbing"
+    style={{ touchAction: "none" }}><GripVertical className="size-4" /></button>;
 }
 
 export function ProfileDndProvider({ children }: { children: ReactNode }) {
@@ -36,8 +47,10 @@ export function ProfileDndProvider({ children }: { children: ReactNode }) {
   const { can } = usePermissions(ws?.teamId);
   const qc = useQueryClient();
   const reorder = useServerFn(reorderFolders);
+  const reorderProfile = useServerFn(reorderProfiles);
   const moveProfile = useServerFn(bulkUpdateProfiles);
   const [activeLabel, setActiveLabel] = useState<string | null>(null);
+  const reorderPending = useRef(false);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -48,6 +61,26 @@ export function ProfileDndProvider({ children }: { children: ReactNode }) {
     if (!ws || !event.over) return;
     const source = String(event.active.id);
     const target = String(event.over.id);
+    if (source.startsWith("profile:") && target.startsWith("profile:") && can("profile.edit")) {
+      if (reorderPending.current) return;
+      const key = ["profiles", ws.teamId];
+      const previous = qc.getQueryData<ProfileRow[]>(key);
+      if (!previous) return;
+      const result = reorderProfileRows(previous, source.slice(8), target.slice(8));
+      if (!result) return;
+      reorderPending.current = true;
+      qc.setQueryData(key, result.rows);
+      try {
+        await reorderProfile({ data: { teamId: ws.teamId, folder: result.folder || MAIN_FOLDER, ids: result.ids } });
+      } catch (error) {
+        qc.setQueryData(key, previous);
+        toast.error(error instanceof Error ? error.message : "Не удалось изменить порядок профилей");
+      } finally {
+        reorderPending.current = false;
+        void qc.invalidateQueries({ queryKey: key });
+      }
+      return;
+    }
     if (!target.startsWith("folder:") && !target.startsWith("folder-page:")) return;
     const folderId = target.startsWith("folder-page:") ? target.slice(12) : target.slice(7);
     const key = ["folders", ws.teamId];
@@ -82,3 +115,4 @@ export function ProfileDndProvider({ children }: { children: ReactNode }) {
     <DragOverlay>{activeLabel && <div className="rounded-md border border-primary/60 bg-card px-3 py-2 text-sm font-medium shadow-xl">{activeLabel}</div>}</DragOverlay>
   </DndContext>;
 }
+

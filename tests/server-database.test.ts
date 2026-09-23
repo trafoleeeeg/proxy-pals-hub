@@ -101,6 +101,28 @@ describe("real migrations and RLS", () => {
     await expect(asUser(outsider, "select public.reorder_team_folders($1, $2::uuid[])", [team, [first, second]])).rejects.toThrow("Недостаточно прав");
   });
 
+  test("profile order persists within a folder without changing cookies or modification dates", async () => {
+    const ids = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
+    await db.query("insert into public.profile_folders(team_id, name) values ($1, 'Sort test')", [team]);
+    for (let i = 0; i < ids.length; i++) {
+      await db.query("insert into public.browser_profiles(id, team_id, name, folder, cookies_enc) values ($1, $2, $3, 'Sort test', 'encrypted')", [ids[i], team, `Sort ${i}`]);
+    }
+    const before = (await db.query<{ id: string; updated_at: string; cookies_enc: string }>(
+      "select id, updated_at, cookies_enc from public.browser_profiles where id = any($1::uuid[]) order by id", [ids],
+    )).rows;
+    await expect(asUser(member, "select public.reorder_team_profiles($1, 'Sort test', $2::uuid[])", [team, ids])).rejects.toThrow("Недостаточно прав");
+    await expect(asUser(owner, "select public.reorder_team_profiles($1, 'Sort test', $2::uuid[])", [team, [ids[0], ids[0], ids[2]]])).rejects.toThrow("Список профилей изменился");
+    await expect(asUser(owner, "select public.reorder_team_profiles($1, 'Sort test', $2::uuid[])", [team, [ids[0], ids[1], otherProfile]])).rejects.toThrow("Список профилей изменился");
+    await asUser(owner, "select public.reorder_team_profiles($1, 'Sort test', $2::uuid[])", [team, [ids[2], ids[0], ids[1]]]);
+    const ordered = (await db.query<{ id: string; updated_at: string; cookies_enc: string }>(
+      "select id, updated_at, cookies_enc from public.browser_profiles where id = any($1::uuid[]) order by sort_order", [ids],
+    )).rows;
+    expect(ordered.map((row) => row.id)).toEqual([ids[2], ids[0], ids[1]]);
+    const byId = (items: typeof ordered) => Object.fromEntries(items.map(({ id, updated_at, cookies_enc }) => [id, { updated_at, cookies_enc }]));
+    expect(byId(ordered)).toEqual(byId(before));
+    await expect(asUser(outsider, "select public.reorder_team_profiles($1, 'Sort test', $2::uuid[])", [team, ids])).rejects.toThrow("Недостаточно прав");
+  });
+
   test("trash hides profiles, preserves cookies, restores them, and purges after 14 days", async () => {
     const id = crypto.randomUUID();
     await db.query("insert into public.browser_profiles(id, team_id, name, cookies_enc) values ($1, $2, 'Trash test', 'encrypted')", [id, team]);

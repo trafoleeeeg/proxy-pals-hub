@@ -13,6 +13,7 @@ type MigrationFunctions = {
   rename_team_folder: Rpc<{ _team_id: string; _folder_id: string; _name: string }, boolean>;
   delete_team_folder: Rpc<{ _team_id: string; _folder_id: string }, boolean>;
   reorder_team_folders: Rpc<{ _team_id: string; _folder_ids: string[] }, boolean>;
+  reorder_team_profiles: Rpc<{ _team_id: string; _folder: string; _profile_ids: string[] }, boolean>;
   prune_team_audit_log: Rpc<{ _team_id: string }, number>;
   list_trashed_profiles: Rpc<{ _team_id: string }, Array<{ id: string; name: string; folder: string; deleted_at: string }>>;
   restore_trashed_profile: Rpc<{ _team_id: string; _profile_id: string }, boolean>;
@@ -33,7 +34,7 @@ type ServerDatabase = Omit<Database, "public"> & {
     Functions: Database["public"]["Functions"] & MigrationFunctions;
     Tables: Omit<Database["public"]["Tables"], "browser_profiles" | "profile_folders"> & {
       browser_profiles: Omit<Database["public"]["Tables"]["browser_profiles"], "Row"> & {
-        Row: Database["public"]["Tables"]["browser_profiles"]["Row"] & { cookies_updated_at: string };
+        Row: Database["public"]["Tables"]["browser_profiles"]["Row"] & { cookies_updated_at: string; sort_order: number };
       };
       profile_folders: Omit<Database["public"]["Tables"]["profile_folders"], "Row"> & {
         Row: Database["public"]["Tables"]["profile_folders"]["Row"] & { position: number };
@@ -177,3 +178,4 @@ export async function writeAudit(context: ServerContext, teamId: string, action:
   const { error } = await context.supabase.from("audit_log").insert({ team_id: teamId, user_id: context.userId, action, target_type: targetType, target_id: targetId, ...(meta === undefined ? {} : { meta }) });
   if (error) throw new Error(error.message);
 }
+

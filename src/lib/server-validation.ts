@@ -91,6 +91,11 @@ export const createFolderSchema = z.object({ teamId: uuidSchema, name: folderNam
 export const renameFolderSchema = z.object({ teamId: uuidSchema, id: uuidSchema, name: folderName }).strict();
 export const folderIdSchema = z.object({ teamId: uuidSchema, id: uuidSchema }).strict();
 export const reorderFoldersSchema = z.object({ teamId: uuidSchema, ids: z.array(uuidSchema).max(500) }).strict();
+export const reorderProfilesSchema = z.object({
+  teamId: uuidSchema,
+  folder: text(200).min(1),
+  ids: z.array(uuidSchema).min(2).max(5000).refine((ids) => new Set(ids).size === ids.length, "Duplicate profile IDs"),
+}).strict();
 export const presenceSchema = z.object({
   teamId: uuidSchema, profileId: uuidSchema.nullable().optional(), deviceLabel: text(200).optional(),
 }).strict();

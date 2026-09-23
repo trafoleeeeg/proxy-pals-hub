@@ -66,7 +66,11 @@ jobs:
           node --check desktop/runtime/profile-runtime.cjs
 
       - name: Check TypeScript
-        run: bun run typecheck
+        # Build generates the typed TanStack route tree, which is intentionally
+        # not committed to the repository.
+        run: |
+          bun run build
+          bun run typecheck
 
       - name: Run full desktop test suite
         working-directory: desktop

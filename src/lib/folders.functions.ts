@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { createFolderSchema, folderAccessSchema, folderIdSchema, renameFolderSchema, teamSchema, transferSchema } from "./server-validation";
-import { accessibleFolders, callServerRpc, memberPermissions, requirePermission, requireTeamManager, writeAudit } from "./server-db";
+import { createFolderSchema, folderAccessSchema, folderIdSchema, renameFolderSchema, reorderFoldersSchema, teamSchema, transferSchema } from "./server-validation";
+import { accessibleFolders, callServerRpc, memberPermissions, requirePermission, requireTeamManager, serverDb, writeAudit } from "./server-db";
 
 export type FolderAccessRow = { folder: string; userId: string };
 
@@ -10,7 +10,7 @@ export const listFolderAccess = createServerFn({ method: "POST" })
   .inputValidator(teamSchema)
   .handler(async ({ data, context }): Promise<FolderAccessRow[]> => {
     await requireTeamManager(context, data.teamId);
-    const { data: rows, error } = await context.supabase
+    const { data: rows, error } = await serverDb(context.supabase)
       .from("folder_access")
       .select("folder, user_id")
       .eq("team_id", data.teamId);
@@ -44,7 +44,7 @@ export const transferProfiles = createServerFn({ method: "POST" })
   });
 
 export const DEFAULT_FOLDER = "Основная";
-export type FolderRow = { id: string; name: string; isDefault: boolean; virtual: boolean };
+export type FolderRow = { id: string; name: string; isDefault: boolean; virtual: boolean; position: number };
 
 export const listFolders = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -52,9 +52,10 @@ export const listFolders = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<FolderRow[]> => {
     const { data: rows, error } = await context.supabase
       .from("profile_folders")
-      .select("id, name, is_default")
+      .select("*")
       .eq("team_id", data.teamId)
       .order("is_default", { ascending: false })
+      .order("position")
       .order("name");
     if (error) throw new Error("Не удалось загрузить папки");
     // Сотрудник видит только те папки, которые ему открыл владелец.
@@ -62,7 +63,7 @@ export const listFolders = createServerFn({ method: "POST" })
     const allowed = rights["folder.manage"] ? null : await accessibleFolders(context, data.teamId);
     const list: FolderRow[] = (rows ?? [])
       .filter((row) => allowed === null || allowed.includes(row.name))
-      .map((row) => ({ id: row.id, name: row.name, isDefault: row.is_default, virtual: false }));
+      .map((row) => ({ id: row.id, name: row.name, isDefault: row.is_default, virtual: false, position: (row as typeof row & { position: number }).position }));
     // Папки, заданные прямо в профилях, тоже показываем — иначе их не видно в меню.
     const { data: used } = await context.supabase
       .from("browser_profiles").select("folder").eq("team_id", data.teamId);
@@ -72,10 +73,10 @@ export const listFolders = createServerFn({ method: "POST" })
       if (!name || known.has(name)) continue;
       if (allowed !== null && !allowed.includes(name)) continue;
       known.add(name);
-      list.push({ id: `virtual:${name}`, name, isDefault: false, virtual: true });
+      list.push({ id: `virtual:${name}`, name, isDefault: false, virtual: true, position: 2147483647 });
     }
     return list.sort((a, b) =>
-      a.isDefault === b.isDefault ? a.name.localeCompare(b.name, "ru") : a.isDefault ? -1 : 1);
+      Number(b.isDefault) - Number(a.isDefault) || a.position - b.position || a.name.localeCompare(b.name, "ru"));
   });
 
 
@@ -112,6 +113,17 @@ export const deleteFolder = createServerFn({ method: "POST" })
     await requirePermission(context, data.teamId, "folder.manage");
     await callServerRpc(context.supabase, "delete_team_folder", {
       _team_id: data.teamId, _folder_id: data.id,
+    });
+    return { ok: true };
+  });
+
+export const reorderFolders = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(reorderFoldersSchema)
+  .handler(async ({ data, context }) => {
+    await requirePermission(context, data.teamId, "folder.manage");
+    await callServerRpc(context.supabase, "reorder_team_folders", {
+      _team_id: data.teamId, _folder_ids: data.ids,
     });
     return { ok: true };
   });

@@ -24,6 +24,7 @@ import { ProfileBulkDialog, type BulkAction } from "@/components/profile-bulk";
 import { ProfileProxyCell, useProxyOps } from "@/components/profile-proxy";
 import { ColumnSettings, InlineText, MetadataManager, NotesCell, ResizableHead, StatusCell, useColumnWidths, type FixedColumn } from "@/components/profile-table-tools";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { createProfileField, createProfileStatus, deleteProfileStatus, listProfileMetadata, updateProfileStatus } from "@/lib/profile-metadata.functions";
 import { fingerprintError, profileFingerprintPayload, splitTags, toggleVisibleSelection } from "@/components/profile-model";
 import { Button } from "@/components/ui/button";
@@ -184,7 +185,7 @@ function ProfilesWorkspace() {
       <div><h1 className="text-xl font-semibold">Профили</h1><p className="text-xs text-muted-foreground">{profiles.data?.length ?? 0} профилей · {running.size} открыто</p></div>
       <div className="ml-auto flex flex-wrap gap-2">
         {canEdit && <Button variant={editMode ? "secondary" : "outline"} onClick={() => setEditMode((value) => !value)}><Pencil className="size-4" />{editMode ? "Готово" : "Редактировать"}</Button>}
-        {canEdit && editMode && <Button size="icon" variant="outline" title="Настроить поля" aria-label="Настроить поля" onClick={() => setMetadataOpen(true)}><Settings2 /></Button>}
+        {canEdit && <Button variant="outline" title="Статусы и поля" aria-label="Статусы и поля" onClick={() => setMetadataOpen(true)}><Settings2 className="size-4" />Статусы и поля</Button>}
         {editMode && <Button variant="outline" size="sm" onClick={resetWidths}>Ширина колонок по умолчанию</Button>}
         {editMode && <ColumnSettings visible={visibleColumns} onChange={setVisibleColumns} fields={metadata.data?.fields ?? []} visibleFields={visibleFields} onFieldChange={setVisibleFields} />}
         <Button size="icon" variant="outline" title="Обновить список" aria-label="Обновить список" disabled={profiles.isFetching} onClick={() => profiles.refetch()}><RefreshCw className={profiles.isFetching ? "size-4 animate-spin" : "size-4"} /></Button>
@@ -233,7 +234,7 @@ function ProfilesWorkspace() {
           const processing = runtime.busy.includes(profile.id);
           const proxy = proxies.data?.find((p) => p.id === profile.proxy_id);
           const busyBy = !active && profile.lock ? (profile.lock.name || profile.lock.email || "другой сотрудник") : null;
-          return <TableRow key={profile.id} data-state={selected.includes(profile.id) ? "selected" : undefined}>
+          return <ContextMenu key={profile.id}><ContextMenuTrigger asChild><TableRow data-state={selected.includes(profile.id) ? "selected" : undefined} draggable={canEdit && !locked(profile.id)} onDragStart={(event) => { event.dataTransfer.setData("application/x-umbra-profile", profile.id); event.dataTransfer.effectAllowed = "move"; }}>
             {manage && <TableCell><Checkbox aria-label={"Выбрать " + profile.name} checked={selected.includes(profile.id)} onCheckedChange={(v) => setSelected((current) => toggleVisibleSelection(current, [profile.id], v === true))} /></TableCell>}
             <TableCell><Button variant={active ? "outline" : "default"} size="icon" title={active ? "Закрыть профиль" : busyBy ? `Профиль занят: ${busyBy}` : runtime.available ? "Запустить профиль" : "Запуск в приложении Windows"} aria-label={busyBy ? `Профиль ${profile.name} занят: ${busyBy}` : (active ? "Закрыть " : "Запустить ") + profile.name} disabled={!runtime.available || !runtime.ready || runtime.restoring || processing || (!active && locked(profile.id))} onClick={() => { void (active ? runtime.stop(profile.id) : runtime.start(profile.id)).catch((e: Error) => toast.error(e.message)); }}>{processing ? <RefreshCw className="size-4 animate-spin" /> : active ? <Square className="size-4" /> : busyBy ? <LockKeyhole className="size-4" /> : <Play className="size-4" />}</Button></TableCell>
             {manage && <TableCell><DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="size-7" title="Действия с профилем" aria-label={"Действия " + profile.name}><MoreVertical className="size-4" /></Button></DropdownMenuTrigger><DropdownMenuContent align="start" className="w-44">
@@ -251,7 +252,13 @@ function ProfilesWorkspace() {
             {shown("fingerprint") && <TableCell style={cellStyle("fingerprint")} className="max-w-40"><span className="block truncate text-muted-foreground" title={describeFingerprint(profile.fingerprint)}>{describeFingerprint(profile.fingerprint)}</span></TableCell>}
             {shown("updated") && <TableCell className="whitespace-nowrap text-muted-foreground">{dateTime(profile.updated_at)}</TableCell>}
             {shown("created") && <TableCell className="whitespace-nowrap text-muted-foreground">{dateTime(profile.created_at)}</TableCell>}
-          </TableRow>;
+          </TableRow></ContextMenuTrigger><ContextMenuContent>
+            <ContextMenuItem disabled={!runtime.available || !runtime.ready || runtime.restoring || processing || (!active && locked(profile.id))} onSelect={() => void (active ? runtime.stop(profile.id) : runtime.start(profile.id)).catch((error: Error) => toast.error(error.message))}>{active ? <Square className="size-4" /> : <Play className="size-4" />}{active ? "Закрыть" : "Открыть"}</ContextMenuItem>
+            <ContextMenuItem disabled={!canEdit || !!busy || locked(profile.id)} onSelect={() => { setError(null); setEditing({ id: profile.id, name: profile.name, folder: profile.folder, tags: profile.tags.join(", "), notes: profile.notes, proxyId: profile.proxy_id ?? "none", fingerprint: profile.fingerprint, statusId: profile.status_id, customFields: profile.custom_fields }); }}><Pencil className="size-4" />Изменить</ContextMenuItem>
+            <ContextMenuItem disabled={!canCreate || !!busy} onSelect={() => void perform(profile.id, () => cloneFn({ data: { id: profile.id } }))}><Copy className="size-4" />Создать копию</ContextMenuItem>
+            <ContextMenuItem onSelect={() => setCookiesId(profile.id)}><Cookie className="size-4" />Cookies</ContextMenuItem>
+            <ContextMenuItem disabled={!canDelete || !!busy || locked(profile.id)} onSelect={() => setAction({ mode: "delete", ids: [profile.id] })}><Trash2 className="size-4" />В корзину</ContextMenuItem>
+          </ContextMenuContent></ContextMenu>;
         })}
         {!profiles.isPending && !profiles.isError && !rows.length && <TableRow><TableCell colSpan={columnCount} className="py-10 text-center text-sm text-muted-foreground">{search || folder !== ALL ? "По выбранным фильтрам профилей нет" : "Профилей пока нет"}</TableCell></TableRow>}
       </TableBody></Table>

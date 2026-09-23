@@ -43,6 +43,9 @@ beforeAll(async () => {
   `);
   const dir = fileURLToPath(new URL("../supabase/migrations/", import.meta.url));
   for (const file of (await readdir(dir)).filter((file) => file.endsWith(".sql")).sort()) {
+    // PGlite does not bundle pg_cron; the retention functions and RLS are
+    // tested here, while this extension-backed schedule is deployed on Supabase.
+    if (file === "20260924100000_enable_retention_cron.sql") continue;
     if (file.startsWith("20260919215434_")) {
       // Одноразовая миграция объединения команд привязана к реальным идентификаторам —
       // создаём целевую команду и суперадмина, как в рабочей базе.
@@ -62,6 +65,79 @@ beforeAll(async () => {
 afterAll(async () => { await db?.close(); });
 
 describe("real migrations and RLS", () => {
+  test("unfiled profiles require their own folder grant, separate from the default folder", async () => {
+    const legacyMember = crypto.randomUUID();
+    const legacyProfile = crypto.randomUUID();
+    await db.query("insert into auth.users(id, email, email_confirmed_at) values ($1, 'legacy@example.test', now())", [legacyMember]);
+    await db.query("insert into public.team_members(team_id, user_id, role) values ($1, $2, 'member')", [team, legacyMember]);
+    await db.query("insert into public.browser_profiles(id, team_id, name, folder) values ($1, $2, 'Unfiled', '')", [legacyProfile, team]);
+    try {
+      expect(await asUser(legacyMember, "select id from public.browser_profiles where id = $1", [legacyProfile])).toEqual([]);
+      await asUser(owner, "select public.set_folder_access($1, 'Основная', $2, true)", [team, legacyMember]);
+      expect(await asUser(legacyMember, "select id from public.browser_profiles where id = $1", [legacyProfile])).toEqual([]);
+      await asUser(owner, "select public.set_folder_access($1, '', $2, true)", [team, legacyMember]);
+      expect(await asUser(legacyMember, "select id from public.browser_profiles where id = $1", [legacyProfile])).toEqual([{ id: legacyProfile }]);
+      expect((await db.query<{ allowed: boolean }>("select private.can_access_profile($1, $2) as allowed", [legacyMember, legacyProfile])).rows).toEqual([{ allowed: true }]);
+      await asUser(owner, "select public.set_member_permissions($1, $2, false, true, false, false, false, false, false)", [team, legacyMember]);
+      expect(await asUser(legacyMember, "update public.browser_profiles set name = 'Updated' where id = $1 returning name", [legacyProfile])).toEqual([{ name: "Updated" }]);
+      expect((await db.query<{ folder: string }>("select folder from public.browser_profiles where id = $1", [legacyProfile])).rows[0]!.folder).toBe("");
+      await asUser(owner, "select public.set_folder_access($1, '', $2, false)", [team, legacyMember]);
+      expect(await asUser(legacyMember, "select id from public.browser_profiles where id = $1", [legacyProfile])).toEqual([]);
+    } finally {
+      await db.query("delete from public.browser_profiles where id = $1", [legacyProfile]);
+      await db.query("delete from public.team_members where team_id = $1 and user_id = $2", [team, legacyMember]);
+      await db.query("delete from auth.users where id = $1", [legacyMember]);
+    }
+  });
+
+  test("folder order is saved atomically and cannot include another team's folder", async () => {
+    const first = crypto.randomUUID();
+    const second = crypto.randomUUID();
+    const foreign = crypto.randomUUID();
+    await db.query("insert into public.profile_folders(id, team_id, name) values ($1, $2, 'First'), ($3, $2, 'Second'), ($4, $5, 'Foreign')", [first, team, second, foreign, otherTeam]);
+    await expect(asUser(owner, "select public.reorder_team_folders($1, $2::uuid[])", [team, [first, foreign]])).rejects.toThrow("Некорректный порядок");
+    await asUser(owner, "select public.reorder_team_folders($1, $2::uuid[])", [team, [second, first]]);
+    const order = await asUser<{ id: string }>(owner, "select id from public.profile_folders where team_id = $1 and id = any($2::uuid[]) order by position", [team, [first, second]]);
+    expect(order.map((row) => row.id)).toEqual([second, first]);
+    await expect(asUser(outsider, "select public.reorder_team_folders($1, $2::uuid[])", [team, [first, second]])).rejects.toThrow("Недостаточно прав");
+  });
+
+  test("trash hides profiles, preserves cookies, restores them, and purges after 14 days", async () => {
+    const id = crypto.randomUUID();
+    await db.query("insert into public.browser_profiles(id, team_id, name, cookies_enc) values ($1, $2, 'Trash test', 'encrypted')", [id, team]);
+    await asUser(owner, "select public.bulk_mutate_profiles($1, $2::uuid[], 'delete', '{}'::jsonb)", [team, [id]]);
+    expect(await asUser(owner, "select id from public.browser_profiles where id = $1", [id])).toEqual([]);
+    await expect(asUser(owner, "select public.acquire_profile_lease($1, 'desktop')", [id])).rejects.toThrow("No profile access");
+    expect(await asUser<{ id: string }>(owner, "select id from public.list_trashed_profiles($1)", [team])).toContainEqual({ id });
+    await expect(asUser(outsider, "select id from public.list_trashed_profiles($1)", [team])).rejects.toThrow("Нет доступа");
+    await asUser(owner, "select public.restore_trashed_profile($1, $2)", [team, id]);
+    expect(await asUser(owner, "select cookies_enc from public.browser_profiles where id = $1", [id])).toEqual([{ cookies_enc: "encrypted" }]);
+    await asUser(owner, "select public.bulk_mutate_profiles($1, $2::uuid[], 'delete', '{}'::jsonb)", [team, [id]]);
+    await db.query("update public.browser_profiles set deleted_at = now() - interval '15 days' where id = $1", [id]);
+    await asUser(owner, "select id from public.list_trashed_profiles($1)", [team]);
+    expect((await db.query("select id from public.browser_profiles where id = $1", [id])).rows).toEqual([]);
+  });
+
+  test("agent trash helper is service-only and cannot bypass active locks", async () => {
+    const id = crypto.randomUUID();
+    await db.query("insert into public.browser_profiles(id, team_id, name) values ($1, $2, 'Agent trash')", [id, team]);
+    await expect(asUser(owner, "select public.trash_agent_profile($1, $2)", [team, id])).rejects.toThrow("permission denied");
+    const serviceCall = () => db.transaction(async (tx) => {
+      await tx.exec("set local role service_role");
+      return (await tx.query("select public.trash_agent_profile($1, $2)", [team, id])).rows;
+    });
+    await serviceCall();
+    expect((await db.query<{ deleted_at: string | null }>("select deleted_at from public.browser_profiles where id = $1", [id])).rows[0]!.deleted_at).not.toBeNull();
+  });
+
+  test("team audit expires after two months and members cannot prune it", async () => {
+    const id = crypto.randomUUID();
+    await db.query("insert into public.audit_log(id, team_id, user_id, action, created_at) values ($1, $2, $3, 'old.test', now() - interval '3 months')", [id, team, owner]);
+    await expect(asUser(member, "select public.prune_team_audit_log($1)", [team])).rejects.toThrow("Недостаточно прав");
+    await asUser(owner, "select public.prune_team_audit_log($1)", [team]);
+    expect((await db.query("select id from public.audit_log where id = $1", [id])).rows).toEqual([]);
+  });
+
   test("granular team rights work for an ordinary employee, not only a manager", async () => {
     await expect(asUser(member, "update public.proxies set label = 'denied' where id = $1 returning id", [proxy])).resolves.toEqual([]);
     await expect(asUser(member, "select public.save_team_bookmark_defaults($1, '[]'::jsonb, true)", [team])).rejects.toThrow("Недостаточно прав");
@@ -149,7 +225,7 @@ describe("real migrations and RLS", () => {
   test("running profiles reject edits, imports and deletion, but accept a cookie save", async () => {
     const lease = await acquire();
     await expect(asUser(owner, "update public.browser_profiles set name = 'Changed' where id = $1", [profile])).rejects.toThrow("Close the profile");
-    await expect(asUser(owner, "delete from public.browser_profiles where id = $1", [profile])).rejects.toThrow("Close the profile");
+    await expect(asUser(owner, "delete from public.browser_profiles where id = $1", [profile])).rejects.toThrow("permission denied");
     await expect(asUser(owner, "select public.import_profile_cookies($1, 'encrypted')", [profile])).rejects.toThrow("Close the profile");
     await expect(asUser(owner, "update public.proxies set port = 9090 where id = $1", [proxy])).rejects.toThrow("Close profiles using this proxy");
     await asUser(owner, "update public.proxies set last_check_ok = true where id = $1", [proxy]);
@@ -216,3 +292,4 @@ describe("real migrations and RLS", () => {
     expect((await db.query<{ created_by: string | null }>("select created_by from public.browser_profiles where id = $1", [shared])).rows[0]!.created_by).toBeNull();
   });
 });
+

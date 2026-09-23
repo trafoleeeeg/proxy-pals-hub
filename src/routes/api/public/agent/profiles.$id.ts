@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
+import { callServerRpc } from "@/lib/server-db";
 import {
   AgentError,
   authenticateAgent,
@@ -25,6 +26,7 @@ async function ownedProfile(teamId: string, id: string) {
     .select("id")
     .eq("id", id)
     .eq("team_id", teamId)
+    .is("deleted_at", null)
     .maybeSingle();
   if (error) throw new AgentError(503, "Не удалось проверить профиль");
   if (!data) throw new AgentError(404, "Профиль не найден");
@@ -70,7 +72,7 @@ export const Route = createFileRoute("/api/public/agent/profiles/$id")({
             if (!proxy) throw new AgentError(400, "Прокси не найден в этой команде");
           }
 
-          const { error } = await db.from("browser_profiles").update(patch).eq("id", params.id);
+          const { error } = await db.from("browser_profiles").update(patch).eq("id", params.id).eq("team_id", agent.teamId).is("deleted_at", null);
           if (error) throw new AgentError(500, "Не удалось обновить профиль");
 
           await logAgentAction(agent, "profile.updated", "profile", params.id, patch);
@@ -87,8 +89,8 @@ export const Route = createFileRoute("/api/public/agent/profiles/$id")({
           await enforceRateLimit(agent);
 
           const db = await ownedProfile(agent.teamId, params.id);
-          const { error } = await db.from("browser_profiles").delete().eq("id", params.id);
-          if (error) throw new AgentError(500, "Не удалось удалить профиль");
+          try { await callServerRpc(db, "trash_agent_profile", { _team_id: agent.teamId, _profile_id: params.id }); }
+          catch { throw new AgentError(500, "Не удалось переместить профиль в корзину"); }
 
           await logAgentAction(agent, "profile.deleted", "profile", params.id);
           return jsonResponse({ ok: true });

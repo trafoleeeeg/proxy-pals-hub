@@ -12,6 +12,11 @@ type MigrationFunctions = {
   set_folder_access: Rpc<{ _team_id: string; _folder: string; _user_id: string; _granted: boolean }, boolean>;
   rename_team_folder: Rpc<{ _team_id: string; _folder_id: string; _name: string }, boolean>;
   delete_team_folder: Rpc<{ _team_id: string; _folder_id: string }, boolean>;
+  reorder_team_folders: Rpc<{ _team_id: string; _folder_ids: string[] }, boolean>;
+  prune_team_audit_log: Rpc<{ _team_id: string }, number>;
+  list_trashed_profiles: Rpc<{ _team_id: string }, Array<{ id: string; name: string; folder: string; deleted_at: string }>>;
+  restore_trashed_profile: Rpc<{ _team_id: string; _profile_id: string }, boolean>;
+  trash_agent_profile: Rpc<{ _team_id: string; _profile_id: string }, boolean>;
   transfer_profiles: Rpc<{ _team_id: string; _profile_ids: string[]; _folder: string; _user_id: null }, number>;
   set_member_permissions: Rpc<{ _team_id: string; _user_id: string; _create: boolean; _edit: boolean; _delete: boolean; _proxy: boolean; _folders: boolean; _proxies: boolean; _bookmarks: boolean }, boolean>;
   remove_team_member: Rpc<{ _team_id: string; _user_id: string }, boolean>;
@@ -26,9 +31,12 @@ type MigrationFunctions = {
 type ServerDatabase = Omit<Database, "public"> & {
   public: Omit<Database["public"], "Functions" | "Tables"> & {
     Functions: Database["public"]["Functions"] & MigrationFunctions;
-    Tables: Omit<Database["public"]["Tables"], "browser_profiles"> & {
+    Tables: Omit<Database["public"]["Tables"], "browser_profiles" | "profile_folders"> & {
       browser_profiles: Omit<Database["public"]["Tables"]["browser_profiles"], "Row"> & {
         Row: Database["public"]["Tables"]["browser_profiles"]["Row"] & { cookies_updated_at: string };
+      };
+      profile_folders: Omit<Database["public"]["Tables"]["profile_folders"], "Row"> & {
+        Row: Database["public"]["Tables"]["profile_folders"]["Row"] & { position: number };
       };
     };
   };

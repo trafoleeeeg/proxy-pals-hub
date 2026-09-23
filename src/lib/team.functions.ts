@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { acceptInviteSchema, inviteIdSchema, inviteSchema, employeeSchema, memberSchema, teamSchema, updateEmployeeSchema, workspaceSchema } from "./server-validation";
-import { callServerRpc, isSuperadmin, memberPermissions, requireTeamManager, PERMISSION_KEYS, type Permission, type PermissionMap, type ServerContext, type TeamScope } from "./server-db";
+import { callServerRpc, isSuperadmin, memberPermissions, requireTeamManager, requireTeamOwner, PERMISSION_KEYS, type Permission, type PermissionMap, type ServerContext, type TeamScope } from "./server-db";
 import { z } from "zod";
 
 export type Workspace = {
@@ -186,12 +186,18 @@ export const setMemberScope = createServerFn({ method: "POST" })
   });
 
 export const listAudit = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth]).inputValidator(teamSchema)
+  .middleware([requireSupabaseAuth]).inputValidator((input) => z.object({
+    teamId: z.string().uuid(), from: z.string().datetime().optional(), to: z.string().datetime().optional(),
+  }).strict().parse(input))
   .handler(async ({ data, context }) => {
     await requireTeamManager(context, data.teamId);
-    const { data: rows, error } = await context.supabase.from("audit_log")
+    await callServerRpc(context.supabase, "prune_team_audit_log", { _team_id: data.teamId });
+    let query = context.supabase.from("audit_log")
       .select("id, action, target_type, target_id, meta, created_at, user_id").eq("team_id", data.teamId)
-      .order("created_at", { ascending: false }).limit(200);
+      .order("created_at", { ascending: false }).limit(500);
+    if (data.from) query = query.gte("created_at", data.from);
+    if (data.to) query = query.lte("created_at", data.to);
+    const { data: rows, error } = await query;
     if (error) throw new Error(error.message);
     const ids = [...new Set((rows ?? []).flatMap((row) => row.user_id ? [row.user_id] : []))];
     const { data: people, error: peopleError } = ids.length
@@ -246,6 +252,59 @@ async function requireManagedEmployee(context: ServerContext, teamId: string, us
     .select("user_id, role").eq("team_id", teamId).eq("user_id", userId).maybeSingle();
   if (error || !data || data.role === "owner") throw new Error("Сотрудник не найден");
 }
+
+// The owner receives a real employee session, so every RLS and server-side
+// permission check sees the employee. Never use this for a cosmetic preview.
+export const startEmployeeSession = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth]).inputValidator(memberSchema)
+  .handler(async ({ data, context }) => {
+    await requireTeamOwner(context, data.teamId);
+    await requireManagedEmployee(context, data.teamId, data.userId);
+    const { data: person, error: personError } = await context.supabase.from("profiles")
+      .select("email").eq("id", data.userId).single();
+    if (personError || !person?.email) throw new Error("Учётная запись сотрудника не найдена");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const generated = await supabaseAdmin.auth.admin.generateLink({ type: "magiclink", email: person.email });
+    if (generated.error || !generated.data.properties.hashed_token || generated.data.user.id !== data.userId)
+      throw new Error("Не удалось подготовить вход под сотрудником");
+    const { createClient } = await import("@supabase/supabase-js");
+    const url = process.env["SUPABASE_URL"];
+    const key = process.env["SUPABASE_PUBLISHABLE_KEY"];
+    if (!url || !key) throw new Error("Сервис авторизации не настроен");
+    const authClient = createClient(url, key, {
+      global: { fetch: (input, init) => {
+        const headers = new Headers(typeof Request !== "undefined" && input instanceof Request ? input.headers : undefined);
+        if (init?.headers) new Headers(init.headers).forEach((value, name) => headers.set(name, value));
+        if ((key.startsWith("sb_publishable_") || key.startsWith("sb_secret_")) && headers.get("Authorization") === `Bearer ${key}`)
+          headers.delete("Authorization");
+        headers.set("apikey", key);
+        return fetch(input, { ...init, headers });
+      } },
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const verified = await authClient.auth.verifyOtp({ token_hash: generated.data.properties.hashed_token, type: "magiclink" });
+    const session = verified.data.session;
+    if (verified.error || !session || session.user.id !== data.userId)
+      throw new Error("Не удалось открыть сессию сотрудника");
+    const { error: auditError } = await context.supabase.from("audit_log").insert({
+      team_id: data.teamId, user_id: context.userId, action: "employee.impersonation_started",
+      target_type: "user", target_id: data.userId,
+    });
+    if (auditError) throw new Error("Не удалось записать вход в журнал");
+    return { accessToken: session.access_token, refreshToken: session.refresh_token, email: person.email, userId: data.userId };
+  });
+
+export const endEmployeeSession = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth]).inputValidator(memberSchema)
+  .handler(async ({ data, context }) => {
+    await requireTeamOwner(context, data.teamId);
+    const { error } = await context.supabase.from("audit_log").insert({
+      team_id: data.teamId, user_id: context.userId, action: "employee.impersonation_ended",
+      target_type: "user", target_id: data.userId,
+    });
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
 
 export const updateEmployee = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth]).inputValidator(updateEmployeeSchema)

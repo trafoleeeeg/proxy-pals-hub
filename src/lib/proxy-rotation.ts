@@ -13,7 +13,7 @@ export function rotationOutcome(previousIp: string | null, result: ProxyCheckRes
 }
 
 export async function confirmRotation({
-  previousIp, probe, record, wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), attempts = 16,
+  previousIp, probe, record, wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), attempts = 40,
 }: {
   previousIp: string;
   probe: () => Promise<ProxyCheckResult>;
@@ -25,8 +25,10 @@ export async function confirmRotation({
   // исходного, уже подтверждает смену. Дополнительная проверка удерживала
   // интерфейс в состоянии «меняем IP» до общего тайм-аута провайдера.
   for (let attempt = 0; attempt < attempts; attempt++) {
-    await wait(attempt === 0 ? 300 : 600);
-    const result = await probe();
+    await wait(attempt === 0 ? 300 : 900);
+    // A mobile modem may briefly drop the connection while switching IPs.
+    // Keep polling instead of treating one failed desktop probe as the result.
+    const result = await probe().catch(() => ({ ok: false as const }));
     const final = attempt === attempts - 1;
     const changedIp = result.ok && result.ip && result.ip !== previousIp ? result.ip : null;
     if (changedIp !== null) {

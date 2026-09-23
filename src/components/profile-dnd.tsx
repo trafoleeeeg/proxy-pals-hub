@@ -21,6 +21,7 @@ export function ProfileDragRow({ id, name, disabled, children, ...props }: { id:
     id: profileDragId(id), disabled, data: { label: name, kind: "profile" },
   });
   return <TableRow ref={setNodeRef} {...props} {...attributes} {...listeners}
+    role="row" aria-roledescription="Перетаскиваемый профиль"
     aria-label={`Профиль ${name}. Зажмите строку и перенесите в папку`}
     className={`${props.className ?? ""} ${disabled ? "" : "cursor-grab active:cursor-grabbing"} ${isDragging ? "opacity-35" : ""}`}
     style={{ ...props.style, touchAction: "pan-y" }}>{children}</TableRow>;

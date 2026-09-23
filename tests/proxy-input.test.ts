@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   DESKTOP_PROXY_CHECK_REQUIRED, PROXY_LIMITS, ProxyCheckQueue, normalizeProxyCheck,
-  normalizeProxyHost, parseProxyImport, parseProxyLine, parseProxyPort,
+  normalizeProxyHost, parseProxyBundle, parseProxyImport, parseProxyLine, parseProxyPort,
   performDesktopProxyCheck, proxyAddress, validateProxyFields, validateProxyInput,
   validateProxyTarget, validateProxyTeam, validateRotationUrl,
 } from "../src/lib/proxy-input";
@@ -12,6 +12,23 @@ const fields = { protocol: "http", host: "proxy.example", port: 8080 };
 const input = { ...fields, teamId, label: "Test proxy" };
 
 describe("proxy addresses and credentials", () => {
+  test("detects vendor-style protocol, credentials and rotation URL in one paste", () => {
+    const parsed = parseProxyBundle("socks5: proxy.example:1080:user:pass\nhttps://rotate.example/change?token=test&wait=1");
+    expect(parsed).toMatchObject({
+      protocol: "socks5", host: "proxy.example", port: 1080,
+      username: "user", password: "pass", rotationUrl: "https://rotate.example/change?token=test&wait=1",
+    });
+    expect(parseProxyBundle("http://user:pass@proxy.example:8080")).toMatchObject({
+      protocol: "http", host: "proxy.example", username: "user", password: "pass",
+    });
+    expect(parseProxyBundle("socks5: proxy.example:1080:user:pass\n[https://rotate.example/change?token=x](https://rotate.example/change?token=x\\&wait=1)")?.rotationUrl)
+      .toBe("https://rotate.example/change?token=x&wait=1");
+    expect(parseProxyBundle("proxy.example:8080\nproxy2.example:8080")).toBeNull();
+    expect(parseProxyBundle("proxy.example:8080\nhttps://proxy2.example:443")).toBeNull();
+    expect(parseProxyBundle("ordinary note")).toBeNull();
+    expect(() => parseProxyBundle("socks5: not a proxy\nhttps://rotate.example/change")).toThrow("Не удалось распознать");
+  });
+
   test.each([
     ["proxy.example:8080", "http", "proxy.example", 8080, "", ""],
     ["proxy.example:8080:login:pa:ss@word%25", "http", "proxy.example", 8080, "login", "pa:ss@word%25"],

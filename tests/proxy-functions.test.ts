@@ -436,4 +436,26 @@ describe("mobile proxy rotation", () => {
     await invoke("recordProxyCheck", { ...target, ok: true, ip: "1.2.3.6" }, f);
     expect(f.tables.proxies[0]).toMatchObject({ rotation_new_ip: "1.2.3.5", rotation_changed_at: changedAt });
   });
+  test("a later successful check reconciles a timed-out rotation", async () => {
+    const f = ready();
+    const requestedAt = new Date(Date.now() - 120_000).toISOString();
+    Object.assign(f.tables.proxies[0]!, {
+      rotation_status: "error", rotation_requested_at: requestedAt,
+      rotation_previous_ip: "1.2.3.4", rotation_last_error: "not_confirmed",
+    });
+    await invoke("recordProxyCheck", { ...target, ok: true, ip: "1.2.3.9" }, f);
+    expect(f.tables.proxies[0]).toMatchObject({
+      rotation_status: "success", rotation_previous_ip: "1.2.3.4",
+      rotation_new_ip: "1.2.3.9", rotation_last_error: null,
+    });
+  });
+  test("a later check with the old IP does not hide a failed rotation", async () => {
+    const f = ready();
+    Object.assign(f.tables.proxies[0]!, {
+      rotation_status: "error", rotation_requested_at: new Date(Date.now() - 120_000).toISOString(),
+      rotation_previous_ip: "1.2.3.4", rotation_last_error: "not_confirmed",
+    });
+    await invoke("recordProxyCheck", { ...target, ok: true, ip: "1.2.3.4" }, f);
+    expect(f.tables.proxies[0]!.rotation_status).toBe("error");
+  });
 });

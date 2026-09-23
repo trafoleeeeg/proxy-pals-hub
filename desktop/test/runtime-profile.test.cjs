@@ -91,7 +91,7 @@ function harness() {
       readState: async (id) => bookmarkRecords.get(id) || { bookmarks: [], barVisible: true },
       write: async (id, state) => { bookmarkRecords.set(id, structuredClone(state)); return structuredClone(state); },
     },
-    privacyStore: { read: async (id) => privacyRecords.get(id) || [], write: async (id, origins) => { privacyRecords.set(id, [...origins]); } },
+    privacyStore: { readPermissions: async (id) => privacyRecords.get(id) || {}, writePermissions: async (id, rules) => { privacyRecords.set(id, structuredClone(rules)); } },
   });
   return { runtime, windows, sessions, records, tabRecords, bookmarkRecords, get browserConfig() { return browserConfig; }, get configured() { return configured; }, get disposed() { return disposed; }, setFlushGate: (gate) => { flushGate = gate; }, setNavigationGate: (gate) => { navigationGate = gate; }, setSnapshotFailure: (value) => { snapshotFailure = value; } };
 }
@@ -105,15 +105,16 @@ test("privacy consent closes profile durably and applies to one origin after res
   const ses = h.sessions.get(`persist:profile-${ID}`);
   await ses.cookies.set({ url: "https://example.test/", name: "fixture", value: "persist-me" });
   assert.equal(h.browserConfig.getPrivacy("https://example.test/").allowed, false);
-  await h.browserConfig.setPrivacy("https://example.test", true);
+  await h.browserConfig.setPrivacy("https://example.test", ["workers"]);
   assert.equal(h.runtime.getRunningProfile(ID), null);
   assert.equal(closures.length, 1);
   assert.match(closures[0].cookies, /persist-me/);
   await h.runtime.launchProfileWindow(payload());
   assert.equal(h.browserConfig.getPrivacy("https://example.test/path").allowed, true);
+  assert.deepEqual(h.browserConfig.getPrivacy("https://example.test/path").permissions, ["workers"]);
   assert.equal(h.browserConfig.getPrivacy("https://sub.example.test/").allowed, false);
   assert.equal(h.browserConfig.getPrivacy("http://example.test/").allowed, false);
-  await h.browserConfig.setPrivacy("https://example.test", false);
+  await h.browserConfig.setPrivacy("https://example.test", []);
   await h.runtime.launchProfileWindow(payload());
   assert.equal(h.browserConfig.getPrivacy("https://example.test").allowed, false);
   await h.runtime.closeAllProfiles();

@@ -2,6 +2,7 @@ const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 const { EventEmitter } = require("node:events");
 const { startUrl, bookmarkletUrl } = require("./validation.cjs");
+const { PRIVACY_CAPABILITIES } = require("./privacy-policy.cjs");
 const { browserUrl } = require("./browser-ui.cjs");
 
 const CHROME_HEIGHT = 90;
@@ -300,8 +301,11 @@ async function createProfileBrowser(electron, {
         const url = tab?.webContents.getURL() || "";
         const privacy = getPrivacy(url);
         // Bind consent to the selected tab/origin, not a renderer-supplied URL.
-        if (!privacy.origin || message.origin !== privacy.origin || message.tabId !== tab?.id || typeof message.allowed !== "boolean") throw new Error("Страница изменилась. Откройте настройки защиты повторно");
-        await setPrivacy(privacy.origin, message.allowed);
+        if (!privacy.origin || message.origin !== privacy.origin || message.tabId !== tab?.id
+          || !Array.isArray(message.permissions) || message.permissions.length > PRIVACY_CAPABILITIES.length
+          || message.permissions.some((item) => !PRIVACY_CAPABILITIES.includes(item))
+          || new Set(message.permissions).size !== message.permissions.length) throw new Error("Страница изменилась. Откройте настройки защиты повторно");
+        await setPrivacy(privacy.origin, message.permissions);
         break;
       }
       case "new": bookmarksOpen = false; proxiesOpen = false; await openTab("about:blank"); focusAddress(); break;

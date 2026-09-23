@@ -21,7 +21,9 @@ export function fingerprintError(fp: Fingerprint): string | null {
   if (!Number.isInteger(fp.hardwareConcurrency) || fp.hardwareConcurrency < 1 || fp.hardwareConcurrency > 128) return "Количество ядер: от 1 до 128.";
   if (![1, 2, 4, 8].includes(fp.deviceMemory)) return "Выберите объём памяти: 1, 2, 4 или 8 ГБ.";
   if (!fp.userAgent.trim() || fp.userAgent.length > 1024 || /[\r\n\0]/.test(fp.userAgent)) return "Укажите корректный User-Agent до 1024 символов без переносов строк.";
-  if (!fp.userAgent.includes("Windows NT 10.0")) return "Для Windows 10 и 11 User-Agent должен содержать Windows NT 10.0.";
+  if (fp.os === "macos") {
+    if (fp.platform !== "MacIntel" || !fp.userAgent.includes("Macintosh; Intel Mac OS X")) return "Для macOS нужны платформа MacIntel и User-Agent Macintosh.";
+  } else if (fp.platform !== "Win32" || !fp.userAgent.includes("Windows NT 10.0")) return "Для Windows 10 и 11 нужны платформа Win32 и User-Agent Windows NT 10.0.";
   if (fp.startUrl) {
     try { const url = new URL(fp.startUrl); if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) return "Стартовый адрес: HTTP или HTTPS без учётных данных."; }
     catch { return "Укажите полный стартовый адрес HTTP или HTTPS."; }

@@ -72,6 +72,7 @@ async function createProfileBrowser(electron, {
   // Меню и всплывающие панели рисуются поверх снимка страницы, а не сдвигают
   // её вниз: страница остаётся на месте, как в Chrome.
   let overlayOpen = false;
+  let overlayRevision = 0;
   let pageSnapshot = "";
   let ready = false;
   let error = "";
@@ -129,29 +130,39 @@ async function createProfileBrowser(electron, {
   // Снимок делается один раз при открытии панели: страница перестаёт
   // показываться, но визуально остаётся на месте и не прыгает.
   async function setOverlay(open) {
+    const revision = ++overlayRevision;
     const next = open === true;
     if (next === overlayOpen) return;
-    pageSnapshot = "";
+    let snapshot = "";
     if (next) {
       const tab = active();
       if (tab && !isStartPage(tab) && !bookmarksOpen && !proxiesOpen) {
         try {
           const image = await tab.webContents.capturePage?.();
-          if (image && !(image.isEmpty?.() === true)) pageSnapshot = image.toDataURL();
-        } catch { pageSnapshot = ""; }
+          if (image && !(image.isEmpty?.() === true)) snapshot = image.toDataURL();
+        } catch { snapshot = ""; }
       }
     }
+    if (revision !== overlayRevision || shell.isDestroyed()) return;
+    pageSnapshot = snapshot;
     overlayOpen = next;
     layout();
     flushPublish();
   }
+  const viewLayouts = new WeakMap();
   function layout() {
     if (shell.isDestroyed()) return;
     const { width, height } = shell.getContentBounds();
     for (const tab of tabs.values()) {
       const top = chromeHeight;
-      tab.view.setBounds({ x: 0, y: top, width: Math.max(1, width), height: Math.max(1, height - top) });
-       tab.view.setVisible(tab.id === activeId && !isStartPage(tab) && !bookmarksOpen && !proxiesOpen && !overlayOpen);
+      const bounds = { x: 0, y: top, width: Math.max(1, width), height: Math.max(1, height - top) };
+      const visible = tab.id === activeId && !isStartPage(tab) && !bookmarksOpen && !proxiesOpen && !overlayOpen;
+      const previous = viewLayouts.get(tab.view);
+      // События title/loading/favicon не должны повторно менять native bounds
+      // всех вкладок: это лишняя работа compositor и рывки при переключении.
+      if (!previous || previous.y !== bounds.y || previous.width !== bounds.width || previous.height !== bounds.height) tab.view.setBounds(bounds);
+      if (!previous || previous.visible !== visible) tab.view.setVisible(visible);
+      viewLayouts.set(tab.view, { ...bounds, visible });
     }
     positionExtensionPopup();
   }
@@ -253,6 +264,8 @@ async function createProfileBrowser(electron, {
   function select(tab) {
     if (shell.isDestroyed() || !tab || tab.isDestroyed()) return;
     closeExtensionPopup();
+    overlayRevision++;
+    bookmarksOpen = false; proxiesOpen = false; overlayOpen = false; pageSnapshot = "";
     activeId = tab.id; layout();
     // Do not let focusing a tab reveal the shell while profiles are still
     // initializing (or while a native test deliberately keeps it hidden).
@@ -271,7 +284,7 @@ async function createProfileBrowser(electron, {
     }
     target.emit("close", { preventDefault() {} });
   }
-  const KEEPS_EXTENSION_POPUP = new Set(["open-extension", "state", "chrome-height", "chrome-overlay-height", "overlay", "preconnect"]);
+  const KEEPS_EXTENSION_POPUP = new Set(["open-extension", "state", "chrome-height", "chrome-overlay-height", "overlay"]);
   async function command(message) {
     if (destroyed || !message || typeof message !== "object") return;
     error = "";
@@ -283,6 +296,12 @@ async function createProfileBrowser(electron, {
       case "state": break;
       case "new": bookmarksOpen = false; proxiesOpen = false; await openTab("about:blank"); focusAddress(); break;
       case "home": bookmarksOpen = false; proxiesOpen = false; select(homeTab()); break;
+      case "focus-page":
+        if (show && shell.isVisible() && tab && !tab.isDestroyed()) {
+          if (isStartPage(tab) || bookmarksOpen || proxiesOpen || overlayOpen) shell.webContents.focus();
+          else tab.webContents.focus();
+        }
+        return;
       case "show-bookmarks": bookmarksOpen = true; proxiesOpen = false; layout(); break;
       case "hide-bookmarks": bookmarksOpen = false; layout(); break;
       case "show-proxies": proxiesOpen = true; bookmarksOpen = false; layout(); void checkConnection(); void command({ action: "check-leaks" }); break;
@@ -428,23 +447,13 @@ async function createProfileBrowser(electron, {
         await setOverlay(Math.round(Number(message.value) || 0) > 0);
         return;
       }
-      // Заранее открываем соединение с сайтом, пока пользователь ещё вводит
-      // адрес или наводится на закладку — страница начинает грузиться быстрее.
-      case "preconnect": {
-        const host = String(message.host || "").toLowerCase();
-        if (/^[a-z\d][a-z\d.-]{2,253}$/.test(host) && host.includes(".")) {
-          try { void session.fromPartition(partition).resolveHost?.(host)?.catch?.(() => {}); }
-          catch { /* предзагрузка не обязательна */ }
-        }
-        return;
-      }
       case "chrome-height": {
         const next = Number(message.value);
         const rounded = Math.round(next);
         if (Number.isFinite(next) && rounded >= 80 && rounded <= 180 && rounded !== chromeHeight) { chromeHeight = rounded; layout(); }
         return;
       }
-      case "navigate": if (tab) { bookmarksOpen = false; proxiesOpen = false; tab.error = ""; const url = addressUrl(message.value); if (isHome(tab)) await openTab(url); else void tab.loadURL(url).catch(() => {}); } break;
+      case "navigate": if (tab) { bookmarksOpen = false; proxiesOpen = false; tab.error = ""; const url = addressUrl(message.value); if (isHome(tab) || message.newTab === true) await openTab(url); else void tab.loadURL(url).catch(() => {}); } break;
       case "back": if (tab?.webContents.navigationHistory.canGoBack()) tab.webContents.navigationHistory.goBack(); break;
       case "forward": if (tab?.webContents.navigationHistory.canGoForward()) tab.webContents.navigationHistory.goForward(); break;
       case "reload": if (tab) { tab.error = ""; if (tab.webContents.isLoading()) tab.webContents.stop(); else tab.webContents.reload(); } break;

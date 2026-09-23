@@ -19,8 +19,9 @@ const startUrl = text(4096).url().refine((value) => {
 }, "Only HTTP(S) URLs without credentials are allowed");
 
 export const fingerprintSchema = z.object({
-  os: z.literal("windows"),
-  osVersion: text(32).min(1),
+  os: z.enum(["windows", "macos"]),
+  architecture: z.enum(["x86", "arm"]).optional(),
+  osVersion: z.string().regex(/^\d{1,2}(?:\.\d{1,3}){0,2}$/, "Invalid operating system version"),
   chromeVersion: z.string().regex(/^\d{1,4}(\.\d{1,6}){0,3}$/),
   userAgent: text(1024).min(1).refine((s) => !/[\r\n]/.test(s), "Invalid user agent"),
   platform: text(64).min(1),

@@ -12,7 +12,7 @@ function applyDocumentFingerprint(fp) {
   define(screen, "width", fp.screen.width);
   define(screen, "height", fp.screen.height);
   define(screen, "availWidth", fp.screen.width);
-  define(screen, "availHeight", Math.max(1, fp.screen.height - 40));
+  define(screen, "availHeight", Math.max(1, fp.screen.height - (fp.os === "macos" ? 25 : 40)));
   define(screen, "colorDepth", fp.screen.colorDepth);
   define(screen, "pixelDepth", fp.screen.colorDepth);
   for (const ctor of [globalThis.WebGLRenderingContext, globalThis.WebGL2RenderingContext]) {
@@ -96,6 +96,11 @@ function applyDocumentFingerprint(fp) {
         return original.call(this, options);
       };
     }
+  }
+  // Profile sessions deny microphone/camera access. Do not still expose the
+  // number and stable identifiers of attached devices through enumeration.
+  if (navigator.mediaDevices && typeof navigator.mediaDevices.enumerateDevices === "function") {
+    navigator.mediaDevices.enumerateDevices = function () { return Promise.resolve([]); };
   }
   // This document-level switch supplements the native non-proxied UDP policy.
   if (fp.webrtc === "disabled") {

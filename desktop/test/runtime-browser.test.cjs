@@ -9,6 +9,7 @@ function harness() {
   const stateEvents = [];
   const views = [];
   let layoutCount = 0;
+  let visibilityCount = 0;
   let bookmarks = [];
   const importedCookies = [];
   let extensions = [{ id: "aaaaaaaaaaaaaaaaaaaaaaaa", name: "Тест", version: "1.0", pinned: false }];
@@ -43,7 +44,7 @@ function harness() {
     focus() {}
     destroy() { this.emit("closed"); }
   }
-  class View { constructor() { this.webContents = new Contents(); } setBounds(bounds) { this.bounds = bounds; layoutCount++; } setVisible(value) { this.visible = value; } }
+  class View { constructor() { this.webContents = new Contents(); } setBounds(bounds) { this.bounds = bounds; layoutCount++; } setVisible(value) { this.visible = value; visibilityCount++; } }
   const ipcMain = { handle(_channel, callback) { handler = callback; }, removeHandler() {} };
   const electron = {
     BrowserWindow: Shell, WebContentsView: View, ipcMain,
@@ -76,7 +77,7 @@ function harness() {
     await openTab("https://one.example/");
     await openTab("https://two.example/");
     const event = { sender: browser.shell.webContents, senderFrame: browser.shell.webContents.mainFrame };
-    return { browser, command: (message) => handler(event, message), stateEvents, changed, views, getBookmarks: () => bookmarks, importedCookies, layoutCount: () => layoutCount };
+    return { browser, command: (message) => handler(event, message), stateEvents, changed, views, getBookmarks: () => bookmarks, importedCookies, layoutCount: () => layoutCount, visibilityCount: () => visibilityCount };
   };
   return { start };
 }
@@ -221,11 +222,11 @@ test("shell popovers show over a page snapshot instead of pushing the page down"
   h.browser.destroy();
 });
 
-test("browser resolves a host in advance for the address bar", async () => {
-  const h = await harness().start();
-  await h.command({ action: "preconnect", host: "example.com" });
-  assert.equal(h.stateEvents.at(-1).overlay, false);
-  h.browser.destroy();
+test("browser does not resolve typed or hovered hosts outside a page navigation", () => {
+  const source = require("node:fs").readFileSync(require.resolve("../runtime/browser.cjs"), "utf8");
+  const chrome = decodeURIComponent(browserUrl().split(",", 2)[1]);
+  assert.ok(!source.includes("resolveHost"));
+  assert.ok(!chrome.includes('action: "preconnect"'));
 });
 
 test("browser UI contains a dedicated bookmark manager, search and compact zoom controls", () => {
@@ -237,11 +238,72 @@ test("browser UI contains a dedicated bookmark manager, search and compact zoom 
   assert.match(source, /id="pinned-extensions"/);
   assert.match(source, /action: "overlay"/);
   assert.match(source, /id="page-snapshot"/);
-  assert.match(source, /action: "preconnect"/);
   assert.match(source, /action: "pin-extension"/);
   assert.match(source, /id="cookie-file"/);
   assert.match(source, /data-local="cookie-import"/);
   assert.match(source, /action: "import-cookies"/);
+});
+
+test("loading and title updates do not resize every native page or repeat its visibility", async () => {
+  const h = await harness().start();
+  await h.command({ action: "state" });
+  const layouts = h.layoutCount();
+  const visibility = h.visibilityCount();
+  h.views.at(-1).webContents.loading = true;
+  await h.command({ action: "state" });
+  assert.equal(h.stateEvents.at(-1).tabs.at(-1).loading, true);
+  assert.equal(h.layoutCount(), layouts);
+  assert.equal(h.visibilityCount(), visibility);
+  await h.command({ action: "select", id: h.stateEvents.at(-1).tabs[0].id });
+  assert.equal(h.layoutCount(), layouts);
+  assert.equal(h.visibilityCount(), visibility + 2, "меняются только скрытая и показанная страницы");
+  h.browser.destroy();
+});
+
+test("switching tabs closes a stale popover snapshot and restores the selected page", async () => {
+  const h = await harness().start();
+  await h.command({ action: "overlay", value: true });
+  await h.command({ action: "select", id: h.stateEvents.at(-1).tabs[0].id });
+  assert.equal(h.stateEvents.at(-1).overlay, false);
+  assert.equal(h.stateEvents.at(-1).pageSnapshot, "");
+  assert.equal(h.views[0].visible, true);
+  assert.equal(h.views[1].visible, false);
+  h.browser.destroy();
+});
+
+test("Alt+Enter navigation preserves the current page and pinned home", async () => {
+  const h = await harness().start({ withHome: true });
+  const before = h.browser.getTabSnapshot().tabs;
+  await h.command({ action: "navigate", value: "https://new.example/", newTab: true });
+  assert.deepEqual(h.browser.getTabSnapshot().tabs, [...before, "https://new.example/"]);
+  assert.equal(h.stateEvents.at(-1).tabs.filter((tab) => tab.pinnedHome).length, 1);
+  assert.equal(h.stateEvents.at(-1).activeId, h.stateEvents.at(-1).tabs.at(-1).id);
+  h.browser.destroy();
+});
+
+test("a late page capture cannot cover the page after switching tabs", async () => {
+  const h = await harness().start();
+  let resolveCapture;
+  h.views.at(-1).webContents.capturePage = () => new Promise((resolve) => { resolveCapture = resolve; });
+  const opening = h.command({ action: "overlay", value: true });
+  await h.command({ action: "select", id: h.stateEvents.at(-1).tabs[0].id });
+  resolveCapture({ isEmpty: () => false, toDataURL: () => "data:image/png;base64,old" });
+  await opening;
+  assert.equal(h.stateEvents.at(-1).overlay, false);
+  assert.equal(h.views[0].visible, true);
+  h.browser.destroy();
+});
+
+test("Chrome-like tab feedback is keyboard accessible and respects reduced motion", () => {
+  const source = decodeURIComponent(browserUrl().split(",", 2)[1]);
+  assert.match(source, /prefers-reduced-motion: ?reduce/);
+  assert.match(source, /animation:none!important;transition:none!important/);
+  assert.match(source, /aria-busy/);
+  assert.match(source, /tab-spinner/);
+  assert.match(source, /node\.select\.tabIndex = tab\.id === state\.activeId \? 0 : -1/);
+  assert.match(source, /event\.key === "ArrowRight"/);
+  assert.match(source, /scrollIntoView/);
+  assert.match(source, /action: "focus-page"/);
 });
 
 test("browser keeps quick tab actions outside the slow command queue", () => {

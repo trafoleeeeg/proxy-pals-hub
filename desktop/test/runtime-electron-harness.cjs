@@ -190,7 +190,9 @@ if (process.versions.electron) {
     const a = runtime.launchProfileWindow(payload(), onClosed);
     const duplicate = runtime.launchProfileWindow(payload(), onClosed);
     assert.strictEqual(a, duplicate);
-    await Promise.all([a, runtime.launchProfileWindow(payload(SECOND, "b"), onClosed)]);
+    const macPayload = payload(SECOND, "b");
+    macPayload.fingerprint = { ...macPayload.fingerprint, os: "macos", osVersion: "15.0.0", platform: "MacIntel", architecture: "arm", webrtc: "disabled", screen: { width: 1512, height: 982, colorDepth: 24 } };
+    await Promise.all([a, runtime.launchProfileWindow(macPayload, onClosed)]);
     assert.equal(runtime.listRunningProfiles().length, 2);
     assert.ok(auth.a > 0 && auth.b > 0);
     const ses = session.fromPartition(`persist:profile-${ID}`);
@@ -218,6 +220,25 @@ if (process.versions.electron) {
     const hints = await win.webContents.executeJavaScript("navigator.userAgentData.getHighEntropyValues(['fullVersionList','platformVersion'])");
     assert.equal(hints.fullVersionList.find((brand) => brand.brand === "Chromium").version, process.versions.chrome);
     assert.equal(hints.platformVersion, "13.0.0");
+    assert.equal(await win.webContents.executeJavaScript("matchMedia('(device-width: 1920px)').matches"), true);
+    assert.equal(await win.webContents.executeJavaScript("navigator.mediaDevices.enumerateDevices().then(devices => devices.length)"), 0);
+    const macSession = session.fromPartition(`persist:profile-${SECOND}`);
+    const macView = profileTabs(macSession).find((view) => view.webContents.getURL().endsWith(SECOND));
+    const macIdentity = await macView.webContents.executeJavaScript(`(async () => ({
+      platform: navigator.platform, ua: navigator.userAgent,
+      hints: await navigator.userAgentData.getHighEntropyValues(['architecture', 'platformVersion']),
+      screenMatch: matchMedia('(device-width: 1512px)').matches,
+      webrtc: typeof RTCPeerConnection,
+      geolocation: await new Promise(resolve => navigator.geolocation.getCurrentPosition(() => resolve('allowed'), error => resolve(error.code), {timeout: 2000})),
+    }))()`);
+    assert.equal(macIdentity.platform, "MacIntel");
+    assert.match(macIdentity.ua, /Macintosh; Intel Mac OS X 10_15_7/);
+    assert.equal(macIdentity.hints.platform, "macOS");
+    assert.equal(macIdentity.hints.platformVersion, "15.0.0");
+    assert.equal(macIdentity.hints.architecture, "arm");
+    assert.equal(macIdentity.screenMatch, true);
+    assert.equal(macIdentity.webrtc, "undefined");
+    assert.equal(macIdentity.geolocation, 1);
     const firstRequest = hits.find((hit) => hit.path === `/${ID}`);
     assert.equal(firstRequest.ua, first.ua); assert.ok(firstRequest.language.startsWith("de-DE"));
     assert.equal(win.webContents.getWebRTCIPHandlingPolicy(), "disable_non_proxied_udp");
@@ -281,6 +302,17 @@ if (process.versions.electron) {
     await waitUntil(() => httpHits.includes("/from-toolbar") && !fresh.webContents.isLoading());
     assert.ok(fresh.webContents.getURL().startsWith("http://127.0.0.1:"));
     assert.equal(await shell.webContents.executeJavaScript("document.getElementById('home').hidden"), true);
+    const chromeInteraction = await shell.webContents.executeJavaScript(`(() => {
+      const selected = document.querySelector('[role="tab"][aria-selected="true"]');
+      selected.focus(); selected.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+      const homeFocused = document.activeElement.closest('.pinned-home') !== null;
+      const rovingCount = document.querySelectorAll('[role="tab"][tabindex="0"]').length;
+      const address = document.getElementById('address'); address.focus(); address.click();
+      return { homeFocused, rovingCount, selectedAddress: address.selectionEnd - address.selectionStart === address.value.length,
+        stickyHome: getComputedStyle(document.querySelector('.pinned-home')).position,
+        hasSpinner: !!selected.querySelector('.tab-spinner') };
+    })()`);
+    assert.deepEqual(chromeInteraction, { homeFocused: true, rovingCount: 1, selectedAddress: true, stickyHome: "sticky", hasSpinner: true });
     await navigateFromToolbar(`http://127.0.0.1:${plain.port}/second-page`);
     await waitUntil(() => httpHits.includes("/second-page") && !fresh.webContents.isLoading());
     await shell.webContents.executeJavaScript("document.getElementById('back').click()");

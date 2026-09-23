@@ -300,6 +300,7 @@ async function createProfileBrowser(electron, {
       case "set-site-privacy": {
         const url = tab?.webContents.getURL() || "";
         const privacy = getPrivacy(url);
+        if (privacy.mode === "normal") throw new Error("В обычном режиме аппаратные API уже доступны. Включите агрессивную блокировку в настройках профиля");
         // Bind consent to the selected tab/origin, not a renderer-supplied URL.
         if (!privacy.origin || message.origin !== privacy.origin || message.tabId !== tab?.id
           || !Array.isArray(message.permissions) || message.permissions.length > PRIVACY_CAPABILITIES.length

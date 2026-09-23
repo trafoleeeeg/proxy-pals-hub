@@ -99,6 +99,19 @@ test("privacy consent is bound to the actual selected tab and origin", async () 
   h.browser.destroy();
 });
 
+test("normal mode rejects per-site privacy changes at the shell command boundary", async () => {
+  const calls = [];
+  const h = await harness().start({ privacy: {
+    getPrivacy: (url) => ({ origin: url.startsWith("https:") ? new URL(url).origin : "", mode: "normal", allowed: true, permissions: ["gpu", "canvas", "audio", "fonts", "workers"] }),
+    setPrivacy: async (...args) => { calls.push(args); },
+  } });
+  const state = h.stateEvents.at(-1);
+  const result = await h.command({ action: "set-site-privacy", origin: "https://two.example", tabId: state.activeId, permissions: ["workers"] });
+  assert.ok(result.error, "the shell must reject per-site changes in normal mode");
+  assert.deepEqual(calls, []);
+  h.browser.destroy();
+});
+
 test("browser commands reorder tabs, preserve active tab and restore a closed tab", async () => {
   const h = await harness().start();
   let snapshot = h.browser.getTabSnapshot();

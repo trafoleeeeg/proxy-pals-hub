@@ -38,6 +38,7 @@ export const fingerprintSchema = z.object({
   audioNoise: z.number().int().min(0).max(2147483647),
   webrtc: z.enum(["disabled", "proxy"]),
   doNotTrack: z.boolean(),
+  aggressivePrivacyMode: z.boolean().default(true),
   startUrl: startUrl.optional(),
 }).strict();
 

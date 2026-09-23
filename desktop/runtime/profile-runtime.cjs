@@ -199,10 +199,14 @@ function createProfileRuntime(electron, options = {}) {
       getZoomLevel: () => entry.zoomLevel || 0,
       getPrivacy: (url) => {
         const origin = privacyOrigin(url);
+        if (entry.fp.aggressivePrivacyMode === false) {
+          return { origin, mode: "normal", allowed: true, permissions: ["gpu", "canvas", "audio", "workers"] };
+        }
         const permissions = origin ? entry.fp.hardwarePermissions?.[origin] || [] : [];
-        return { origin, allowed: permissions.length > 0, permissions };
+        return { origin, mode: "strict", allowed: permissions.length > 0, permissions };
       },
       setPrivacy: async (origin, permissions) => {
+        if (entry.fp.aggressivePrivacyMode === false) throw new Error("В обычном режиме аппаратные API уже доступны. Режим меняется в настройках профиля");
         if (!origin || privacyOrigin(origin) !== origin) throw new Error("Откройте сайт для настройки защиты");
         const rules = { ...entry.fp.hardwarePermissions };
         if (permissions.length) rules[origin] = permissions;
@@ -647,8 +651,13 @@ function createProfileRuntime(electron, options = {}) {
         blockSession(entry.ses);
         // Install guards before opening the proxy gate: service workers from
         // an existing partition must never inherit default device permissions.
-        entry.ses.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
-        entry.ses.setPermissionCheckHandler(() => false);
+        const localFontsAllowed = (permission, url) => {
+          if (permission !== "local-fonts" || entry.fp?.aggressivePrivacyMode === false) return false;
+          const origin = privacyOrigin(url);
+          return !!origin && entry.fp?.hardwarePermissions?.[origin]?.includes("fonts") === true;
+        };
+        entry.ses.setPermissionRequestHandler((_wc, permission, callback, details) => callback(localFontsAllowed(permission, details?.requestingUrl)));
+        entry.ses.setPermissionCheckHandler((_wc, permission, requestingOrigin) => localFontsAllowed(permission, requestingOrigin));
         entry.ses.setDevicePermissionHandler(() => false);
         entry.ses.setDisplayMediaRequestHandler((_request, callback) => callback({}));
         const extensionApi = entry.ses.extensions || entry.ses;
@@ -659,7 +668,7 @@ function createProfileRuntime(electron, options = {}) {
         // Remove only background worker registrations before opening the network
         // gate. Old workers must not execute with a revoked/missing exception.
         // Cookies, localStorage, IndexedDB and cache storage remain intact.
-        if (entry.ses.clearStorageData) await entry.ses.clearStorageData({ storages: ["serviceworkers"] });
+        if (entry.fp.aggressivePrivacyMode && entry.ses.clearStorageData) await entry.ses.clearStorageData({ storages: ["serviceworkers"] });
         if (entry.ses.webRequest.onBeforeSendHeaders) installSessionPrivacy(entry.ses, entry.fp);
         entry.ses.setUserAgent(entry.fp.userAgent, entry.fp.languages.join(","));
         // Warm the browser chrome while the authenticated proxy and cookies are

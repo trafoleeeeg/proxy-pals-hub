@@ -68,6 +68,15 @@ test("memory stays within Chromium buckets and invalid identity fields fail clos
   }
 });
 
+test("legacy profiles retain strict API blocking while new normal-mode profiles opt out explicitly", () => {
+  assert.equal(fingerprint().aggressivePrivacyMode, true, "a missing field must preserve legacy protection");
+  assert.equal(fingerprint({ aggressivePrivacyMode: true }).aggressivePrivacyMode, true);
+  assert.equal(fingerprint({ aggressivePrivacyMode: false }).aggressivePrivacyMode, false);
+  for (const value of [null, 0, 1, "false", "true", {}, []]) {
+    assert.throws(() => fingerprint({ aggressivePrivacyMode: value }), /Invalid fingerprint/);
+  }
+});
+
 function webContents({ policy = "disable_non_proxied_udp", reject = null } = {}) {
   const commands = [];
   let detached = false;
@@ -112,4 +121,36 @@ test("document privacy hides attached media-device identities and supports macOS
   assert.equal((await context.navigator.mediaDevices.enumerateDevices()).length, 0);
   assert.equal(context.screen.availHeight, 957);
   assert.equal(context.RTCPeerConnection, undefined);
+});
+
+test("document script blocks hardware APIs only in strict mode", async () => {
+  async function probe(aggressivePrivacyMode) {
+    const wc = webContents();
+    await applyFingerprint(wc, fingerprint({ aggressivePrivacyMode }));
+    const source = wc.commands.find((item) => item.command === "Page.addScriptToEvaluateOnNewDocument").args.source;
+    class CanvasContext {
+      getImageData() { return { data: new Uint8ClampedArray(4), width: 1, height: 1 }; }
+    }
+    class Canvas {
+      getContext(type) { return type === "webgl" ? {} : new CanvasContext(); }
+    }
+    const context = vm.createContext({
+      origin: "https://example.test", navigator: { serviceWorker: {} }, screen: {},
+      HTMLCanvasElement: Canvas, CanvasRenderingContext2D: CanvasContext,
+      AudioContext: class {}, SharedWorker: class {}, DOMException,
+    });
+    vm.runInContext(source, context);
+    let canvasBlocked = false;
+    try { new context.CanvasRenderingContext2D().getImageData(0, 0, 1, 1); }
+    catch (error) { canvasBlocked = error.name === "SecurityError"; }
+    return {
+      gpuBlocked: new context.HTMLCanvasElement().getContext("webgl") === null,
+      canvasBlocked,
+      audioBlocked: context.AudioContext === undefined,
+      sharedBlocked: context.SharedWorker === undefined,
+      serviceBlocked: context.navigator.serviceWorker === undefined,
+    };
+  }
+  assert.deepEqual(await probe(true), { gpuBlocked: true, canvasBlocked: true, audioBlocked: true, sharedBlocked: true, serviceBlocked: true });
+  assert.deepEqual(await probe(false), { gpuBlocked: false, canvasBlocked: false, audioBlocked: false, sharedBlocked: false, serviceBlocked: false });
 });

@@ -15,9 +15,10 @@ function applyDocumentFingerprint(fp) {
   // Never inherit an exception from the top frame or a wildcard. Opaque
   // documents (data:, sandboxed frames) stay restricted.
   const origin = globalThis.origin || globalThis.location?.origin;
+  const strict = fp.aggressivePrivacyMode !== false;
   const legacyAllowed = origin && origin !== "null" && !fp.hardwarePermissions && fp.hardwareOrigins?.includes(origin) === true;
   const grants = origin && origin !== "null" ? fp.hardwarePermissions?.[origin] : null;
-  const allowed = (capability) => legacyAllowed || (Array.isArray(grants) && grants.includes(capability));
+  const allowed = (capability) => !strict || legacyAllowed || (Array.isArray(grants) && grants.includes(capability));
   if (!allowed("gpu")) {
     define(nav, "gpu", undefined);
     for (const ctor of [globalThis.HTMLCanvasElement, globalThis.OffscreenCanvas]) {
@@ -55,7 +56,7 @@ function applyDocumentFingerprint(fp) {
     define(screenProto, "colorDepth", fp.screen.colorDepth);
     define(screenProto, "pixelDepth", fp.screen.colorDepth);
   }
-  for (const ctor of [globalThis.WebGLRenderingContext, globalThis.WebGL2RenderingContext]) {
+  for (const ctor of strict ? [globalThis.WebGLRenderingContext, globalThis.WebGL2RenderingContext] : []) {
     if (!ctor) continue;
     const original = ctor.prototype.getParameter;
     ctor.prototype.getParameter = function (parameter) {
@@ -69,7 +70,7 @@ function applyDocumentFingerprint(fp) {
     value = Math.imul(value ^ (value >>> 16), 0x45d9f3b) >>> 0;
     return (value & 1) ? 1 : -1;
   };
-  if (allowed("canvas") && fp.canvasNoise && globalThis.CanvasRenderingContext2D) {
+  if (strict && allowed("canvas") && fp.canvasNoise && globalThis.CanvasRenderingContext2D) {
     const originalGet = CanvasRenderingContext2D.prototype.getImageData;
     const perturb = (data, width, height) => {
       // Fingerprint probes use small synthetic canvases. Never rewrite large
@@ -103,7 +104,7 @@ function applyDocumentFingerprint(fp) {
       HTMLCanvasElement.prototype[method] = function (...args) { return original.apply(copy(this), args); };
     }
   }
-  if (allowed("audio") && fp.audioNoise) {
+  if (strict && allowed("audio") && fp.audioNoise) {
     const perturb = (data) => {
       for (let index = 0; index < data.length; index += 97) if (Number.isFinite(data[index])) data[index] += delta(fp.audioNoise, index) * 1e-7;
     };

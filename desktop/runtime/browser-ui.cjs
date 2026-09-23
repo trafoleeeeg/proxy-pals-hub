@@ -116,9 +116,18 @@ function renderer() {
   let privacyConsent = null;
   byId("privacy-button").addEventListener("click", () => {
     privacyConsent = { ...latestState.privacy, tabId: latestState.activeId };
+    const normal = privacyConsent.mode === "normal";
     byId("privacy-origin").textContent = privacyConsent.origin || "Откройте сайт";
-    for (const capability of privacyCapabilities) byId(`privacy-${capability}`).checked = privacyConsent.permissions?.includes(capability) === true;
-    byId("privacy-save").disabled = !privacyConsent.origin;
+    byId("privacy-intro").textContent = normal
+      ? "Обычный режим: WebGL, Canvas, Web Audio и workers доступны всем сайтам и могут раскрыть реальное устройство. Доступ к локальным шрифтам и устройствам по запросу по-прежнему запрещён. Для блокировки включите агрессивный режим в настройках профиля и перезапустите его."
+      : "По умолчанию аппаратные API заблокированы. Разрешайте только то, без чего этот сайт не работает:";
+    for (const capability of privacyCapabilities) {
+      byId(`privacy-${capability}`).checked = privacyConsent.permissions?.includes(capability) === true;
+      byId(`privacy-${capability}`).disabled = normal;
+    }
+    byId("privacy-detail").hidden = normal;
+    byId("privacy-save").hidden = normal;
+    byId("privacy-save").disabled = normal || !privacyConsent.origin;
     togglePopover(privacyPopover, byId("privacy-button"));
   });
   byId("privacy-save").addEventListener("click", async () => {
@@ -362,9 +371,12 @@ function renderer() {
     managerSignature = signature;
     byId("find-count").textContent = state.find && findInput.value ? `${state.find.active}/${state.find.total}` : "";
     current = state.tabs.find((tab) => tab.id === state.activeId);
-    byId("privacy-button").textContent = state.privacy?.allowed ? "⚠" : "◈";
-    byId("privacy-button").title = state.privacy?.allowed ? "Защита сайта ослаблена: есть исключения для аппаратных API" : "Защита: аппаратные API заблокированы. Настроить исключение";
-    byId("privacy-notice").textContent = state.privacy?.allowed
+    const normalPrivacy = state.privacy?.mode === "normal";
+    byId("privacy-button").textContent = normalPrivacy || state.privacy?.allowed ? "⚠" : "◈";
+    byId("privacy-button").title = normalPrivacy ? "Обычный режим: аппаратные API доступны и могут раскрыть устройство" : state.privacy?.allowed ? "Защита сайта ослаблена: есть исключения для аппаратных API" : "Защита: аппаратные API заблокированы. Настроить исключение";
+    byId("privacy-notice").textContent = normalPrivacy
+      ? "Обычный режим: WebGL, Canvas, Web Audio и workers доступны; сайты могут увидеть реальное оборудование. Локальные шрифты и устройства остаются под запретом."
+      : state.privacy?.allowed
       ? `Для этого сайта разрешены: ${state.privacy.permissions.join(", ")}. Они могут раскрыть характеристики компьютера.`
       : "Аппаратные API заблокированы. Если сайт не работает, нажмите ◈ для настройки исключения.";
     byId("home").hidden = !state.home;
@@ -596,7 +608,7 @@ function browserUrl() {
  <section id="bookmark-manager" hidden aria-label="Закладки"><div class="manager-shell"><aside class="manager-sidebar"><h1>Закладки</h1><div class="manager-nav">Все закладки</div></aside><main class="manager-main"><header class="manager-header"><label class="manager-search-wrap">${search}<input id="manager-search" type="search" aria-label="Поиск закладок" placeholder="Поиск закладок" autocomplete="off"></label><button id="manager-close" type="button" class="toolbar-button manager-close" title="Закрыть закладки" aria-label="Закрыть закладки">${svg('<path d="m7 7 10 10M17 7 7 17"/>')}</button></header><div id="manager-list"></div><p id="manager-empty" hidden>Закладки не найдены</p><div id="manager-add-form" class="manager-add"><input id="manager-new-title" aria-label="Название новой закладки" placeholder="Название" maxlength="120"><input id="manager-new-url" aria-label="Адрес новой закладки" placeholder="https://example.com" maxlength="2048"><button id="manager-add" type="button" class="text-button primary">Добавить закладку</button></div></main></div></section>
  <section id="proxy-page" hidden aria-label="Прокси"><div class="manager-shell"><aside class="manager-sidebar"><h1>Прокси</h1><div class="manager-nav">Серверы команды</div></aside><main class="manager-main"><header class="manager-header"><label class="proxy-switch"><input id="proxy-failover" type="checkbox"> Переключать при сбое</label><button id="proxy-check" type="button" class="text-button">Проверить</button><button id="leak-check" type="button" class="text-button">Проверить утечки</button><button id="proxy-close" type="button" class="toolbar-button manager-close" title="Закрыть прокси" aria-label="Закрыть прокси">${svg('<path d="m7 7 10 10M17 7 7 17"/>')}</button></header><section id="leak-panel" class="leak-panel" aria-label="Проверка утечек"><h2>Утечки DNS, WebRTC и IP</h2><ul id="leak-list"></ul></section><div id="proxy-list" class="manager-list"></div><p id="proxy-empty" hidden>Для команды пока нет прокси-серверов</p></main></div></section>
 <div id="findbar" hidden>${search}<input id="find-input" type="text" aria-label="Поиск на странице" placeholder="Найти на странице" autocomplete="off"><span id="find-count"></span><button id="find-prev" type="button" class="text-button" title="Предыдущее совпадение" aria-label="Предыдущее совпадение">↑</button><button id="find-next" type="button" class="text-button" title="Следующее совпадение" aria-label="Следующее совпадение">↓</button><button id="find-close" type="button" class="text-button" title="Закрыть поиск" aria-label="Закрыть поиск">✕</button></div>
-<section id="privacy-popover" class="popover" aria-label="Защита сайта" hidden><h2>Защита сайта</h2><p id="privacy-origin"></p><p>По умолчанию аппаратные API заблокированы. Разрешайте только то, без чего этот сайт не работает:</p><label><input id="privacy-gpu" type="checkbox"> WebGL и WebGPU — может раскрыть видеокарту</label><label><input id="privacy-canvas" type="checkbox"> Чтение Canvas — может раскрыть графический отпечаток</label><label><input id="privacy-audio" type="checkbox"> Web Audio — может раскрыть аудиооборудование</label><label><input id="privacy-fonts" type="checkbox"> Локальные шрифты через API</label><label><input id="privacy-workers" type="checkbox"> Shared/Service Workers — могут работать в фоне</label><p>Это разрешения для точного адреса сайта только в этом профиле. Прокси и запреты доступа к устройствам сохраняются. Шрифты через CSS эта защита не скрывает.</p><p>Настройка хранится только на этом ПК. Профиль будет сохранён и закрыт: откройте его снова, чтобы применить изменение ко всем вкладкам и workers. Регистрации service workers пересоздаются при запуске; cookies и данные сайтов не очищаются.</p><div class="popover-actions"><button id="privacy-save" type="button" class="text-button primary">Сохранить и закрыть профиль</button></div></section>
+<section id="privacy-popover" class="popover" aria-label="Защита сайта" hidden><h2>Защита сайта</h2><p id="privacy-origin"></p><p id="privacy-intro">По умолчанию аппаратные API заблокированы. Разрешайте только то, без чего этот сайт не работает:</p><label><input id="privacy-gpu" type="checkbox"> WebGL и WebGPU — может раскрыть видеокарту</label><label><input id="privacy-canvas" type="checkbox"> Чтение Canvas — может раскрыть графический отпечаток</label><label><input id="privacy-audio" type="checkbox"> Web Audio — может раскрыть аудиооборудование</label><label><input id="privacy-fonts" type="checkbox"> Локальные шрифты через API</label><label><input id="privacy-workers" type="checkbox"> Shared/Service Workers — могут работать в фоне</label><div id="privacy-detail"><p>Это разрешения для точного адреса сайта только в этом профиле. Прокси и запреты доступа к устройствам сохраняются. Шрифты через CSS эта защита не скрывает.</p><p>Настройка хранится только на этом ПК. Профиль будет сохранён и закрыт: откройте его снова, чтобы применить изменение ко всем вкладкам и workers. Регистрации service workers пересоздаются при запуске; cookies и данные сайтов не очищаются.</p></div><div class="popover-actions"><button id="privacy-save" type="button" class="text-button primary">Сохранить и закрыть профиль</button></div></section>
 <div id="error" role="alert" hidden></div>${homeMarkup}<script>${script}</script></body></html>`;
   return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }

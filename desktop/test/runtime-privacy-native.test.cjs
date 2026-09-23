@@ -5,7 +5,7 @@ const path = require("node:path");
 const os = require("node:os");
 const { spawn } = require("node:child_process");
 
-test("sandboxed Electron privacy defaults and exact-origin compatibility", { timeout: 65000 }, async (t) => {
+test("sandboxed Electron strict and normal modes plus exact-origin compatibility", { timeout: 65000 }, async (t) => {
   let electron;
   try { electron = require("electron"); await fs.access(electron); }
   catch (error) { if (process.env.UMBRA_REQUIRE_NATIVE !== "1") { t.skip("Electron executable unavailable"); return; } throw error; }

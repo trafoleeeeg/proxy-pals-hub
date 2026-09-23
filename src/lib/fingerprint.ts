@@ -19,6 +19,8 @@ export type Fingerprint = {
   audioNoise: number;
   webrtc: "disabled" | "proxy";
   doNotTrack: boolean;
+  // Older profiles have no setting and continue using the strict mode.
+  aggressivePrivacyMode?: boolean;
   startUrl?: string;
 };
 
@@ -119,8 +121,9 @@ export function generateFingerprint(country?: string | null, os: FingerprintOS =
     canvasNoise: Math.round(Math.random() * 1e6),
     webglNoise: Math.round(Math.random() * 1e6),
     audioNoise: Math.round(Math.random() * 1e6),
-    webrtc: "disabled",
+    webrtc: "proxy",
     doNotTrack: false,
+    aggressivePrivacyMode: false,
   };
 }
 

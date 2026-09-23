@@ -34,6 +34,13 @@ describe("profile UI data", () => {
     expect(fingerprintError({ ...fp, deviceMemory: 0.5 })).not.toBeNull();
     expect(fingerprintError({ ...fp, userAgent: "Windows NT 10.0" + "a".repeat(1024) })).not.toBeNull();
   });
+  test("new profiles save normal mode while legacy profiles preserve strict mode", () => {
+    const fp = generateFingerprint();
+    expect(profileFingerprintPayload(fp).aggressivePrivacyMode).toBe(false);
+    const { aggressivePrivacyMode: _, ...legacy } = fp;
+    expect(profileFingerprintPayload(legacy).aggressivePrivacyMode).toBe(true);
+    expect(profileFingerprintPayload({ ...legacy, aggressivePrivacyMode: false }).aggressivePrivacyMode).toBe(false);
+  });
   test("Netscape export preserves HttpOnly, domain scope, expiry and session cookies", () => {
     const text = cookiesToNetscape(JSON.stringify([
       { domain: ".example.com", name: "a", value: "one", path: "/", httpOnly: true, secure: true, expirationDate: 1700000000.9 },

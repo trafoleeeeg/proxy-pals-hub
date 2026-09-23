@@ -7,6 +7,7 @@ if (window.location.origin === trustedOrigin) contextBridge.exposeInMainWorld("u
   isDesktop: true,
   version,
   platform: process.platform,
+  engine: { electron: process.versions.electron, chromium: process.versions.chrome },
   launchProfile: (payload) => ipcRenderer.invoke("umbra:launch-profile", payload),
   closeProfile: (profileId) => ipcRenderer.invoke("umbra:close-profile", profileId),
   profileCookies: (profileId) => ipcRenderer.invoke("umbra:profile-cookies", profileId),
@@ -37,6 +38,7 @@ if (window.location.origin === trustedOrigin) contextBridge.exposeInMainWorld("u
 
   // Обновление в один клик.
   appVersion: () => ipcRenderer.invoke("umbra:app-version"),
+  checkEngineVersions: () => ipcRenderer.invoke("umbra:check-engine-versions"),
   checkUpdate: () => ipcRenderer.invoke("umbra:check-update"),
   updateState: () => ipcRenderer.invoke("umbra:update-state"),
   downloadUpdate: () => ipcRenderer.invoke("umbra:download-update"),

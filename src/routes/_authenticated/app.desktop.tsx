@@ -15,10 +15,27 @@ import type { BookmarkDefaults } from "@/lib/bookmark-defaults";
 
 export const Route = createFileRoute("/_authenticated/app/desktop")({ component: ClientPage });
 const RELEASES = "https://github.com/trafoleeeeg/proxy-pals-hub/releases/latest";
+type EngineCheck = { installedElectron: string; installedChromium: string; latestElectron: string; stableChrome: string; electronUpdateAvailable: boolean; chromeMajorAhead: boolean };
 
 export function ClientPage() {
   const runtime = useDesktopProfileLifecycle();
   const { status, version, busy, error } = runtime.update;
+  const bridge = desktop();
+  const [engineCheck, setEngineCheck] = useState<EngineCheck | null>(null);
+  const [engineBusy, setEngineBusy] = useState(false);
+  const [engineError, setEngineError] = useState("");
+  async function checkEngine() {
+    if (!bridge?.checkEngineVersions || engineBusy) return;
+    setEngineBusy(true);
+    setEngineError("");
+    setEngineCheck(null);
+    try {
+      const result = await bridge.checkEngineVersions();
+      if (!result.ok || !result.installedElectron || !result.installedChromium || !result.latestElectron || !result.stableChrome) throw new Error("Не удалось получить версии движка. Проверьте подключение и повторите.");
+      setEngineCheck(result as EngineCheck);
+    } catch { setEngineError("Не удалось проверить версии движка. Проверьте подключение и повторите."); }
+    finally { setEngineBusy(false); }
+  }
   return <div className="max-w-3xl space-y-6">
     <div><h1 className="flex items-center gap-2 text-2xl font-semibold"><Monitor className="size-6" />Umbra для Windows</h1><p className="mt-2 text-sm text-muted-foreground">Windows 10 и 11, 64 бита</p></div>
     {runtime.available ? <section className="space-y-4 border-y border-border py-5">
@@ -39,6 +56,21 @@ export function ClientPage() {
         {status?.state === "downloaded" && <Button disabled={busy} onClick={() => runtime.updateAction("install")}>Установить и перезапустить</Button>}
       </div>
       <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs text-muted-foreground"><span>Открыто профилей: {runtime.running.length}</span><span>Ожидают синхронизации: {runtime.pending.length}</span></div>
+      <div className="space-y-2 border-t border-border pt-4">
+        <h3 className="text-sm font-semibold">Движок браузера</h3>
+        <p className="text-sm">Встроенный Chromium: <span className="font-mono">{bridge?.engine?.chromium ?? "недоступно"}</span> · Electron: <span className="font-mono">{bridge?.engine?.electron ?? "недоступно"}</span></p>
+        <p className="text-xs text-muted-foreground">Chromium обновляется вместе с Umbra. Проверка сравнивает установленный движок с последним стабильным Electron и Chrome Stable; обновление Chrome отдельно не устанавливается.</p>
+        <Button variant="outline" disabled={engineBusy || !bridge?.checkEngineVersions} onClick={() => { void checkEngine(); }}><RefreshCw className="size-4" />{engineBusy ? "Проверка движка…" : "Проверить версии движка"}</Button>
+        {engineError && <p role="alert" className="text-sm text-destructive">{engineError}</p>}
+        {engineCheck && <div role="status" className="space-y-1 text-sm">
+          <p>Последний стабильный Electron: {engineCheck.latestElectron} · Chrome Stable: {engineCheck.stableChrome}</p>
+          <p>{engineCheck.electronUpdateAvailable
+            ? "Доступна новая версия Electron. Движок будет обновлён после проверенного релиза Umbra."
+            : engineCheck.chromeMajorAhead
+              ? "Chrome уже перешёл на более новую основную версию. Подходящий стабильный Electron пока не вышел; проверяйте обновления Umbra."
+              : "Установлен актуальный стабильный Electron; основная версия Chromium не отстаёт от Chrome Stable."}</p>
+        </div>}
+      </div>
     </section> : <section className="space-y-4 border-y border-border py-5"><h2 className="font-semibold">Установщик Windows</h2><a href={RELEASES} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm text-primary hover:underline"><Download className="size-4" />Скачать установщик из последнего релиза</a></section>}
     <BookmarkDefaultsManager />
     <ExtensionManager />

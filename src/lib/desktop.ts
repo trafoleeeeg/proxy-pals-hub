@@ -37,6 +37,7 @@ export type UmbraBridge = {
   isDesktop: true;
   version?: string;
   platform: string;
+  engine?: { electron: string; chromium: string };
   launchProfile: (payload: LaunchPayload) => Promise<{ ok: boolean; error?: string }>;
   closeProfile: (profileId: string) => Promise<{ ok: boolean; error?: string } & Partial<ProfileRuntimeSnapshot>>;
   listRunningProfiles: () => Promise<{ ok: boolean; profiles: RunningProfile[]; error?: string }>;
@@ -75,6 +76,7 @@ export type UmbraBridge = {
     };
   }>;
   appVersion: () => Promise<string>;
+  checkEngineVersions?: () => Promise<{ ok: boolean; error?: string; installedElectron?: string; installedChromium?: string; latestElectron?: string; stableChrome?: string; electronUpdateAvailable?: boolean; chromeMajorAhead?: boolean }>;
   checkUpdate: () => Promise<{ ok: boolean; version?: string | null; current?: string; error?: string }>;
   updateState: () => Promise<UpdateStatus>;
   downloadUpdate: () => Promise<{ ok: boolean; error?: string }>;

@@ -65,6 +65,29 @@ beforeAll(async () => {
 afterAll(async () => { await db?.close(); });
 
 describe("real migrations and RLS", () => {
+  test("unfiled profiles follow default-folder access without changing their folder", async () => {
+    const legacyMember = crypto.randomUUID();
+    const legacyProfile = crypto.randomUUID();
+    await db.query("insert into auth.users(id, email, email_confirmed_at) values ($1, 'legacy@example.test', now())", [legacyMember]);
+    await db.query("insert into public.team_members(team_id, user_id, role) values ($1, $2, 'member')", [team, legacyMember]);
+    await db.query("insert into public.browser_profiles(id, team_id, name, folder) values ($1, $2, 'Unfiled', '')", [legacyProfile, team]);
+    try {
+      expect(await asUser(legacyMember, "select id from public.browser_profiles where id = $1", [legacyProfile])).toEqual([]);
+      await asUser(owner, "select public.set_folder_access($1, 'Основная', $2, true)", [team, legacyMember]);
+      expect(await asUser(legacyMember, "select id from public.browser_profiles where id = $1", [legacyProfile])).toEqual([{ id: legacyProfile }]);
+      expect((await db.query<{ allowed: boolean }>("select private.can_access_profile($1, $2) as allowed", [legacyMember, legacyProfile])).rows).toEqual([{ allowed: true }]);
+      await asUser(owner, "select public.set_member_permissions($1, $2, false, true, false, false, false, false, false)", [team, legacyMember]);
+      expect(await asUser(legacyMember, "update public.browser_profiles set name = 'Updated' where id = $1 returning name", [legacyProfile])).toEqual([{ name: "Updated" }]);
+      expect((await db.query<{ folder: string }>("select folder from public.browser_profiles where id = $1", [legacyProfile])).rows[0]!.folder).toBe("");
+      await asUser(owner, "select public.set_folder_access($1, 'Основная', $2, false)", [team, legacyMember]);
+      expect(await asUser(legacyMember, "select id from public.browser_profiles where id = $1", [legacyProfile])).toEqual([]);
+    } finally {
+      await db.query("delete from public.browser_profiles where id = $1", [legacyProfile]);
+      await db.query("delete from public.team_members where team_id = $1 and user_id = $2", [team, legacyMember]);
+      await db.query("delete from auth.users where id = $1", [legacyMember]);
+    }
+  });
+
   test("folder order is saved atomically and cannot include another team's folder", async () => {
     const first = crypto.randomUUID();
     const second = crypto.randomUUID();
@@ -267,3 +290,4 @@ describe("real migrations and RLS", () => {
     expect((await db.query<{ created_by: string | null }>("select created_by from public.browser_profiles where id = $1", [shared])).rows[0]!.created_by).toBeNull();
   });
 });
+

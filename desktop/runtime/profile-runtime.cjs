@@ -629,10 +629,17 @@ function createProfileRuntime(electron, options = {}) {
       try {
         entry.ses = session.fromPartition(entry.partition);
         blockSession(entry.ses);
+        // Install guards before opening the proxy gate: service workers from
+        // an existing partition must never inherit default device permissions.
+        entry.ses.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+        entry.ses.setPermissionCheckHandler(() => false);
+        entry.ses.setDevicePermissionHandler(() => false);
+        entry.ses.setDisplayMediaRequestHandler((_request, callback) => callback({}));
         const extensionApi = entry.ses.extensions || entry.ses;
         for (const extension of extensionApi.getAllExtensions?.() || []) extensionApi.removeExtension(extension.id);
         const defaultUA = entry.ses.getUserAgent().replace(/\s(?:Electron|Umbra)\/[^ ]+/g, "");
         entry.fp = normalizeFingerprint(payload.fingerprint || {}, defaultUA);
+        entry.ses.setUserAgent(entry.fp.userAgent, entry.fp.languages.join(","));
         // Warm the browser chrome while the authenticated proxy and cookies are
         // being prepared. Fingerprint application still completes before any
         // remote page is allowed to navigate.
@@ -645,7 +652,9 @@ function createProfileRuntime(electron, options = {}) {
         try {
           entry.proxyRuntime = await setupProxy(entry.ses, launchProxy);
         } catch (proxyFailure) {
-          if (!selected) throw proxyFailure;
+          // A selected proxy must not fall back to direct internet when the
+          // profile has no default proxy. Only another configured proxy is safe.
+          if (!selected || !payload.proxy) throw proxyFailure;
           launchProxy = payload.proxy;
           entry.proxyRuntime = await setupProxy(entry.ses, launchProxy);
         }
@@ -657,10 +666,6 @@ function createProfileRuntime(electron, options = {}) {
           try { entry.ses.setWebRTCIPHandlingPolicy?.(SAFE_WEBRTC); } catch { /* политика недоступна в этой сборке */ }
         }
          installResourceRecovery(entry);
-        entry.ses.setUserAgent(entry.fp.userAgent, entry.fp.languages.join(","));
-        // Background permission requests cannot enable arbitrary device access.
-        entry.ses.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
-        entry.ses.setPermissionCheckHandler(() => false);
         const initialized = await initializeCookies(entry.ses, cookieStore(), { ...payload, profileId: id });
         entry.cookiesUpdatedAt = initialized.cookiesUpdatedAt;
         entry.cookieSignature = initialized.signature;

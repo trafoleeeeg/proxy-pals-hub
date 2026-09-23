@@ -59,7 +59,12 @@ function harness() {
       const cookies = new EventEmitter();
       let data = [];
       Object.assign(cookies, { get: async () => data, set: async (cookie) => { data.push({ ...cookie, domain: cookie.domain || new URL(cookie.url).hostname, session: true, hostOnly: !cookie.domain }); }, flushStore: async () => { if (flushGate) await flushGate.promise; }, update: (value) => { data = value; cookies.emit("changed"); } });
-      const ses = { cookies, webRequest: { onBeforeRequest() {} }, getUserAgent: () => "Chrome/144.0.0.0", setUserAgent() {}, flushStorageData() {}, closeAllConnections: async () => {}, clearStorageData: async () => { data = []; }, setPermissionRequestHandler() {}, setPermissionCheckHandler() {} };
+      const ses = { cookies, webRequest: { onBeforeRequest() {} }, getUserAgent: () => "Chrome/144.0.0.0", setUserAgent() {}, flushStorageData() {}, closeAllConnections: async () => {}, clearStorageData: async () => { data = []; },
+        setPermissionRequestHandler(handler) { this.permissionRequest = handler; },
+        setPermissionCheckHandler(handler) { this.permissionCheck = handler; },
+        setDevicePermissionHandler(handler) { this.devicePermission = handler; },
+        setDisplayMediaRequestHandler(handler) { this.displayMedia = handler; },
+      };
       sessions.set(partition, ses); return ses;
     } },
   };
@@ -68,7 +73,11 @@ function harness() {
       shell: { isDestroyed: () => false, focus() {} }, destroy() {},
       createTab: () => new Window({ webPreferences: { partition: options.partition, contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, devTools: false } }),
     }),
-    setupProxy: async () => { configured++; return { diagnostics: { mode: "http" }, dispose: async () => { disposed++; } }; },
+    setupProxy: async (ses) => {
+      assert.equal(ses.permissionCheck(), false, "permissions denied before opening network gate");
+      assert.equal(ses.devicePermission(), false, "device access denied before opening network gate");
+      configured++; return { diagnostics: { mode: "http" }, dispose: async () => { disposed++; } };
+    },
     cookieStore: {
       read: async (id) => records.get(id),
       write: async (id, cookies, cookiesUpdatedAt) => { if (snapshotFailure) throw new Error("simulated disk failure"); records.set(id, { cookies, cookiesUpdatedAt }); },
@@ -250,6 +259,23 @@ test("fingerprint camelCase/legacy mappings and document overrides precede navig
   vm.runInContext(script.source, context);
   assert.equal(context.navigator.hardwareConcurrency, 6);
   assert.equal(context.navigator.language, "de-DE"); assert.equal(context.screen.width, 1920);
+  await h.runtime.closeAllProfiles();
+});
+
+test("profile permissions deny device identity, geolocation and display capture", async () => {
+  const h = harness();
+  await h.runtime.launchProfileWindow(payload());
+  const ses = h.sessions.get(`persist:profile-${ID}`);
+  for (const permission of ["geolocation", "media", "notifications", "display-capture", "usb", "serial", "hid"]) {
+    let granted;
+    ses.permissionRequest(null, permission, (result) => { granted = result; });
+    assert.equal(granted, false);
+    assert.equal(ses.permissionCheck(null, permission), false);
+  }
+  for (const deviceType of ["hid", "usb", "serial"]) assert.equal(ses.devicePermission({ deviceType }), false);
+  let streams;
+  ses.displayMedia({ videoRequested: true }, (result) => { streams = result; });
+  assert.deepEqual(streams, {});
   await h.runtime.closeAllProfiles();
 });
 

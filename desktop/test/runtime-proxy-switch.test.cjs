@@ -27,7 +27,7 @@ function harness(options = {}) {
       this.webContents = new EventEmitter();
       Object.assign(this.webContents, {
         id: windows.length + 1,
-        setUserAgent() {}, setWebRTCIPHandlingPolicy() {}, getWebRTCIPHandlingPolicy: () => "", setWindowOpenHandler() {},
+        setUserAgent() {}, setWebRTCIPHandlingPolicy() {}, getWebRTCIPHandlingPolicy: () => "disable_non_proxied_udp", setWindowOpenHandler() {},
         stop() {}, setZoomLevel() {}, getURL: () => this.url || "", reload: () => { reloads++; },
       });
       this.webContents.debugger = new EventEmitter();
@@ -48,7 +48,7 @@ function harness(options = {}) {
       Object.assign(cookies, { get: async () => [], set: async () => {}, flushStore: async () => {} });
       return { cookies, webRequest: { onBeforeRequest() {}, onErrorOccurred(_filter, handler) { resourceError = typeof _filter === "object" ? handler : null; } }, getUserAgent: () => "Chrome/144.0.0.0", setUserAgent() {},
         flushStorageData() {}, closeAllConnections: async () => {}, clearStorageData: async () => {},
-        setPermissionRequestHandler() {}, setPermissionCheckHandler() {} };
+        setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, setDevicePermissionHandler() {}, setDisplayMediaRequestHandler() {} };
     } },
   };
   const runtime = createProfileRuntime(electron, {
@@ -72,6 +72,27 @@ function harness(options = {}) {
 const payload = (extra = {}) => ({ profileId: ID, deviceId: "test-device", name: "Test", lockToken: "t", fingerprint: FP,
   cookies: "[]", cookiesUpdatedAt: null, proxy: { protocol: "http", host: "10.0.0.1", port: 8080, username: "user", password: "secret-a" },
   proxies: proxies(), startUrl: "about:blank", ...extra });
+
+test("сбой сохранённого прокси никогда не включает прямой интернет при запуске", async () => {
+  const h = harness({ failProxy: "10.0.0.2" });
+  await assert.rejects(h.runtime.launchProfileWindow(payload({ proxy: null, browserSettings: {
+    profileId: ID, bookmarks: [], bookmarkBarVisible: true, zoomLevel: 0, extensions: [],
+    activeProxyId: B, proxyFailover: false, revision: 1,
+  } })), /Не удалось поднять прокси/);
+  assert.equal(h.setups.length, 1);
+  assert.equal(h.setups[0].host, "10.0.0.2");
+  assert.equal(h.runtime.listRunningProfiles().length, 0);
+});
+
+test("сбой сохранённого прокси допускает только другой настроенный прокси", async () => {
+  const h = harness({ failProxy: "10.0.0.2" });
+  await h.runtime.launchProfileWindow(payload({ browserSettings: {
+    profileId: ID, bookmarks: [], bookmarkBarVisible: true, zoomLevel: 0, extensions: [],
+    activeProxyId: B, proxyFailover: false, revision: 1,
+  } }));
+  assert.deepEqual(h.setups.map((proxy) => proxy.host), ["10.0.0.2", "10.0.0.1"]);
+  await h.runtime.closeAllProfiles();
+});
 
 test("окно профиля получает список прокси без паролей и переключается на выбранный сервер", async () => {
   const h = harness();

@@ -29,6 +29,9 @@ function renderer() {
   let managerSignature;
   let barSignature;
   let extensionSignature;
+  let tabOrderSignature;
+  let visibleActiveId;
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   const icon = (name) => {
     const paths = {
       globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/>',
@@ -83,7 +86,8 @@ function renderer() {
     void run({ action: "chrome-height", value: height });
   }
   byId("navigate").addEventListener("submit", (event) => {
-    event.preventDefault(); address.blur(); void run({ action: "navigate", value: address.value });
+    event.preventDefault(); address.blur();
+    void run({ action: "navigate", value: address.value }).then((result) => { if (!result?.error) void run({ action: "focus-page" }); });
   });
   byId("home-search").addEventListener("submit", (event) => {
     event.preventDefault(); void run({ action: "navigate", value: byId("home-address").value });
@@ -285,29 +289,37 @@ function renderer() {
   byId("find-prev").addEventListener("click", () => void run({ action: "find", value: findInput.value, next: true, forward: false }));
   byId("find-close").addEventListener("click", closeFind);
   byId("manage-extensions").addEventListener("click", () => { extensionsPopover.hidden = true; syncPopoverLayer(); void run({ action: "manage-extensions" }); });
-  // Соединение с сайтом открывается заранее — пока адрес ещё набирают или
-  // курсор только наведён на закладку, — поэтому страница грузится быстрее.
-  let preconnectTimer;
-  let lastPreconnect = "";
-  const preconnect = (value) => {
-    let host = "";
-    try {
-      const text = String(value || "").trim();
-      if (!text || /\s/.test(text)) return;
-      host = /^[a-z][a-z\d+.-]*:\/\//i.test(text) ? new URL(text).hostname : text.split("/")[0];
-    } catch { return; }
-    if (!host || !host.includes(".") || host === lastPreconnect) return;
-    lastPreconnect = host;
-    void run({ action: "preconnect", host });
-  };
-  address.addEventListener("input", () => {
-    clearTimeout(preconnectTimer);
-    const value = address.value;
-    preconnectTimer = setTimeout(() => preconnect(value), 250);
+  // Не резолвим набираемые адреса и закладки заранее: DNS должен идти только
+  // в рамках реальной навигации защищённой сессии, через её сетевую политику.
+  let selectAddressOnClick = false;
+  address.addEventListener("focus", () => { selectAddressOnClick = true; });
+  address.addEventListener("click", () => {
+    if (selectAddressOnClick) { address.select(); selectAddressOnClick = false; }
   });
   address.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && current) { address.value = current.url === "about:blank" ? "" : current.url; address.blur(); }
+    if (event.key === "Escape" && current) {
+      address.value = current.url === "about:blank" ? "" : current.url; address.blur();
+      void run({ action: "focus-page" });
+    }
+    if (event.key === "Enter" && event.altKey) {
+      event.preventDefault(); address.blur();
+      void run({ action: "navigate", value: address.value, newTab: true });
+    }
   });
+  tabs.addEventListener("keydown", (event) => {
+    const target = event.target.closest('[role="tab"]');
+    if (!target || event.altKey || event.ctrlKey || event.metaKey) return;
+    const buttons = [...tabs.querySelectorAll('[role="tab"]')];
+    const index = buttons.indexOf(target);
+    const next = event.key === "Home" ? buttons[0] : event.key === "End" ? buttons.at(-1)
+      : event.key === "ArrowRight" ? buttons[(index + 1) % buttons.length]
+      : event.key === "ArrowLeft" ? buttons[(index - 1 + buttons.length) % buttons.length] : null;
+    if (next) { event.preventDefault(); next.focus(); }
+  });
+  tabs.addEventListener("wheel", (event) => {
+    if (event.ctrlKey || Math.abs(event.deltaX) >= Math.abs(event.deltaY) || tabs.scrollWidth <= tabs.clientWidth) return;
+    event.preventDefault(); tabs.scrollBy({ left: event.deltaY, behavior: "auto" });
+  }, { passive: false });
   document.addEventListener("pointerdown", (event) => {
     if (!event.target.closest(".popover,.toolbar-button,#bookmark-manager,#proxy-page")) closePopovers();
     // Клик по любой части оболочки закрывает окно расширения, как в Chrome.
@@ -322,6 +334,9 @@ function renderer() {
     // Тяжёлые списки приходят только при изменении, поэтому дополняем прошлое состояние.
     const state = { ...latestState, ...incoming };
     latestState = state;
+    if (visibleActiveId && state.activeId !== visibleActiveId) {
+      for (const popover of [bookmarkPopover, extensionsPopover, menu]) popover.hidden = true;
+    }
     manager.hidden = !state.bookmarksOpen;
     proxyPage.hidden = !state.proxiesOpen;
     if (state.proxiesOpen) renderProxies();
@@ -348,6 +363,13 @@ function renderer() {
     byId("restore-menu").disabled = !state.canRestoreTab;
     byId("zoom-value").textContent = `${state.zoomPercent || 100}%`;
     const focused = document.activeElement?.dataset?.focusKey;
+    const orderSignature = state.tabs.map((tab) => tab.id).join("|");
+    const orderChanged = orderSignature !== tabOrderSignature;
+    const previousPositions = new Map();
+    if (orderChanged && !reducedMotion.matches) {
+      for (const [id, node] of tabNodes) previousPositions.set(id, node.item.getBoundingClientRect().left);
+    }
+    tabOrderSignature = orderSignature;
     // Вкладки обновляем точечно: полная перерисовка на каждое событие загрузки
     // убирала кнопку из-под курсора, и клик по вкладке терялся.
     const seen = new Set();
@@ -361,16 +383,23 @@ function renderer() {
         const select = document.createElement("button");
         select.className = "tab-title"; select.setAttribute("role", "tab");
         select.dataset.focusKey = "tab-" + tab.id;
+        const statusIcon = document.createElement("span"); statusIcon.className = "tab-status";
         const favicon = document.createElement("span"); favicon.className = "favicon"; favicon.innerHTML = icon("globe");
+        const spinner = document.createElement("span"); spinner.className = "tab-spinner"; spinner.setAttribute("aria-hidden", "true");
+        statusIcon.append(favicon, spinner);
         const label = document.createElement("span"); label.className = "tab-label";
-        select.append(favicon, label);
+        select.append(statusIcon, label);
         select.onclick = () => void run({ action: "select", id: item.dataset.id });
         select.onauxclick = (event) => { if (event.button === 1 && !tab.pinnedHome) void run({ action: "close-tab", id: item.dataset.id }); };
         const close = document.createElement("button"); close.innerHTML = icon("close");
         close.className = "tab-close"; close.title = "Закрыть вкладку"; close.setAttribute("aria-label", "Закрыть вкладку");
         close.dataset.focusKey = "close-" + tab.id;
         close.onclick = () => void run({ action: "close-tab", id: item.dataset.id });
-        item.addEventListener("dragstart", (event) => { if (tab.pinnedHome) { event.preventDefault(); return; } draggedTab = item.dataset.id; item.classList.add("dragging"); });
+        item.addEventListener("dragstart", (event) => {
+          if (tab.pinnedHome) { event.preventDefault(); return; }
+          draggedTab = item.dataset.id; item.classList.add("dragging");
+          if (event.dataTransfer) { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", draggedTab); }
+        });
         item.addEventListener("dragend", () => { draggedTab = undefined; item.classList.remove("dragging"); });
         item.addEventListener("dragover", (event) => event.preventDefault());
         item.addEventListener("drop", (event) => {
@@ -394,6 +423,9 @@ function renderer() {
       if (node.shown.name !== name) { node.label.textContent = name; node.shown.name = name; }
       if (node.shown.title !== title) { node.select.title = title; node.shown.title = title; }
       if (node.shown.selected !== selected) { node.select.setAttribute("aria-selected", selected); node.shown.selected = selected; }
+      node.select.tabIndex = tab.id === state.activeId ? 0 : -1;
+      node.item.classList.toggle("loading", !!tab.loading && !tab.pinnedHome);
+      node.select.setAttribute("aria-busy", String(!!tab.loading && !tab.pinnedHome));
       const source = tab.pinnedHome ? "home" : tab.favicon || "";
       if (node.shown.favicon !== source) {
         node.shown.favicon = source;
@@ -407,7 +439,23 @@ function renderer() {
       previous = node.item;
     }
     for (const [id, node] of [...tabNodes]) if (!seen.has(id)) { node.item.remove(); tabNodes.delete(id); }
-    if (focused) [...document.querySelectorAll("[data-focus-key]")].find((button) => button.dataset.focusKey === focused)?.focus();
+    if (orderChanged && !reducedMotion.matches) {
+      for (const [id, node] of tabNodes) {
+        const oldLeft = previousPositions.get(id);
+        const offset = oldLeft == null ? 0 : oldLeft - node.item.getBoundingClientRect().left;
+        if (offset && !node.item.classList.contains("pinned-home")) node.item.animate([
+          { transform: `translateX(${offset}px)` }, { transform: "translateX(0)" },
+        ], { duration: 160, easing: "cubic-bezier(.2,0,0,1)" });
+      }
+    }
+    if (focused) {
+      const button = [...document.querySelectorAll("[data-focus-key]")].find((item) => item.dataset.focusKey === focused);
+      (button || tabNodes.get(state.activeId)?.select)?.focus({ preventScroll: true });
+    }
+    if (state.activeId !== visibleActiveId) {
+      visibleActiveId = state.activeId;
+      tabNodes.get(state.activeId)?.item.scrollIntoView({ block: "nearest", inline: "nearest", behavior: reducedMotion.matches ? "instant" : "smooth" });
+    }
     newTab.disabled = state.tabs.length >= (state.tabs.some((tab) => tab.pinnedHome) ? 33 : 32);
     bookmarksBar.hidden = !state.bookmarkBarVisible || !(state.bookmarks || []).length;
     if (signature !== barSignature) {
@@ -419,7 +467,6 @@ function renderer() {
       const label = document.createElement("span"); label.textContent = bookmark.title || new URL(bookmark.url).hostname;
       button.append(favicon, label);
       button.title = bookmark.url; button.onclick = () => void run({ action: "open-bookmark", id: bookmark.id });
-      button.onmouseenter = () => preconnect(bookmark.url);
       button.onauxclick = (event) => { if (event.button === 1) void run({ action: "open-bookmark", id: bookmark.id, newTab: true }); };
       button.addEventListener("dragstart", () => { draggedBookmark = bookmark.id; });
       button.addEventListener("dragover", (event) => event.preventDefault());
@@ -508,6 +555,8 @@ function browserUrl() {
  *{box-sizing:border-box;letter-spacing:0}html{--chrome-height:90px}body{margin:0;background:var(--background);color:var(--foreground);font:13px "Segoe UI Variable","Segoe UI",system-ui,sans-serif;overflow:hidden}button,input{font:inherit;color:inherit}button{border:0;background:transparent;cursor:pointer}button:disabled{opacity:.35;cursor:default}button:focus-visible,input:focus-visible{outline:2px solid var(--ring);outline-offset:1px}svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}#chrome{position:relative;z-index:5;background:var(--sidebar);box-shadow:0 1px 0 var(--border)}
  #tab-strip{display:flex;align-items:end;height:42px;padding:8px 7px 0;gap:1px;background:var(--sidebar)}#tabs{display:flex;flex:0 1 auto;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;gap:1px}#tabs::-webkit-scrollbar{display:none}#tab-spacer{flex:1 1 auto;min-width:0}.tab{display:flex;position:relative;flex:0 1 240px;min-width:62px;max-width:250px;height:34px;border-radius:9px 9px 0 0;color:var(--muted-foreground)}.tab:hover{background:color-mix(in oklab,var(--secondary) 72%,transparent)}.tab:has([aria-selected=true]){background:var(--secondary);color:var(--foreground)}.tab.dragging,.manager-row.dragging{opacity:.5}.tab-title{display:flex;align-items:center;gap:8px;min-width:0;flex:1;padding:0 4px 0 11px;text-align:left}.tab-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.favicon{display:grid;place-items:center;width:16px;height:16px;flex:none;object-fit:contain}.extension-icon{display:grid;place-items:center;width:18px;height:18px;flex:none;object-fit:contain}.favicon svg{width:15px;height:15px}.extension-icon svg{width:18px;height:18px}.tab-close{display:grid;place-items:center;width:28px;height:28px;margin:2px 3px 0 0;border-radius:50%;flex:none}.tab-close:hover,.toolbar-button:hover{background:var(--accent)}.tab-close svg{width:14px;height:14px}#new{margin:0 4px 3px;width:30px;height:30px;font-size:24px;border-radius:50%}
  .tab.pinned-home{flex:0 0 42px;min-width:42px;max-width:42px}.tab.pinned-home .tab-title{justify-content:center;padding:0}.tab.pinned-home .tab-label,.tab.pinned-home .tab-close{display:none}.tab.pinned-home .favicon svg{width:17px;height:17px}
+ /* Анимируется только лёгкая оболочка; содержимое WebContents не растягивается. */
+ #tabs{isolation:isolate;scroll-padding-inline:44px 4px;overscroll-behavior-x:contain}.tab{transition:background-color 130ms ease,color 130ms ease;animation:tab-appear 140ms ease-out}.tab:not(.pinned-home):not(:has([aria-selected=true])):not(:hover)::after{content:"";position:absolute;right:0;top:9px;bottom:9px;width:1px;background:var(--border);pointer-events:none}.tab.pinned-home{position:sticky;left:0;z-index:2;background:var(--sidebar)}.tab.pinned-home:has([aria-selected=true]){background:var(--secondary)}.tab.pinned-home:hover{background:var(--accent)}.tab-title{user-select:none}.tab-title:focus-visible{outline-offset:-3px;border-radius:8px}.tab-status{display:grid;place-items:center;position:relative;width:16px;height:16px;flex:none}.tab-spinner{display:none;position:absolute;inset:1px;border:2px solid color-mix(in oklab,var(--primary) 25%,transparent);border-top-color:var(--primary);border-radius:50%;animation:tab-spin 700ms linear infinite}.tab.loading .tab-spinner{display:block}.tab.loading .favicon{visibility:hidden}.tab.dragging{animation:none}.tab-close,.toolbar-button,.text-button,.bookmark,.menu-item{transition:background-color 120ms ease,color 120ms ease,opacity 120ms ease}.toolbar-button:active:not(:disabled),.tab-close:active{transform:scale(.94)}.popover:not([hidden]),#findbar:not([hidden]){animation:chrome-popover 120ms ease-out;transform-origin:top right}.address-wrap{transition:border-color 120ms ease,box-shadow 120ms ease}#address::selection{background:var(--primary);color:var(--primary-foreground)}@keyframes tab-spin{to{transform:rotate(360deg)}}@keyframes tab-appear{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}@keyframes chrome-popover{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:translateY(0)}}@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}.toolbar-button:active:not(:disabled),.tab-close:active{transform:none}}
  #navigate{display:flex;align-items:center;gap:5px;height:48px;margin:0;padding:6px 9px;background:var(--secondary);border-bottom:1px solid var(--border)}.toolbar-button{position:relative;display:grid;place-items:center;width:34px;height:34px;border-radius:50%;flex:none}.address-wrap{display:flex;align-items:center;min-width:120px;flex:1;height:34px;padding:0 4px 0 13px;border:1px solid transparent;border-radius:18px;background:var(--background)}.address-wrap:focus-within{border-color:var(--ring);box-shadow:0 0 0 1px var(--ring)}#address{min-width:0;flex:1;height:31px;border:0;outline:0;background:transparent}.reload-path{display:block}.stop-path{display:none}.loading .reload-path{display:none}.loading .stop-path{display:block}#star.on svg{fill:var(--primary);stroke:var(--primary)}#extensions-count{position:absolute;right:1px;bottom:1px;min-width:14px;height:14px;padding:0 3px;border-radius:7px;background:var(--primary);color:var(--primary-foreground);font-size:9px;line-height:14px}#extensions-count:empty{display:none}#pinned-extensions{display:flex;align-items:center;gap:1px}.pinned-extension img{width:18px;height:18px;object-fit:contain}
  #bookmarks-bar{display:flex;align-items:center;gap:3px;height:32px;padding:3px 10px;background:var(--secondary);overflow-x:auto;scrollbar-width:thin}#bookmarks-bar[hidden]{display:none}.bookmark{display:flex;align-items:center;gap:7px;flex:none;max-width:190px;height:26px;padding:0 8px;border-radius:5px}.bookmark:hover{background:var(--accent)}.bookmark-favicon{display:grid;place-items:center;width:16px;height:16px;flex:none;object-fit:contain}.bookmark-favicon svg{width:15px;height:15px}.bookmark span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.popover{position:fixed;top:88px;z-index:20;width:310px;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--popover);color:var(--popover-foreground);box-shadow:0 12px 30px color-mix(in oklab,var(--background) 72%,transparent)}.popover[hidden]{display:none}.popover h2{margin:3px 4px 10px;font-size:14px}.popover input{width:100%;height:36px;border:1px solid var(--border);border-radius:6px;background:var(--background);padding:0 10px}.popover-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:10px}.text-button{height:32px;padding:0 10px;border-radius:6px}.text-button:hover,.menu-item:hover{background:var(--accent)}.primary{background:var(--primary);color:var(--primary-foreground)}.danger{color:var(--destructive)}#browser-menu{width:292px;padding:6px}.menu-item{display:flex;width:100%;height:34px;align-items:center;padding:0 10px;border-radius:5px;text-align:left}.menu-separator{height:1px;margin:5px;background:var(--border)}.zoom-row{display:flex;align-items:center;gap:6px;padding:4px 8px}.zoom-row>span:first-child{margin-right:auto}.zoom-button{width:30px;height:30px;border-radius:50%;font-size:19px}.zoom-button:hover{background:var(--accent)}#zoom-value{width:48px;text-align:center}.extension-row{display:grid;grid-template-columns:minmax(0,1fr) 30px;align-items:center;gap:6px;padding:4px 5px}.extension-open{display:grid;grid-template-columns:18px minmax(0,1fr);align-items:center;gap:10px;min-width:0;padding:6px 5px;border-radius:6px;text-align:left}.extension-open:hover{background:var(--accent)}.extension-row img{object-fit:contain}.extension-row div{display:flex;min-width:0;flex-direction:column}.pin-extension{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;color:var(--muted-foreground);font-size:17px}.pin-extension:hover{background:var(--accent);color:var(--foreground)}.extension-row strong,.extension-row small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.extension-row small,#extensions-empty{color:var(--muted-foreground);font-size:11px}#extensions-list{max-height:260px;overflow:auto}#page-snapshot{position:fixed;z-index:1;inset:var(--chrome-height) 0 0;width:100%;height:calc(100% - var(--chrome-height));object-fit:fill;pointer-events:none}#page-snapshot[hidden]{display:none}#error{position:fixed;z-index:30;right:16px;top:calc(var(--chrome-height) + 12px);max-width:min(460px,calc(100vw - 32px));padding:10px 13px;border:1px solid var(--destructive);border-radius:8px;background:var(--popover);color:var(--destructive);box-shadow:0 8px 28px color-mix(in oklab,var(--background) 80%,transparent)}#error[data-tone=success]{border-color:#28a745;color:#28a745}#error[data-tone=progress]{border-color:var(--primary);color:var(--primary)}#error[hidden]{display:none}#findbar{position:fixed;z-index:25;right:18px;top:calc(var(--chrome-height) + 10px);display:flex;align-items:center;gap:5px;padding:7px 8px;border:1px solid var(--border);border-radius:8px;background:var(--popover);box-shadow:0 10px 30px color-mix(in oklab,var(--background) 75%,transparent)}#findbar[hidden]{display:none}#findbar>svg{width:16px;color:var(--muted-foreground)}#find-input{width:210px;height:30px;border:0;background:transparent;padding:0 4px;outline:0}#find-count{min-width:54px;color:var(--muted-foreground);font-size:11px;text-align:center}#findbar .text-button{display:grid;place-items:center;width:30px;padding:0}#bookmark-manager,#proxy-page{position:fixed;z-index:4;inset:var(--chrome-height) 0 0;width:auto;background:var(--background);color:var(--foreground)}#bookmark-manager[hidden],#proxy-page[hidden]{display:none}.proxy-row{grid-template-columns:minmax(0,1fr) auto}.proxy-text{display:flex;min-width:0;flex-direction:column;gap:3px}.proxy-text small{color:var(--muted-foreground);font-size:11px}.proxy-switch{display:flex;align-items:center;gap:8px;margin-left:auto;color:var(--muted-foreground)}.leak-panel{margin:14px 20px 0;padding:12px 14px;border:1px solid var(--border);border-radius:8px;background:var(--sidebar)}.leak-panel h2{margin:0 0 8px;font-size:13px;font-weight:600}.leak-panel ul{display:flex;flex-direction:column;gap:6px;margin:0;padding:0;list-style:none}.leak-panel li{display:flex;align-items:center;gap:8px;font-size:12px}.leak-dot{width:9px;height:9px;flex:none;border-radius:50%;background:var(--muted-foreground)}.leak-ok .leak-dot{background:#28a745}.leak-leak .leak-dot{background:var(--destructive)}.leak-leak{color:var(--destructive)}.leak-error .leak-dot{background:#f0ad4e}.leak-detail{color:var(--muted-foreground)}#proxy-empty{padding:50px;text-align:center;color:var(--muted-foreground)}#proxy-empty[hidden]{display:none}.manager-shell{display:flex;height:100%}.manager-sidebar{width:230px;padding:22px 12px;border-right:1px solid var(--border);background:var(--sidebar)}.manager-sidebar h1{margin:0 12px 22px;font-size:20px;font-weight:500}.manager-nav{padding:10px 14px;border-left:3px solid var(--primary);background:var(--accent);color:var(--primary)}.manager-main{display:flex;min-width:0;flex:1;flex-direction:column}.manager-header{display:flex;align-items:center;gap:12px;padding:18px 24px;border-bottom:1px solid var(--border);background:var(--sidebar)}.manager-search-wrap{display:flex;align-items:center;gap:9px;max-width:600px;min-width:220px;flex:1;height:38px;padding:0 12px;border-radius:6px;background:var(--accent)}.manager-search-wrap svg{color:var(--muted-foreground)}#manager-search{width:100%;border:0;outline:0;background:transparent}.manager-close{margin-left:auto}#manager-list,#proxy-list{flex:1;overflow:auto;padding:12px 20px}.manager-row{display:grid;grid-template-columns:22px minmax(220px,1fr) auto;align-items:center;gap:12px;min-height:62px;padding:8px 12px;border-bottom:1px solid color-mix(in oklab,var(--border) 55%,transparent);border-radius:6px}.manager-row:hover{background:var(--accent)}.manager-favicon{display:grid;place-items:center;width:18px;height:18px;object-fit:contain}.manager-fields{display:grid;min-width:0;grid-template-columns:minmax(150px,.7fr) minmax(220px,1fr);gap:8px}.manager-row input,#manager-add-form input{height:34px;border:1px solid transparent;border-radius:5px;background:transparent;padding:0 8px}.manager-row input:hover,.manager-row input:focus{border-color:var(--border);background:var(--background);outline:0}.manager-row input[readonly]{color:var(--muted-foreground)}.manager-row .row-actions{display:flex;align-items:center;justify-content:flex-end;gap:4px}.managed-bookmark{padding:0 8px;color:var(--muted-foreground);font-size:11px}.manager-add{display:grid;grid-template-columns:minmax(150px,.7fr) minmax(220px,1fr) auto;gap:8px;padding:12px 24px;border-top:1px solid var(--border);background:var(--sidebar)}#manager-empty{padding:50px;text-align:center;color:var(--muted-foreground)}#manager-empty[hidden]{display:none}@media(max-width:760px){.tab{flex-basis:150px}.toolbar-button{width:31px}.address-wrap{min-width:80px}#home-button{display:none}.manager-sidebar{display:none}.manager-fields,.manager-add{grid-template-columns:1fr}.manager-row{grid-template-columns:22px 1fr}.manager-row .row-actions{grid-column:2}.manager-add{padding:10px}}
 </style></head><body><div id="chrome"><div id="tab-strip"><div id="tabs" role="tablist" aria-label="Вкладки"></div><button id="new" class="toolbar-button" title="Новая вкладка (Ctrl+T)" aria-label="Новая вкладка">+</button><div id="tab-spacer"></div></div>

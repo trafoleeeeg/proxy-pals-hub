@@ -1,5 +1,7 @@
+export type FingerprintOS = "windows" | "macos";
 export type Fingerprint = {
-  os: "windows";
+  os: FingerprintOS;
+  architecture?: "x86" | "arm";
   osVersion: string;
   chromeVersion: string;
   userAgent: string;
@@ -59,6 +61,12 @@ const GPUS = [
 const CORES = [4, 6, 8, 12, 16];
 const MEMORY = [4, 8];
 const FONT_PRESETS = ["Windows 10 базовый", "Windows 11 базовый", "Windows + MS Office"];
+// Keep screen, GPU and CPU families together instead of mixing Mac and Windows hardware.
+const MAC_DEVICES = [
+  { architecture: "arm" as const, cores: 8, screen: { width: 1440, height: 900 }, renderer: "ANGLE (Apple, ANGLE Metal Renderer: Apple M1, Unspecified Version)" },
+  { architecture: "arm" as const, cores: 8, screen: { width: 1470, height: 956 }, renderer: "ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)" },
+  { architecture: "arm" as const, cores: 10, screen: { width: 1512, height: 982 }, renderer: "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)" },
+];
 
 /** Соответствие страны прокси -> язык и часовой пояс, чтобы отпечаток был правдоподобным. */
 export const COUNTRY_LOCALES: Record<string, { language: string; timezone: string; label: string }> = {
@@ -84,37 +92,40 @@ function pick<T>(arr: readonly T[]): T {
   return arr[Math.floor(Math.random() * arr.length)] as T;
 }
 
-export function generateFingerprint(country?: string | null): Fingerprint {
+export function generateFingerprint(country?: string | null, os: FingerprintOS = "windows"): Fingerprint {
   const chromeVersion = pick(CHROME_VERSIONS);
-  const osVersion = pick(WINDOWS_VERSIONS);
-  const screen = pick(SCREENS);
-  const gpu = pick(GPUS);
+  const mac = os === "macos" ? pick(MAC_DEVICES) : null;
+  const osVersion = mac ? pick(["14.0.0", "15.0.0"]) : pick(WINDOWS_VERSIONS);
+  const screen = mac?.screen ?? pick(SCREENS);
+  const gpu = mac ? { vendor: "Google Inc. (Apple)", renderer: mac.renderer } : pick(GPUS);
   const locale = (country && COUNTRY_LOCALES[country.toUpperCase()]) || COUNTRY_LOCALES["US"]!;
   const major = chromeVersion.split(".")[0];
 
   return {
-    os: "windows",
+    os,
+    architecture: mac?.architecture ?? "x86",
     osVersion,
     chromeVersion,
-    userAgent: `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`,
-    platform: "Win32",
+    userAgent: `Mozilla/5.0 (${mac ? "Macintosh; Intel Mac OS X 10_15_7" : "Windows NT 10.0; Win64; x64"}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`,
+    platform: mac ? "MacIntel" : "Win32",
     screen: { ...screen, colorDepth: 24 },
     gpu,
-    hardwareConcurrency: pick(CORES),
-    deviceMemory: pick(MEMORY),
+    hardwareConcurrency: mac?.cores ?? pick(CORES),
+    deviceMemory: mac ? 8 : pick(MEMORY),
     language: locale.language,
     languages: [locale.language, locale.language.split("-")[0] ?? "en"],
     timezone: locale.timezone,
-    fontsPreset: pick(FONT_PRESETS),
+    fontsPreset: mac ? "macOS базовый" : pick(FONT_PRESETS),
     canvasNoise: Math.round(Math.random() * 1e6),
     webglNoise: Math.round(Math.random() * 1e6),
     audioNoise: Math.round(Math.random() * 1e6),
-    webrtc: "proxy",
-    doNotTrack: Math.random() > 0.7,
+    webrtc: "disabled",
+    doNotTrack: false,
   };
 }
 
 export function describeFingerprint(fp: Partial<Fingerprint>): string {
   if (!fp?.chromeVersion) return "Отпечаток не задан";
-  return `Windows ${fp.osVersion === "11.0" ? "11" : "10"} · Chrome ${fp.chromeVersion.split(".")[0]} · ${fp.screen?.width}x${fp.screen?.height} · ${fp.timezone}`;
+  const os = fp.os === "macos" ? `macOS ${fp.osVersion?.split(".")[0] ?? ""}` : `Windows ${fp.osVersion === "11.0" ? "11" : "10"}`;
+  return `${os} · Chrome ${fp.chromeVersion.split(".")[0]} · ${fp.screen?.width}x${fp.screen?.height} · ${fp.timezone}`;
 }

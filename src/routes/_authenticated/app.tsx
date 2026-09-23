@@ -127,6 +127,7 @@ function AppShell() {
           <Button variant="ghost" size="icon" className="ml-auto size-7" title="Свернуть меню" aria-label="Свернуть меню" onClick={() => toggleCollapsed()}><PanelLeftClose className="size-4" /></Button></>}
       </div>
       <nav className="scroll-thin flex flex-1 flex-col gap-1 overflow-y-auto p-2">{NAV.map((item) => {
+        if (item.to === "/app/trash" && ws?.scope !== "owner") return null;
         const active = item.exact ? pathname === item.to || pathname === "/app/" : pathname.startsWith(item.to);
         const Icon = item.icon;
         return <Link key={item.to} to={item.to} title={item.label} aria-label={item.label} aria-current={active ? "page" : undefined}

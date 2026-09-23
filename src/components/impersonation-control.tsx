@@ -36,7 +36,7 @@ export function ImpersonationControl({ workspace, closeProfiles }: { workspace: 
   async function enter(userId: string) {
     if (!workspace || busy) return;
     const employee = team.data?.members.find((row) => row.userId === userId);
-    if (!employee || !window.confirm(`Войти как ${employee.email}? Открытые профили будут закрыты. Все вкладки Umbra в этом браузере переключатся на сотрудника.`)) return;
+    if (!employee) return;
     setBusy(true);
     try {
       await closeProfiles();

@@ -139,6 +139,55 @@ describe("real migrations and RLS", () => {
     expect((await db.query("select id from public.browser_profiles where id = $1", [id])).rows).toEqual([]);
   });
 
+  test("employees can soft-delete but cannot read, restore, purge, or backdate trash even with all rights", async () => {
+    const employee = crypto.randomUUID();
+    const admin = crypto.randomUUID();
+    const deleted = crypto.randomUUID();
+    const expired = crypto.randomUUID();
+    const active = crypto.randomUUID();
+    await db.query("insert into auth.users(id, email, email_confirmed_at) values ($1, 'trash-employee@example.test', now()), ($2, 'trash-admin@example.test', now())", [employee, admin]);
+    await db.query("insert into public.team_members(team_id, user_id, role, scope) values ($1, $2, 'member', 'member'), ($1, $3, 'member', 'manager')", [team, employee, admin]);
+    await db.query("insert into public.profile_folders(team_id, name) values ($1, 'Trash permissions')", [team]);
+    await asUser(owner, "select public.set_folder_access($1, 'Trash permissions', $2, true)", [team, employee]);
+    await asUser(owner, "select public.set_member_permissions($1, $2, false, false, true, false, false, false, false)", [team, employee]);
+    for (const id of [deleted, expired, active]) {
+      await db.query("insert into public.browser_profiles(id, team_id, name, folder, cookies_enc) values ($1, $2, 'Protected trash', 'Trash permissions', 'encrypted-trash')", [id, team]);
+    }
+    await expect(asUser(employee, "select public.bulk_mutate_profiles($1, $2::uuid[], 'delete', '{}'::jsonb)", [team, [deleted, otherProfile]])).rejects.toThrow("недоступны");
+    await expect(asUser(employee, "select public.bulk_mutate_profiles($1, $2::uuid[], 'delete', '{}'::jsonb)", [team, [deleted, profile]])).rejects.toThrow("Нет доступа к папке");
+    await asUser(owner, "select public.acquire_profile_lease($1, 'trash-lock-test')", [deleted]);
+    await expect(asUser(employee, "select public.bulk_mutate_profiles($1, $2::uuid[], 'delete', '{}'::jsonb)", [team, [deleted, active]])).rejects.toThrow("Сначала закройте");
+    await asUser(owner, "select public.force_profile_unlock($1)", [deleted]);
+    expect((await db.query("select deleted_at from public.browser_profiles where id = any($1::uuid[])", [[deleted, active]])).rows).toEqual([{ deleted_at: null }, { deleted_at: null }]);
+    expect(await asUser(employee, "update public.browser_profiles set name = 'No edit permission' where id = $1 returning id", [active])).toEqual([]);
+    await asUser(employee, "select public.bulk_mutate_profiles($1, $2::uuid[], 'delete', '{}'::jsonb)", [team, [deleted]]);
+    await asUser(owner, "select public.set_member_permissions($1, $2, true, true, true, true, true, true, true)", [team, employee]);
+    await db.query("update public.browser_profiles set deleted_at = now() - interval '15 days' where id = $1", [expired]);
+    for (const user of [employee, admin]) {
+      await expect(asUser(user, "select * from public.list_trashed_profiles($1)", [team])).rejects.toThrow("только владельцу");
+      await expect(asUser(user, "select public.restore_trashed_profile($1, $2)", [team, deleted])).rejects.toThrow("только владельцу");
+      expect(await asUser(user, "select id from public.browser_profiles where id = any($1::uuid[])", [[deleted, expired]])).toEqual([]);
+      await expect(asUser(user, "update public.browser_profiles set deleted_at = null, deleted_by = null where id = $1 returning id", [deleted])).rejects.toThrow("permission denied");
+      await expect(asUser(user, "delete from public.browser_profiles where id = $1", [deleted])).rejects.toThrow("permission denied");
+      await expect(asUser(user, "update public.browser_profiles set deleted_at = now() - interval '15 days' where id = $1", [active])).rejects.toThrow("permission denied");
+      await expect(asUser(user, "insert into public.browser_profiles(team_id, name, folder, deleted_at) values ($1, 'Forged trash', 'Trash permissions', now())", [team])).rejects.toThrow("row-level security");
+    }
+    // An unauthorized listing did not trigger its retention DELETE.
+    expect((await db.query("select id from public.browser_profiles where id = $1", [expired])).rows).toEqual([{ id: expired }]);
+    await asUser(owner, "select public.restore_trashed_profile($1, $2)", [team, deleted]);
+    expect(await asUser(employee, "select cookies_enc, deleted_at, deleted_by from public.browser_profiles where id = $1", [deleted])).toEqual([{ cookies_enc: "encrypted-trash", deleted_at: null, deleted_by: null }]);
+    await asUser(owner, "select * from public.list_trashed_profiles($1)", [team]);
+    expect((await db.query("select id from public.browser_profiles where id = $1", [expired])).rows).toEqual([]);
+    // Owner-like membership is not ownership of teams.owner_id.
+    await db.query("update public.team_members set role = 'owner' where team_id = $1 and user_id = $2", [team, employee]);
+    await expect(asUser(employee, "select * from public.list_trashed_profiles($1)", [team])).rejects.toThrow("только владельцу");
+    // Global superadmin retains the pre-existing owner capability.
+    await db.query("insert into private.super_admins(user_id) values ($1)", [admin]);
+    try {
+      expect(await asUser(admin, "select * from public.list_trashed_profiles($1)", [team])).toEqual([]);
+    } finally { await db.query("delete from private.super_admins where user_id = $1", [admin]); }
+  });
+
   test("agent trash helper is service-only and cannot bypass active locks", async () => {
     const id = crypto.randomUUID();
     await db.query("insert into public.browser_profiles(id, team_id, name) values ($1, $2, 'Agent trash')", [id, team]);
@@ -267,7 +316,7 @@ describe("real migrations and RLS", () => {
     await asUser(owner, "select public.bulk_mutate_profiles($1, $2::uuid[], 'update', $3::jsonb)", [team, [profile], JSON.stringify({ folder: "Ready", tags: ["a", "b"] })]);
     expect((await asUser<{ folder: string }>(owner, "select folder from public.browser_profiles where id = $1", [profile]))[0]!.folder).toBe("Ready");
     await asUser(owner, "select public.set_folder_access($1, 'Ready', $2, true)", [team, member]);
-    await expect(asUser(member, "select public.bulk_mutate_profiles($1, $2::uuid[], 'delete', '{}'::jsonb)", [team, [profile]])).rejects.toThrow("Недостаточно прав для изменения профилей");
+    await expect(asUser(member, "select public.bulk_mutate_profiles($1, $2::uuid[], 'delete', '{}'::jsonb)", [team, [profile]])).rejects.toThrow("Недостаточно прав для удаления профилей");
   });
 
   test("assigned proxies cannot disappear or be swapped across teams", async () => {

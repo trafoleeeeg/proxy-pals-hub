@@ -43,6 +43,9 @@ beforeAll(async () => {
   `);
   const dir = fileURLToPath(new URL("../supabase/migrations/", import.meta.url));
   for (const file of (await readdir(dir)).filter((file) => file.endsWith(".sql")).sort()) {
+    // PGlite does not bundle pg_cron; the retention functions and RLS are
+    // tested here, while this extension-backed schedule is deployed on Supabase.
+    if (file === "20260924100000_enable_retention_cron.sql") continue;
     if (file.startsWith("20260919215434_")) {
       // Одноразовая миграция объединения команд привязана к реальным идентификаторам —
       // создаём целевую команду и суперадмина, как в рабочей базе.

@@ -74,13 +74,6 @@ export const listProxies = createServerFn({ method: "POST" })
       .eq("team_id", data.teamId).order("created_at", { ascending: false });
     if (error) throw new Error("Не удалось загрузить прокси");
     const rawRows = (rows ?? []) as unknown as Array<Record<string, unknown>>;
-    const missing = [...new Set(rawRows.filter((row) => row["last_check_ok"] === true && !row["country"] && typeof row["last_check_ip"] === "string")
-      .map((row) => row["last_check_ip"] as string))];
-    const countryByIp = new Map<string, string | null>();
-    if (missing.length) {
-      const { lookupIpCountry } = await import("./geoip.server");
-      await Promise.all(missing.map(async (ip) => countryByIp.set(ip, await lookupIpCountry(ip))));
-    }
     return rawRows.map((row) => {
       const reconciled = row["last_check_ok"] === true && !!row["last_check_ip"] && !!row["rotation_previous_ip"]
         && row["last_check_ip"] !== row["rotation_previous_ip"]
@@ -89,7 +82,7 @@ export const listProxies = createServerFn({ method: "POST" })
       return ({
       id: String(row["id"]), label: String(row["label"] ?? ""), protocol: row["protocol"] as ProxyProtocol,
       host: String(row["host"]), port: Number(row["port"]), username: (row["username"] as string | null) ?? null,
-      country: (row["country"] as string | null) ?? countryByIp.get(String(row["last_check_ip"])) ?? null,
+      country: (row["country"] as string | null) ?? null,
       city: (row["city"] as string | null) ?? null,
       last_checked_at: (row["last_checked_at"] as string | null) ?? null,
       last_check_ok: (row["last_check_ok"] as boolean | null) ?? null,
@@ -356,3 +349,4 @@ export const checkProxy = createServerFn({ method: "POST" })
     await requireProxy(context, data);
     return DESKTOP_PROXY_CHECK_REQUIRED;
   });
+

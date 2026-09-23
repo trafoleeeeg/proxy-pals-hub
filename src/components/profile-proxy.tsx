@@ -5,7 +5,7 @@ import { Activity, Clock3, Loader2, RotateCw } from "lucide-react";
 import { toast } from "sonner";
 import { listProxies, proxyForCheck, recordProxyCheck, rotateProxyIp } from "@/lib/proxies.functions";
 import { normalizeProxyCheck, performDesktopProxyCheck, proxyAddress } from "@/lib/proxy-input";
-import { countryFlag } from "@/lib/country-flag";
+import { IpCountryFlag } from "@/components/ip-country-flag";
 import { confirmRotation } from "@/lib/proxy-rotation";
 import { desktop } from "@/lib/desktop";
 import { Badge } from "@/components/ui/badge";
@@ -160,7 +160,7 @@ export function ProfileProxyCell({ proxy, ops, compact = false }: { proxy: Proxy
       <span className={`size-2 shrink-0 rounded-full ${dot}`} aria-hidden />
       <span className="min-w-0 flex-1 truncate">
         <span className="font-medium">{proxy.label}</span>
-        <span className="mono ml-1 text-muted-foreground">{shownIp && countryFlag(proxy.country) ? <span className="mr-1 font-sans text-sm" title={`Страна выхода: ${proxy.country}`}>{countryFlag(proxy.country)}</span> : null}{shownIp ?? proxyAddress(proxy.host, proxy.port)}</span>
+        <span className="mono ml-1 text-muted-foreground">{shownIp && <IpCountryFlag ip={shownIp} country={proxy.country} className="mr-1 font-sans text-sm" />}{shownIp ?? proxyAddress(proxy.host, proxy.port)}</span>
       </span>
       <Button variant="ghost" size="icon" className="size-6 shrink-0" title="Проверить соединение" aria-label={"Проверить прокси " + proxy.label}
         disabled={ops.busy} onClick={() => ops.checkMut.mutate(proxy.id)}>
@@ -203,7 +203,7 @@ export function ProfileProxyCell({ proxy, ops, compact = false }: { proxy: Proxy
         : proxy.last_check_ok === true ? <Badge className="bg-primary/15 text-primary">работает</Badge>
         : proxy.last_check_ok === false ? <Badge variant="destructive">ошибка</Badge>
         : <span className="text-xs text-muted-foreground">не проверялся</span>}
-      {proxy.last_check_ip && <span className="mono break-all text-xs">{countryFlag(proxy.country) && <span className="mr-1 font-sans text-sm" title={`Страна выхода: ${proxy.country}`}>{countryFlag(proxy.country)}</span>}{proxy.last_check_ip}{proxy.last_check_latency_ms != null ? ` · ${proxy.last_check_latency_ms} мс` : ""}</span>}
+      {proxy.last_check_ip && <span className="mono break-all text-xs"><IpCountryFlag ip={proxy.last_check_ip} country={proxy.country} className="mr-1 font-sans text-sm" />{proxy.last_check_ip}{proxy.last_check_latency_ms != null ? ` · ${proxy.last_check_latency_ms} мс` : ""}</span>}
       {/* Мобильный IP меняется сам по себе: без времени проверки адрес в панели
           выглядит как текущий, хотя он лишь последний измеренный. */}
       {proxy.last_check_ip && proxy.last_checked_at && <span className="text-xs text-muted-foreground">проверено {relativeTime(proxy.last_checked_at)}</span>}
@@ -218,3 +218,4 @@ export function ProfileProxyCell({ proxy, ops, compact = false }: { proxy: Proxy
     {error && <p role="status" className="break-words text-xs text-destructive">{error}</p>}
   </div>;
 }
+

@@ -151,10 +151,10 @@ export function NotesCell({ value, disabled, onSave }: { value: string; disabled
     } catch { setPasteError(true); }
   }
   return <Popover open={open} onOpenChange={(next) => { setOpen(next); if (next) { setDraft(value); setPasteError(false); } }}>
-      <PopoverTrigger asChild><button type="button" disabled={disabled} title={value || "Открыть заметку"}
-        aria-label={`Открыть заметку: ${value || "пусто"}`}
+      <PopoverTrigger asChild><button type="button" disabled={disabled}
+        aria-label={value ? "Открыть заметку профиля" : "Добавить заметку профиля"}
         className="flex w-full min-w-0 items-center gap-2 rounded px-1 py-1 text-left text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-default">
-        <span className="min-w-0 flex-1 truncate">{value || "—"}</span><Pencil className="size-3.5 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">{value ? "Есть заметка" : "—"}</span><Pencil className="size-3.5 shrink-0" />
       </button></PopoverTrigger>
       <PopoverContent align="end" className="w-[min(42rem,calc(100vw-2rem))] space-y-3 p-4">
         <p className="text-sm font-medium">Заметка профиля</p>

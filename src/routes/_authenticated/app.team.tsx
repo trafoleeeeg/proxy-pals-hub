@@ -1,8 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
-import { Pencil, Settings2, ShieldOff, UserPlus, Trash2, X } from "lucide-react";
+import { Pencil, Settings2, ShieldOff, UserPlus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "@/lib/useWorkspace";
 import {
@@ -10,7 +10,6 @@ import {
   createInvite,
   revokeInvite,
   removeMember,
-  listAudit,
   listMemberPermissions,
   setMemberPermissions,
   setMemberScope,
@@ -20,14 +19,12 @@ import {
   deleteEmployeeAccount,
 } from "@/lib/team.functions";
 import { PERMISSION_LABELS, PERMISSION_ORDER, EMPTY_PERMISSIONS, usePermissions, type PermissionKey } from "@/lib/usePermissions";
-import { listFolderAccess, setFolderAccess, listFolders, createFolder, renameFolder, deleteFolder } from "@/lib/folders.functions";
 import { listPresence } from "@/lib/presence.functions";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
@@ -44,27 +41,18 @@ export function TeamPage() {
   const invite = useServerFn(createInvite);
   const revoke = useServerFn(revokeInvite);
   const kick = useServerFn(removeMember);
-  const audit = useServerFn(listAudit);
   const permissionsListFn = useServerFn(listMemberPermissions);
   const permissionsSaveFn = useServerFn(setMemberPermissions);
   const scopeFn = useServerFn(setMemberScope);
-  const folderAccessListFn = useServerFn(listFolderAccess);
-  const folderAccessFn = useServerFn(setFolderAccess);
-  const foldersFn = useServerFn(listFolders);
-  const createFolderFn = useServerFn(createFolder);
-  const renameFolderFn = useServerFn(renameFolder);
-  const deleteFolderFn = useServerFn(deleteFolder);
   const presenceFn = useServerFn(listPresence);
   const createEmployeeFn = useServerFn(createEmployee);
   const updateEmployeeFn = useServerFn(updateEmployee);
   const revokeEmployeeAccessFn = useServerFn(revokeEmployeeAccess);
   const deleteEmployeeAccountFn = useServerFn(deleteEmployeeAccount);
-  const [newFolder, setNewFolder] = useState("");
   const [employee, setEmployee] = useState({ email: "", password: "", displayName: "" });
   const [email, setEmail] = useState("");
   const [removing, setRemoving] = useState<{ userId: string; email: string } | null>(null);
   const [editing, setEditing] = useState<{ userId: string; email: string; displayName: string; password: string } | null>(null);
-  const [activeTab, setActiveTab] = useState("members");
   const [busy, setBusy] = useState(false);
   useEffect(() => { setRemoving(null); }, [ws?.teamId]);
 
@@ -84,29 +72,11 @@ export function TeamPage() {
     enabled: !!ws?.teamId && isOwner,
   });
 
-  const folderAccess = useQuery({
-    queryKey: ["folder-access", ws?.teamId],
-    queryFn: () => folderAccessListFn({ data: { teamId: ws!.teamId } }),
-    enabled: !!ws?.teamId && canManage,
-  });
-
-  const folderList = useQuery({
-    queryKey: ["folders", ws?.teamId],
-    queryFn: () => foldersFn({ data: { teamId: ws!.teamId } }),
-    enabled: !!ws?.teamId && (canManage || canManageFolders),
-  });
-
   const presence = useQuery({
     queryKey: ["presence", ws?.teamId],
     queryFn: () => presenceFn({ data: { teamId: ws!.teamId } }),
     enabled: !!ws?.teamId && canManage,
     refetchInterval: 30_000,
-  });
-
-  const log = useQuery({
-    queryKey: ["audit", ws?.teamId],
-    queryFn: () => audit({ data: { teamId: ws!.teamId } }),
-    enabled: !!ws?.teamId && canManage,
   });
 
   const refresh = async () => {
@@ -130,31 +100,6 @@ export function TeamPage() {
       scopeFn({ data: { teamId: ws!.teamId, userId: v.userId, scope: v.scope } }),
     onSuccess: async () => { toast.success("Уровень доступа изменён"); await refresh(); },
     onError: () => toast.error("Не удалось изменить уровень доступа. Это может сделать только владелец."),
-  });
-
-  const folderAccessMut = useMutation({
-    mutationFn: (v: { folder: string; userId: string; granted: boolean }) =>
-      folderAccessFn({ data: { teamId: ws!.teamId, folder: v.folder, userId: v.userId, granted: v.granted } }),
-    onSuccess: refresh,
-    onError: () => toast.error("Не удалось изменить доступ к папке. Обновите страницу и повторите попытку."),
-  });
-
-  const createFolderMut = useMutation({
-    mutationFn: () => createFolderFn({ data: { teamId: ws!.teamId, name: newFolder.trim() } }),
-    onSuccess: async () => { setNewFolder(""); toast.success("Папка создана"); await refresh(); },
-    onError: (error: Error) => toast.error(error.message || "Не удалось создать папку"),
-  });
-
-  const renameFolderMut = useMutation({
-    mutationFn: (v: { id: string; name: string }) => renameFolderFn({ data: { teamId: ws!.teamId, id: v.id, name: v.name } }),
-    onSuccess: async () => { toast.success("Папка переименована"); await refresh(); },
-    onError: (error: Error) => toast.error(error.message || "Не удалось переименовать папку"),
-  });
-
-  const deleteFolderMut = useMutation({
-    mutationFn: (id: string) => deleteFolderFn({ data: { teamId: ws!.teamId, id } }),
-    onSuccess: async () => { toast.success("Папка удалена, профили перенесены в основную"); await refresh(); },
-    onError: (error: Error) => toast.error(error.message || "Не удалось удалить папку"),
   });
 
   // Короткий логин без «@» превращается в служебный адрес Umbra.
@@ -215,24 +160,7 @@ export function TeamPage() {
   if (workspace.isError) return <p role="alert" className="text-sm text-destructive">Команда недоступна. <Button variant="outline" onClick={() => workspace.refetch()}>Повторить</Button></p>;
 
   if (!canManage && canManageFolders) {
-    return <div className="max-w-3xl space-y-4">
-      <div><h1 className="text-2xl font-semibold">Папки команды</h1><p className="mt-1 text-sm text-muted-foreground">Вы можете управлять папками. Доступ к профилям в них выдаётся владельцем отдельно.</p></div>
-      <div className="flex flex-wrap gap-2">
-        <Input aria-label="Название новой папки" placeholder="Название новой папки" className="max-w-xs" value={newFolder} onChange={(event) => setNewFolder(event.target.value)} />
-        <Button disabled={!newFolder.trim() || createFolderMut.isPending} onClick={() => createFolderMut.mutate()}>Создать папку</Button>
-      </div>
-      {folderList.isPending && <p role="status" className="text-sm">Загрузка папок…</p>}
-      {folderList.isError && <p role="alert" className="text-sm text-destructive">Не удалось загрузить папки. <Button variant="outline" onClick={() => folderList.refetch()}>Повторить</Button></p>}
-      <div className="rounded-lg border border-border bg-card">
-        {(folderList.data ?? []).map((row) => <div key={row.id} className="flex items-center gap-2 border-b border-border p-3 last:border-0">
-          <span className="min-w-0 flex-1 truncate text-sm">{row.name}{row.isDefault && <span className="ml-2 text-xs text-muted-foreground">основная</span>}</span>
-          {!row.virtual && !row.isDefault && <>
-            <Button size="sm" variant="ghost" disabled={renameFolderMut.isPending} onClick={() => { const name = window.prompt("Новое название папки", row.name)?.trim(); if (name && name !== row.name) renameFolderMut.mutate({ id: row.id, name }); }}>Переименовать</Button>
-            <Button size="sm" variant="ghost" disabled={deleteFolderMut.isPending} onClick={() => { if (window.confirm(`Удалить папку «${row.name}»? Профили перейдут в основную.`)) deleteFolderMut.mutate(row.id); }}><Trash2 className="size-4" />Удалить</Button>
-          </>}
-        </div>)}
-      </div>
-    </div>;
+    return <div className="space-y-3"><h1 className="text-2xl font-semibold">Команда</h1><p>Управление папками перенесено в отдельный раздел.</p><Button asChild><Link to="/app/folders">Открыть папки</Link></Button></div>;
   }
 
   if (!canManage) {
@@ -244,27 +172,7 @@ export function TeamPage() {
   }
 
   if (!isOwner) {
-    return (
-      <div>
-        <h1 className="text-2xl font-semibold">Журнал действий</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Состав команды и приглашения меняет только владелец.</p>
-        {log.isPending && <p role="status" className="py-3 text-sm">Загрузка журнала…</p>}
-        <div className="mt-4 rounded-lg border border-border bg-card">
-          <Table>
-            <TableHeader><TableRow><TableHead>Когда</TableHead><TableHead>Кто</TableHead><TableHead>Действие</TableHead></TableRow></TableHeader>
-            <TableBody>
-              {(log.data ?? []).map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell className="mono text-xs">{new Date(r.created_at).toLocaleString("ru-RU")}</TableCell>
-                  <TableCell className="text-xs">{r.email ?? "—"}</TableCell>
-                  <TableCell className="mono text-xs">{r.action}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      </div>
-    );
+    return <div className="space-y-3"><h1 className="text-2xl font-semibold">Команда</h1><p className="text-sm text-muted-foreground">Состав команды и приглашения меняет только владелец.</p><Button asChild variant="outline"><Link to="/app/audit">Открыть журнал</Link></Button></div>;
   }
 
   const rightsByUser = new Map((rights.data ?? []).map((row) => [row.userId, row]));
@@ -273,9 +181,6 @@ export function TeamPage() {
     return Object.fromEntries(PERMISSION_ORDER.map((key) => [key, row?.[key] === true])) as Record<PermissionKey, boolean>;
   };
   const staff = (team.data?.members ?? []).filter((m) => m.role === "member");
-  const folderRows = folderList.data ?? [];
-  const folders = folderRows.map((row) => row.name);
-  const folderAccessSet = new Set((folderAccess.data ?? []).map((row) => `${row.folder}:${row.userId}`));
 
   return (
     <div>
@@ -283,16 +188,8 @@ export function TeamPage() {
       {team.isPending && <p role="status" className="mt-3 text-sm text-muted-foreground">Загрузка участников…</p>}
       {team.isError && <p role="alert" className="mt-3 text-sm text-destructive">Не удалось загрузить команду. <Button variant="outline" onClick={() => team.refetch()}>Повторить</Button></p>}
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-6">
-        <TabsList>
-          <TabsTrigger value="members">Участники</TabsTrigger>
-          <TabsTrigger value="rights">Права</TabsTrigger>
-          <TabsTrigger value="folders">Папки</TabsTrigger>
-          <TabsTrigger value="staff">Сотрудники</TabsTrigger>
-          <TabsTrigger value="log">Журнал</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="members" className="space-y-6">
+      <div className="mt-6 space-y-10">
+        <section className="space-y-6"><h2 className="text-lg font-semibold">Участники</h2>
           <div className="flex flex-wrap gap-2">
             <Input
               placeholder="почта сотрудника"
@@ -389,9 +286,9 @@ export function TeamPage() {
               </ul>
             </div>
           )}
-        </TabsContent>
+        </section>
 
-        <TabsContent value="rights">
+        <section id="rights"><h2 className="mb-3 text-lg font-semibold">Права</h2>
           <p className="mb-3 text-sm text-muted-foreground">Сотрудник работает только с профилями в открытых ему папках. Здесь вы решаете, что именно он может делать: по умолчанию — ничего, кроме запуска профилей.</p>
           {rights.isPending && <p role="status" className="py-3 text-sm">Загрузка прав…</p>}
           {rights.isError && <p role="alert" className="py-3 text-sm text-destructive">Не удалось загрузить права. <Button variant="outline" onClick={() => rights.refetch()}>Повторить</Button></p>}
@@ -441,143 +338,11 @@ export function TeamPage() {
               </Button>
             </div>
           )}
-        </TabsContent>
-
-        <TabsContent value="folders">
-          <p className="mb-3 text-sm text-muted-foreground">Основная папка есть всегда. Остальные папки вы создаёте сами, а доступ к папке открывает сотруднику все профили внутри неё, включая новые.</p>
-          <div className="mb-4 flex flex-wrap gap-2">
-            <Input
-              placeholder="название новой папки"
-              aria-label="Название новой папки"
-              value={newFolder}
-              onChange={(e) => setNewFolder(e.target.value)}
-              className="max-w-xs"
-            />
-            <Button onClick={() => createFolderMut.mutate()} disabled={!newFolder.trim() || createFolderMut.isPending}>Создать папку</Button>
-          </div>
-          <div className="mb-6 rounded-lg border border-border bg-card">
-            <Table>
-              <TableHeader><TableRow><TableHead>Папка</TableHead><TableHead className="text-right">Действия</TableHead></TableRow></TableHeader>
-              <TableBody>
-                {folderRows.map((row) => (
-                  <TableRow key={row.id}>
-                    <TableCell className="font-medium">
-                      {row.name}
-                      {row.isDefault && <Badge variant="outline" className="ml-2">основная</Badge>}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {row.virtual ? (
-                        <span className="text-xs text-muted-foreground">папка из профилей</span>
-                      ) : !row.isDefault && (
-                        <>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={renameFolderMut.isPending}
-                            onClick={() => {
-                              const name = window.prompt("Новое название папки", row.name)?.trim();
-                              if (name && name !== row.name) renameFolderMut.mutate({ id: row.id, name });
-                            }}
-                          >
-                            Переименовать
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={deleteFolderMut.isPending}
-                            onClick={() => { if (window.confirm(`Удалить папку «${row.name}»? Профили перейдут в основную.`)) deleteFolderMut.mutate(row.id); }}
-                          >
-                            <Trash2 className="size-4" /> Удалить
-                          </Button>
-                        </>
-                      )}
-                    </TableCell>
-
-                  </TableRow>
-                ))}
-                {!folderRows.length && <TableRow><TableCell className="py-6 text-sm text-muted-foreground">Папок пока нет</TableCell></TableRow>}
-              </TableBody>
-            </Table>
-          </div>
-          {folderAccess.isError && <p role="alert" className="py-3 text-sm text-destructive">Не удалось загрузить доступы к папкам. <Button variant="outline" onClick={() => folderAccess.refetch()}>Повторить</Button></p>}
-          <div className="overflow-x-auto rounded-lg border border-border bg-card">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Папка</TableHead>
-                  {staff.map((m) => <TableHead key={m.userId} className="text-center text-xs">{m.email}</TableHead>)}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {folders.map((name) => (
-                  <TableRow key={name}>
-                    <TableCell className="font-medium">{name}</TableCell>
-                    {staff.map((m) => (
-                      <TableCell key={m.userId} className="text-center">
-                        <Checkbox
-                          aria-label={`Доступ ${m.email} к папке ${name}`}
-                          disabled={folderAccessMut.isPending || folderAccess.isError}
-                          checked={folderAccessSet.has(`${name}:${m.userId}`)}
-                          onCheckedChange={(v) => folderAccessMut.mutate({ folder: name, userId: m.userId, granted: v === true })}
-                        />
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                ))}
-                {(!folders.length || !staff.length) && (
-                  <TableRow><TableCell className="py-8 text-sm text-muted-foreground">{!staff.length ? "Сначала пригласите сотрудников" : "Пока нет папок с профилями"}</TableCell></TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-
-          <div className="mt-6 space-y-3">
-            <h2 className="text-sm font-semibold">Кому какие папки переданы</h2>
-            {staff.map((m) => {
-              const granted = folders.filter((name) => folderAccessSet.has(`${name}:${m.userId}`));
-              return (
-                <div key={m.userId} className="rounded-lg border border-border bg-card p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-sm font-medium">{m.email}</span>
-                    {granted.length > 0 && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={folderAccessMut.isPending}
-                        onClick={() => granted.forEach((name) => folderAccessMut.mutate({ folder: name, userId: m.userId, granted: false }))}
-                      >
-                        Отозвать все папки
-                      </Button>
-                    )}
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {granted.length === 0 && <span className="text-xs text-muted-foreground">Папки не переданы</span>}
-                    {granted.map((name) => (
-                      <Badge key={name} variant="outline" className="gap-1 pr-1">
-                        {name}
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-5"
-                          title={`Отозвать папку ${name}`}
-                          aria-label={`Отозвать у ${m.email} папку ${name}`}
-                          disabled={folderAccessMut.isPending}
-                          onClick={() => folderAccessMut.mutate({ folder: name, userId: m.userId, granted: false })}
-                        >
-                          <X className="size-3" />
-                        </Button>
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
-            {!staff.length && <p className="text-sm text-muted-foreground">Сначала создайте учётные записи сотрудников</p>}
-          </div>
-        </TabsContent>
+        </section>
 
 
-        <TabsContent value="staff" className="space-y-6">
+
+        <section className="space-y-6"><h2 className="text-lg font-semibold">Сотрудники</h2>
           {ws?.isSuperadmin && (
             <div className="rounded-lg border border-border bg-card p-4">
               <h2 className="mb-3 text-sm font-semibold">Создать учётную запись сотрудника</h2>
@@ -614,7 +379,7 @@ export function TeamPage() {
                       <TableCell className="text-xs">{row.activeProfileId ? `занят: ${row.activeProfileName}` : "—"}</TableCell>
                       <TableCell>
                         <div className="flex justify-end gap-1">
-                          <Button variant="ghost" size="icon" title="Настроить права" aria-label={`Настроить права ${row.email}`} onClick={() => setActiveTab("rights")}><Settings2 className="size-4" /></Button>
+                          <Button variant="ghost" size="icon" title="Настроить права" aria-label={`Настроить права ${row.email}`} onClick={() => document.getElementById("rights")?.scrollIntoView({ behavior: "smooth" })}><Settings2 className="size-4" /></Button>
                           <Button variant="ghost" size="icon" title="Изменить сотрудника" aria-label={`Изменить ${row.email}`} onClick={() => setEditing({ userId: row.userId, email: row.email, displayName: row.name, password: "" })}><Pencil className="size-4" /></Button>
                           <Button variant="ghost" size="icon" title="Забрать все доступы" aria-label={`Забрать все доступы у ${row.email}`} disabled={revokeAccessMut.isPending} onClick={() => revokeAccessMut.mutate(row.userId)}><ShieldOff className="size-4" /></Button>
                           <Button variant="ghost" size="icon" title="Удалить учётную запись" aria-label={`Удалить ${row.email}`} disabled={busy} onClick={() => setRemoving({ userId: row.userId, email: row.email })}><Trash2 className="size-4" /></Button>
@@ -627,35 +392,9 @@ export function TeamPage() {
               </TableBody>
             </Table>
           </div>
-        </TabsContent>
+        </section>
 
-        <TabsContent value="log">
-          {log.isPending && <p role="status" className="py-3 text-sm">Загрузка журнала…</p>}
-          {log.isError && <p role="alert" className="py-3 text-sm text-destructive">Журнал недоступен. <Button variant="outline" onClick={() => log.refetch()}>Повторить</Button></p>}
-          <div className="rounded-lg border border-border bg-card">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Когда</TableHead>
-                  <TableHead>Кто</TableHead>
-                  <TableHead>Действие</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(log.data ?? []).map((r) => (
-                  <TableRow key={r.id}>
-                    <TableCell className="mono text-xs">
-                      {new Date(r.created_at).toLocaleString("ru-RU")}
-                    </TableCell>
-                    <TableCell className="text-xs">{r.email ?? "—"}</TableCell>
-                    <TableCell className="mono text-xs">{r.action}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </TabsContent>
-      </Tabs>
+      </div>
       <Dialog open={!!editing} onOpenChange={(open) => { if (!open && !updateEmployeeMut.isPending) setEditing(null); }}>
         <DialogContent className="w-[calc(100%-2rem)]">
           <DialogHeader><DialogTitle>Изменить сотрудника</DialogTitle><DialogDescription>Можно изменить логин, имя и установить новый пароль.</DialogDescription></DialogHeader>

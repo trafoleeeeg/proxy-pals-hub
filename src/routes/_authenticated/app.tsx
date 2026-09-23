@@ -1,7 +1,7 @@
 import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Bot, Download, Globe, LayoutGrid, LogOut, Monitor, PanelLeftClose, PanelLeftOpen, RefreshCw, Users } from "lucide-react";
+import { ArchiveRestore, Bot, Download, FolderOpen, Globe, LayoutGrid, ListChecks, LogOut, Monitor, PanelLeftClose, PanelLeftOpen, RefreshCw, Users } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useWorkspace, useWorkspaceSelection, WorkspaceProvider } from "@/lib/useWorkspace";
@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FoldersNav } from "@/components/folders-nav";
 import { ProfileFolderProvider } from "@/lib/useProfileFolder";
+import { ImpersonationControl } from "@/components/impersonation-control";
 
 export const Route = createFileRoute("/_authenticated/app")({
   head: () => ({ meta: [
@@ -27,8 +28,11 @@ export const Route = createFileRoute("/_authenticated/app")({
 
 const NAV = [
   { to: "/app", label: "Профили", icon: LayoutGrid, exact: true },
+  { to: "/app/folders", label: "Папки", icon: FolderOpen, exact: false },
   { to: "/app/proxies", label: "Прокси", icon: Globe, exact: false },
   { to: "/app/team", label: "Команда", icon: Users, exact: false },
+  { to: "/app/audit", label: "Журнал", icon: ListChecks, exact: false },
+  { to: "/app/trash", label: "Корзина", icon: ArchiveRestore, exact: false },
   { to: "/app/agents", label: "Агенты", icon: Bot, exact: false },
   { to: "/app/desktop", label: "Приложение", icon: Monitor, exact: false },
 ] as const;
@@ -101,6 +105,7 @@ function AppShell() {
       await runtime.closeAll();
       const result = await supabase.auth.signOut();
       if (result.error) throw new Error();
+      try { sessionStorage.removeItem("umbra:impersonation"); } catch { /* Нет доступа к хранилищу. */ }
       await qc.cancelQueries(); qc.clear();
       await navigate({ to: "/auth", replace: true });
     } catch { toast.error("Выход не выполнен. Проверьте синхронизацию профилей и подключение."); }
@@ -122,7 +127,7 @@ function AppShell() {
           <Icon className={"size-4 shrink-0 " + (active ? "text-primary" : "")} />{!collapsed && <span>{item.label}</span>}
         </Link>;
       })}
-        {(pathname === "/app" || pathname === "/app/") && <FoldersNav collapsed={collapsed} />}
+        <FoldersNav collapsed={collapsed} />
       </nav>
       <div className="border-t border-sidebar-border p-2">
         <div className={"min-w-0 space-y-2 " + (collapsed ? "hidden" : "block")}>
@@ -133,6 +138,7 @@ function AppShell() {
           </Select>
           {selection.workspaces.isError && <Button size="sm" variant="ghost" onClick={() => selection.workspaces.refetch()}>Повторить загрузку команд</Button>}
           <p className="text-xs text-muted-foreground">{ws?.scope === "owner" ? "Владелец" : ws?.scope === "manager" ? "Администратор" : ws ? "Сотрудник" : ""}</p>
+          <ImpersonationControl workspace={ws} closeProfiles={runtime.closeAll} />
         </div>
         <Button variant="ghost" size="sm" title="Выйти" aria-label="Выйти" disabled={signingOut || !runtime.ready} className={"mt-2 w-full " + (collapsed ? "px-0" : "justify-start px-2")} onClick={signOut}><LogOut className="size-4" />{!collapsed && <span>{signingOut ? "Сохранение…" : "Выйти"}</span>}</Button>
       </div>

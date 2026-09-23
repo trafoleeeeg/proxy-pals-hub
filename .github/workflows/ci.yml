@@ -27,6 +27,11 @@ jobs:
       - name: Установка зависимостей
         run: bun install --frozen-lockfile
 
+      # TanStack Router generates routeTree.gen.ts during Vite build.
+      # Keep that generated file out of commits, but generate it before tsgo.
+      - name: Сборка панели и генерация маршрутов
+        run: bun run build
+
       - name: Проверка типов
         run: bun run typecheck
 
@@ -35,9 +40,6 @@ jobs:
 
       - name: Проверка правил автоматического выпуска ядра
         run: node --test .github/scripts/core-update-policy.test.cjs
-
-      - name: Сборка панели
-        run: bun run build
 
       - name: Зависимости клиента
         working-directory: desktop

@@ -36,6 +36,7 @@ export const Route = createFileRoute("/api/public/agent/profiles")({
             .from("browser_profiles")
             .select("id, name, folder, tags, notes, proxy_id, fingerprint, created_at, updated_at")
             .eq("team_id", agent.teamId)
+            .is("deleted_at", null)
             .order("created_at", { ascending: false })
             .limit(500);
           if (error) throw new AgentError(500, "Не удалось получить профили");

@@ -88,6 +88,7 @@ const folderName = folder.pipe(z.string().min(1).max(200));
 export const createFolderSchema = z.object({ teamId: uuidSchema, name: folderName }).strict();
 export const renameFolderSchema = z.object({ teamId: uuidSchema, id: uuidSchema, name: folderName }).strict();
 export const folderIdSchema = z.object({ teamId: uuidSchema, id: uuidSchema }).strict();
+export const reorderFoldersSchema = z.object({ teamId: uuidSchema, ids: z.array(uuidSchema).max(500) }).strict();
 export const presenceSchema = z.object({
   teamId: uuidSchema, profileId: uuidSchema.nullable().optional(), deviceLabel: text(200).optional(),
 }).strict();

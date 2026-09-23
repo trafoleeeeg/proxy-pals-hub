@@ -74,6 +74,13 @@ export const listProxies = createServerFn({ method: "POST" })
       .eq("team_id", data.teamId).order("created_at", { ascending: false });
     if (error) throw new Error("Не удалось загрузить прокси");
     const rawRows = (rows ?? []) as unknown as Array<Record<string, unknown>>;
+    const missing = [...new Set(rawRows.filter((row) => row["last_check_ok"] === true && !row["country"] && typeof row["last_check_ip"] === "string")
+      .map((row) => row["last_check_ip"] as string))];
+    const countryByIp = new Map<string, string | null>();
+    if (missing.length) {
+      const { lookupIpCountry } = await import("./geoip.server");
+      await Promise.all(missing.map(async (ip) => countryByIp.set(ip, await lookupIpCountry(ip))));
+    }
     return rawRows.map((row) => {
       const reconciled = row["last_check_ok"] === true && !!row["last_check_ip"] && !!row["rotation_previous_ip"]
         && row["last_check_ip"] !== row["rotation_previous_ip"]
@@ -82,7 +89,8 @@ export const listProxies = createServerFn({ method: "POST" })
       return ({
       id: String(row["id"]), label: String(row["label"] ?? ""), protocol: row["protocol"] as ProxyProtocol,
       host: String(row["host"]), port: Number(row["port"]), username: (row["username"] as string | null) ?? null,
-      country: (row["country"] as string | null) ?? null, city: (row["city"] as string | null) ?? null,
+      country: (row["country"] as string | null) ?? countryByIp.get(String(row["last_check_ip"])) ?? null,
+      city: (row["city"] as string | null) ?? null,
       last_checked_at: (row["last_checked_at"] as string | null) ?? null,
       last_check_ok: (row["last_check_ok"] as boolean | null) ?? null,
       last_check_ip: (row["last_check_ip"] as string | null) ?? null,
@@ -258,6 +266,7 @@ export const recordProxyCheck = createServerFn({ method: "POST" })
     // confirming probe: the panel then shows the new address immediately
     // instead of sitting on "меняем IP…" with stale data.
     const changedIp = (reconcilesRotation || confirmsRotation) && data.ok && data.ip && data.ip !== current["rotation_previous_ip"] ? data.ip : null;
+    const exitIpChanged = data.ok && !!data.ip && data.ip !== current["last_check_ip"];
     const rotation = outcome ? {
       rotation_status: outcome,
       rotation_last_error: outcome === "error" ? "not_confirmed" : null,
@@ -268,8 +277,8 @@ export const recordProxyCheck = createServerFn({ method: "POST" })
       last_checked_at: now, last_check_ok: data.ok,
       last_check_ip: data.ip ?? null, last_check_latency_ms: data.latency ?? null,
       last_check_error: data.ok ? null : data.error ?? null,
-      ...(data.ok && data.country ? { country: data.country } : {}),
-      ...(data.ok && data.city ? { city: data.city } : {}),
+      ...(data.ok && data.country ? { country: data.country } : exitIpChanged ? { country: null } : {}),
+      ...(data.ok && data.city ? { city: data.city } : exitIpChanged ? { city: null } : {}),
       ...rotation,
     } as never).eq("id", data.id).eq("team_id", data.teamId);
     if (confirmsRotation || reconcilesRotation) update = update.eq("rotation_requested_at", current["rotation_requested_at"]).eq("rotation_status", current["rotation_status"]);

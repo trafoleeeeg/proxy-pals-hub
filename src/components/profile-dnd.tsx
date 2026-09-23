@@ -4,7 +4,7 @@ import { closestCenter, DndContext, DragOverlay, KeyboardSensor, PointerSensor, 
 import { arrayMove, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical } from "lucide-react";
-import { createContext, useContext, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import { createContext, forwardRef, useCallback, useContext, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { toast } from "sonner";
 import { reorderFolders, type FolderRow } from "@/lib/folders.functions";
 import { bulkUpdateProfiles, reorderProfiles, type ProfileRow } from "@/lib/profiles.functions";
@@ -43,16 +43,22 @@ const detectDropTarget: CollisionDetection = (args) => {
 type HandleProps = Pick<ReturnType<typeof useSortable>, "attributes" | "listeners" | "setActivatorNodeRef"> & { disabled: boolean; name: string };
 const DragHandleContext = createContext<HandleProps | null>(null);
 
-export function ProfileDragRow({ id, name, disabled, children, ...props }: { id: string; name: string; disabled: boolean } & ComponentProps<typeof TableRow>) {
-  const { attributes, listeners, setActivatorNodeRef, setNodeRef, transform, transition, isDragging, isOver } = useSortable({
-    id: profileDragId(id), disabled: { draggable: disabled, droppable: false }, data: { label: name, kind: "profile" },
-  });
-  return <DragHandleContext.Provider value={{ attributes, listeners, setActivatorNodeRef, disabled, name }}>
-    <TableRow ref={setNodeRef} {...props}
-      className={`${props.className ?? ""} ${isDragging ? "opacity-35" : ""} ${isOver ? "bg-primary/10" : ""}`}
-      style={{ ...props.style, transform: CSS.Transform.toString(transform), transition }}>{children}</TableRow>
-  </DragHandleContext.Provider>;
-}
+export const ProfileDragRow = forwardRef<HTMLTableRowElement, { id: string; name: string; disabled: boolean } & ComponentProps<typeof TableRow>>(
+  function ProfileDragRow({ id, name, disabled, children, ...props }, forwardedRef) {
+    const { attributes, listeners, setActivatorNodeRef, setNodeRef, transform, transition, isDragging, isOver } = useSortable({
+      id: profileDragId(id), disabled: { draggable: disabled, droppable: false }, data: { label: name, kind: "profile" },
+    });
+    const setRefs = useCallback((node: HTMLTableRowElement | null) => {
+      setNodeRef(node);
+      if (typeof forwardedRef === "function") forwardedRef(node);
+      else if (forwardedRef) forwardedRef.current = node;
+    }, [setNodeRef, forwardedRef]);
+    return <DragHandleContext.Provider value={{ attributes, listeners, setActivatorNodeRef, disabled, name }}>
+      <TableRow {...props} ref={setRefs}
+        className={`${props.className ?? ""} ${isDragging ? "opacity-35" : ""} ${isOver ? "bg-primary/10" : ""}`}
+        style={{ ...props.style, transform: CSS.Transform.toString(transform), transition }}>{children}</TableRow>
+    </DragHandleContext.Provider>;
+});
 
 export function ProfileDragHandle() {
   const handle = useContext(DragHandleContext);

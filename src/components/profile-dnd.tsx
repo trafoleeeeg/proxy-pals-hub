@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { DndContext, DragOverlay, KeyboardSensor, PointerSensor, pointerWithin, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { closestCenter, DndContext, DragOverlay, KeyboardSensor, PointerSensor, pointerWithin, useSensor, useSensors, type CollisionDetection, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical } from "lucide-react";
@@ -17,6 +17,28 @@ import { TableRow } from "@/components/ui/table";
 export const folderDragId = (id: string) => `folder:${id}`;
 export const folderPageDragId = (id: string) => `folder-page:${id}`;
 export const profileDragId = (id: string) => `profile:${id}`;
+
+const detectDropTarget: CollisionDetection = (args) => {
+  const pointerHits = args.pointerCoordinates ? pointerWithin(args) : [];
+  if (args.active.data.current?.["kind"] !== "profile")
+    return args.pointerCoordinates ? pointerHits : closestCenter(args);
+
+  // A profile row also moves under the pointer. Using pointerWithin alone can
+  // keep reporting the dragged row instead of the row underneath it.
+  const folderHit = pointerHits.filter(({ id }) => String(id).startsWith("folder:") || String(id).startsWith("folder-page:"));
+  if (folderHit.length) return folderHit;
+  const profiles = args.droppableContainers.filter(({ id }) => String(id).startsWith("profile:"));
+  if (!profiles.length) return [];
+  if (args.pointerCoordinates) {
+    const rects = profiles.map(({ id }) => args.droppableRects.get(id)).filter((rect) => rect != null);
+    const { x, y } = args.pointerCoordinates;
+    if (!rects.length || x < Math.min(...rects.map((rect) => rect.left))
+      || x > Math.max(...rects.map((rect) => rect.right))
+      || y < Math.min(...rects.map((rect) => rect.top))
+      || y > Math.max(...rects.map((rect) => rect.bottom))) return [];
+  }
+  return closestCenter({ ...args, droppableContainers: profiles });
+};
 
 type HandleProps = Pick<ReturnType<typeof useSortable>, "attributes" | "listeners" | "setActivatorNodeRef"> & { disabled: boolean; name: string };
 const DragHandleContext = createContext<HandleProps | null>(null);
@@ -108,7 +130,7 @@ export function ProfileDndProvider({ children }: { children: ReactNode }) {
     } catch (error) { toast.error(error instanceof Error ? error.message : "Не удалось перенести профиль"); }
   }
 
-  return <DndContext sensors={sensors} collisionDetection={pointerWithin}
+  return <DndContext sensors={sensors} collisionDetection={detectDropTarget}
     onDragStart={(event) => setActiveLabel(String(event.active.data.current?.["label"] ?? "Перемещение"))}
     onDragCancel={() => setActiveLabel(null)} onDragEnd={(event) => void finish(event)}>
     {children}

@@ -1,20 +1,49 @@
-// Registered only by CDP in document main worlds before page scripts run.
-// This is not an Electron preload and does not configure workers or OOPIFs.
+// Installed before website code in documents and attached worker targets.
+// Privacy controls are intentionally observable; they do not emulate hardware.
 function applyDocumentFingerprint(fp) {
   const define = (object, key, value) => {
     Object.defineProperty(object, key, { get: () => value, configurable: true });
   };
-  define(navigator, "hardwareConcurrency", fp.hardwareConcurrency);
-  define(navigator, "deviceMemory", fp.deviceMemory);
-  define(navigator, "doNotTrack", fp.doNotTrack ? "1" : null);
-  define(navigator, "languages", Object.freeze([...fp.languages]));
-  define(navigator, "language", fp.languages[0]);
-  define(screen, "width", fp.screen.width);
-  define(screen, "height", fp.screen.height);
-  define(screen, "availWidth", fp.screen.width);
-  define(screen, "availHeight", Math.max(1, fp.screen.height - (fp.os === "macos" ? 25 : 40)));
-  define(screen, "colorDepth", fp.screen.colorDepth);
-  define(screen, "pixelDepth", fp.screen.colorDepth);
+  const nav = globalThis.Navigator?.prototype || globalThis.WorkerNavigator?.prototype || navigator;
+  define(nav, "hardwareConcurrency", fp.hardwareConcurrency);
+  define(nav, "deviceMemory", fp.deviceMemory);
+  define(nav, "doNotTrack", fp.doNotTrack ? "1" : null);
+  define(nav, "languages", Object.freeze([...fp.languages]));
+  define(nav, "language", fp.languages[0]);
+  define(nav, "platform", fp.platform);
+  define(nav, "userAgent", fp.userAgent);
+  // Never inherit an exception from the top frame or a wildcard. Opaque
+  // documents (data:, sandboxed frames) stay restricted.
+  const origin = globalThis.origin || globalThis.location?.origin;
+  const compatible = origin && origin !== "null" && fp.hardwareOrigins?.includes(origin) === true;
+  if (!compatible) {
+    define(nav, "gpu", undefined);
+    define(nav, "serviceWorker", undefined);
+    for (const name of ["SharedWorker", "AudioContext", "webkitAudioContext", "OfflineAudioContext", "webkitOfflineAudioContext", "queryLocalFonts"]) define(globalThis, name, undefined);
+    const denied = () => { throw new DOMException("Hardware readback blocked by profile privacy settings", "SecurityError"); };
+    for (const ctor of [globalThis.HTMLCanvasElement, globalThis.OffscreenCanvas]) {
+      if (!ctor) continue;
+      const original = ctor.prototype.getContext;
+      ctor.prototype.getContext = function (type, ...args) {
+        if (["webgl", "experimental-webgl", "webgl2", "webgpu"].includes(String(type).toLowerCase())) return null;
+        return original.call(this, type, ...args);
+      };
+      for (const method of ["toDataURL", "toBlob", "convertToBlob"]) if (typeof ctor.prototype[method] === "function") ctor.prototype[method] = denied;
+    }
+    for (const ctor of [globalThis.CanvasRenderingContext2D, globalThis.OffscreenCanvasRenderingContext2D]) {
+      if (ctor) ctor.prototype.getImageData = denied;
+    }
+  }
+  if (globalThis.screen) {
+    define(globalThis, "devicePixelRatio", fp.os === "macos" ? 2 : 1);
+    const screenProto = globalThis.Screen?.prototype || screen;
+    define(screenProto, "width", fp.screen.width);
+    define(screenProto, "height", fp.screen.height);
+    define(screenProto, "availWidth", fp.screen.width);
+    define(screenProto, "availHeight", Math.max(1, fp.screen.height - (fp.os === "macos" ? 25 : 40)));
+    define(screenProto, "colorDepth", fp.screen.colorDepth);
+    define(screenProto, "pixelDepth", fp.screen.colorDepth);
+  }
   for (const ctor of [globalThis.WebGLRenderingContext, globalThis.WebGL2RenderingContext]) {
     if (!ctor) continue;
     const original = ctor.prototype.getParameter;
@@ -29,7 +58,7 @@ function applyDocumentFingerprint(fp) {
     value = Math.imul(value ^ (value >>> 16), 0x45d9f3b) >>> 0;
     return (value & 1) ? 1 : -1;
   };
-  if (fp.canvasNoise && globalThis.CanvasRenderingContext2D) {
+  if (compatible && fp.canvasNoise && globalThis.CanvasRenderingContext2D) {
     const originalGet = CanvasRenderingContext2D.prototype.getImageData;
     const perturb = (data, width, height) => {
       // Fingerprint probes use small synthetic canvases. Never rewrite large
@@ -63,7 +92,7 @@ function applyDocumentFingerprint(fp) {
       HTMLCanvasElement.prototype[method] = function (...args) { return original.apply(copy(this), args); };
     }
   }
-  if (fp.audioNoise) {
+  if (compatible && fp.audioNoise) {
     const perturb = (data) => {
       for (let index = 0; index < data.length; index += 97) if (Number.isFinite(data[index])) data[index] += delta(fp.audioNoise, index) * 1e-7;
     };
@@ -87,9 +116,10 @@ function applyDocumentFingerprint(fp) {
   define(globalThis, "PublicKeyCredential", undefined);
   if (navigator.credentials) {
     for (const method of ["get", "create"]) {
-      const original = navigator.credentials[method];
+      const credentials = globalThis.CredentialsContainer?.prototype || navigator.credentials;
+      const original = credentials[method];
       if (typeof original !== "function") continue;
-      navigator.credentials[method] = function (options) {
+      credentials[method] = function (options) {
         if (options && options.publicKey) {
           return Promise.reject(new DOMException("The operation either timed out or was not allowed.", "NotAllowedError"));
         }
@@ -100,7 +130,8 @@ function applyDocumentFingerprint(fp) {
   // Profile sessions deny microphone/camera access. Do not still expose the
   // number and stable identifiers of attached devices through enumeration.
   if (navigator.mediaDevices && typeof navigator.mediaDevices.enumerateDevices === "function") {
-    navigator.mediaDevices.enumerateDevices = function () { return Promise.resolve([]); };
+    const media = globalThis.MediaDevices?.prototype || navigator.mediaDevices;
+    media.enumerateDevices = function () { return Promise.resolve([]); };
   }
   // This document-level switch supplements the native non-proxied UDP policy.
   if (fp.webrtc === "disabled") {

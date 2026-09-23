@@ -2,60 +2,47 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { createLeakAudit, SAFE_WEBRTC } = require("../runtime/leak-check.cjs");
 
-function fakeSession() {
-  return {
-    fromPartition: () => ({
-      setProxy: async () => {},
-      closeAllConnections: async () => {},
-      clearStorageData: async () => {},
-      clearCache: async () => {},
-    }),
-  };
-}
-
-function audit({ direct = "5.5.5.5", profile = "9.9.9.9", dns = "9.9.9.9", blocked = [] }) {
-  let call = 0;
-  return createLeakAudit({ session: fakeSession(), net: {} }, {
-    blockSession: (ses) => blocked.push(ses),
-    requestJson: async (_net, ses, url) => {
-      call++;
-      if (!ses.profile) return { ip: direct };
-      return url.includes("edns") ? { dns: { ip: dns } } : { ip: profile };
-    },
+test("IP probe uses only the profile session and never certifies DNS or ICE", async () => {
+  const ses = {};
+  let calls = 0;
+  const audit = createLeakAudit({ net: {}, session: { fromPartition() { throw new Error("direct session forbidden"); } } }, {
+    requestJson: async (_net, actual) => { assert.equal(actual, ses); calls++; return { ip: "203.0.113.1" }; },
   });
-}
-
-test("чистый прокси не даёт утечек", async () => {
-  const blocked = [];
-  const run = audit({ blocked });
-  const result = await run({ ses: { profile: true }, hasProxy: true, webrtcPolicy: SAFE_WEBRTC });
+  const result = await audit({ ses, hasProxy: true, webrtcPolicy: SAFE_WEBRTC });
+  assert.equal(calls, 1);
+  assert.equal(result.ip, "203.0.113.1");
+  assert.equal(result.ok, false);
+  assert.equal(result.complete, false);
   assert.equal(result.leaked, false);
-  assert.equal(result.ok, true);
-  assert.equal(blocked.length, 0);
-  assert.equal(result.checks.find((c) => c.id === "ip").state, "ok");
+  assert.ok(result.checks.every((check) => check.state === "unknown"));
+  assert.equal(result.directIp, undefined);
 });
 
-test("совпадение с реальным адресом блокирует трафик", async () => {
-  const blocked = [];
-  const run = audit({ direct: "5.5.5.5", profile: "5.5.5.5", dns: "5.5.5.5", blocked });
-  const ses = { profile: true, closeAllConnections: async () => {} };
-  const result = await run({ ses, hasProxy: true, webrtcPolicy: SAFE_WEBRTC });
+test("failed probes are not converted into a green leak result", async () => {
+  const audit = createLeakAudit({ net: {} }, { requestJson: async () => { throw new Error("offline"); } });
+  const result = await audit({ ses: {}, hasProxy: true, webrtcPolicy: SAFE_WEBRTC });
+  assert.equal(result.ok, false);
+  assert.equal(result.complete, false);
+  assert.equal(result.checks.find((check) => check.id === "ip").state, "error");
+});
+
+test("unsafe WebRTC policy blocks before sending probes", async () => {
+  const ses = { closeAllConnections: async () => {} };
+  let blocked;
+  const audit = createLeakAudit({ net: {} }, {
+    blockSession: (session) => { blocked = session; },
+    requestJson: async () => { assert.fail("blocked session must not probe"); },
+  });
+  const result = await audit({ ses, hasProxy: true, webrtcPolicy: "default" });
+  assert.equal(blocked, ses);
   assert.equal(result.leaked, true);
-  assert.equal(blocked[0], ses);
-  assert.equal(result.checks.find((c) => c.id === "dns").state, "leak");
+  assert.equal(result.ok, false);
 });
 
-test("небезопасная политика WebRTC считается утечкой", async () => {
-  const blocked = [];
-  const run = audit({ blocked });
-  const result = await run({ ses: { profile: true, closeAllConnections: async () => {} }, hasProxy: true, webrtcPolicy: "default" });
-  assert.equal(result.checks.find((c) => c.id === "webrtc").state, "leak");
-  assert.equal(result.leaked, true);
-});
-
-test("без прокси проверки пропускаются", async () => {
-  const run = audit({});
-  const result = await run({ ses: { profile: true }, hasProxy: false });
-  assert.equal(result.leaked, false);
+test("direct mode warns without contacting probe services", async () => {
+  const audit = createLeakAudit({ net: {} }, { requestJson: async () => assert.fail("unexpected probe") });
+  const result = await audit({ ses: {}, hasProxy: false });
+  assert.equal(result.ok, false);
   assert.ok(result.checks.every((check) => check.state === "skip"));
+  assert.match(result.checks[0].detail, /сайт видит адрес/);
 });

@@ -5,7 +5,8 @@ const { createRuntimeProxy, blockSession } = require("./proxy.cjs");
 const { createCookieStore, initializeCookies, canonicalCookies, parseCookieImport, applyImportedCookies } = require("./cookies.cjs");
 const { createTabStore, sanitizeTabs } = require("./tabs.cjs");
 const { createBookmarkStore, defaultBookmarks, sanitizeBookmarks } = require("./bookmarks.cjs");
-const { normalizeFingerprint, applyFingerprint } = require("./fingerprint.cjs");
+const { normalizeFingerprint, applyFingerprint, installSessionPrivacy } = require("./fingerprint.cjs");
+const { createPrivacyStore, privacyOrigin } = require("./privacy-policy.cjs");
 const { sanitizeBrowserSettings } = require("./browser-settings.cjs");
 const { SAFE_WEBRTC } = require("./leak-check.cjs");
 const { createFaviconLoader } = require("./favicons.cjs");
@@ -45,6 +46,10 @@ function createProfileRuntime(electron, options = {}) {
   let store;
   let tabStoreRef;
   let bookmarkStoreRef;
+  let privacyStoreRef;
+  let extensionConsentRef;
+  const extensionConsent = () => extensionConsentRef ||= options.extensionConsent || createPrivacyStore({ safeStorage, userData: app.getPath("userData"), extensions: true });
+  const privacyStore = () => privacyStoreRef ||= options.privacyStore || createPrivacyStore({ safeStorage, userData: app.getPath("userData") });
   const cookieStore = () => store ||= options.cookieStore || createCookieStore({ safeStorage, userData: app.getPath("userData") });
   const tabStore = () => tabStoreRef ||= options.tabStore || createTabStore({ safeStorage, userData: app.getPath("userData") });
   const bookmarkStore = () => bookmarkStoreRef ||= options.bookmarkStore || createBookmarkStore({ safeStorage, userData: app.getPath("userData") });
@@ -184,7 +189,27 @@ function createProfileRuntime(electron, options = {}) {
       getBookmarks: () => allBookmarks(entry),
       getBookmarkBarVisible: () => entry.bookmarkBarVisible !== false,
       getExtensions: () => entry.extensionList || [],
+      setExtensionEnabled: async (id, enabled) => {
+        if (!(entry.extensionList || []).some((item) => item.id === id)) throw new Error("Расширение не установлено на этом ПК");
+        const ids = new Set(entry.allowedExtensions || []);
+        if (enabled) ids.add(id); else ids.delete(id);
+        await extensionConsent().write(entry.profileId, [...ids]);
+        await closeProfileWindow(entry.profileId);
+      },
       getZoomLevel: () => entry.zoomLevel || 0,
+      getPrivacy: (url) => {
+        const origin = privacyOrigin(url);
+        return { origin, allowed: !!origin && entry.fp.hardwareOrigins?.includes(origin) === true };
+      },
+      setPrivacy: async (origin, allowed) => {
+        if (!origin || privacyOrigin(origin) !== origin) throw new Error("Откройте сайт для настройки защиты");
+        const origins = new Set(entry.fp.hardwareOrigins || []);
+        if (allowed) origins.add(origin); else origins.delete(origin);
+        await privacyStore().write(entry.profileId, [...origins]);
+        // Restart the entire profile: reload alone cannot revoke capabilities
+        // already captured by shared workers, frames or another open tab.
+        await closeProfileWindow(entry.profileId);
+      },
       setZoomLevel: async (level) => { entry.zoomLevel = level; notifyBrowserSettings(entry); },
       setExtensionPinned: async (id, pinned) => {
         if (!extensionStore?.setPinned) return;
@@ -458,7 +483,7 @@ function createProfileRuntime(electron, options = {}) {
 
   function browserSettings(entry) {
     return { profileId: entry.profileId, bookmarks: entry.bookmarks || [], bookmarkBarVisible: entry.bookmarkBarVisible !== false,
-      zoomLevel: entry.zoomLevel || 0, extensions: (entry.extensionList || []).filter((item) => item.url).map((item) => ({ id: item.id, pinned: item.pinned === true, url: item.url })),
+      zoomLevel: entry.zoomLevel || 0, extensions: (entry.extensionList || []).filter((item) => item.url && item.enabled).map((item) => ({ id: item.id, pinned: item.pinned === true, url: item.url })),
       activeProxyId: entry.activeProxyId || null, proxyFailover: entry.proxyFailover === true,
       revision: entry.settingsRevision || 0 };
   }
@@ -474,9 +499,10 @@ function createProfileRuntime(electron, options = {}) {
     // Незагруженные расширения остаются в списке с пометкой, иначе они молча исчезают.
     entry.extensionList = all.map((item) => {
       const runtimeId = entry.extensionsLoaded?.get(item.id) || "";
-      const failed = !!entry.extensionsLoaded && !entry.extensionsLoaded.has(item.id);
+      const enabled = entry.allowedExtensions?.includes(item.id) === true;
+      const failed = enabled && !!entry.extensionsLoaded && !entry.extensionsLoaded.has(item.id);
       return {
-        id: item.id, name: item.name, version: item.version, enabled: !failed, failed, icon: item.icon || "",
+        id: item.id, name: item.name, version: item.version, enabled, failed, icon: item.icon || "",
         pinned: item.pinned === true, popup: item.popup || "", options: item.options || "", runtimeId,
         ...(item.url ? { url: item.url } : {}),
       };
@@ -550,32 +576,20 @@ function createProfileRuntime(electron, options = {}) {
       // Отпечаток применяется к пустому рендереру до любой удалённой навигации.
       // Полная загрузка about:blank больше не ожидается: страница лишь
       // запускается без await, чтобы рендерер существовал для CDP. Если
-      // отладчик недоступен или не отвечает без документа, делаем запасной
-      // заход через about:blank с ожиданием.
+      // отладчик недоступен, запуск отклоняется. Каждый CDP-запрос ограничен
+      // таймаутом; второй контроллер поверх незавершённого не запускается.
       try {
         if (win.webContents.getURL() === "" && !win.webContents.isLoading()) {
           win.webContents.loadURL("about:blank").catch(() => {});
         }
       } catch { /* рендерер появится при первой навигации */ }
-      const fingerprintAttempt = configureFingerprint(win.webContents, entry.fp);
-      let fingerprintTimer;
-      try {
-        entry.fingerprintDiagnostics = await Promise.race([
-          fingerprintAttempt,
-          new Promise((_, reject) => {
-            fingerprintTimer = setTimeout(() => reject(new Error("Fingerprint debugger timeout")), 5000);
-            fingerprintTimer.unref?.();
-          }),
-        ]);
-      } catch (first) {
-        clearTimeout(fingerprintTimer);
-        if (entry.closingRequested) throw first;
-        try { if (win.webContents.debugger.isAttached()) win.webContents.debugger.detach(); } catch { /* игнорируем */ }
-        await navigate(win, "about:blank");
-        entry.fingerprintDiagnostics = await configureFingerprint(win.webContents, entry.fp);
-      }
-      clearTimeout(fingerprintTimer);
-      fingerprintAttempt.catch(() => {});
+      const fingerprintOptions = { onFailure: () => {
+        if (entry.closingRequested || win.closing || win.isDestroyed()) return;
+        entry.lastError = "Защита страницы недоступна, профиль остановлен";
+        blockSession(entry.ses);
+        void closeProfileWindow(entry.profileId).catch(() => {});
+      } };
+      entry.fingerprintDiagnostics = await configureFingerprint(win.webContents, entry.fp, fingerprintOptions);
       win.webContents.debugger.on("detach", () => {
         if (entry.closingRequested || win.closing || win.isDestroyed()) return;
         entry.lastError = "Отпечаток браузера отключился, профиль остановлен";
@@ -639,6 +653,12 @@ function createProfileRuntime(electron, options = {}) {
         for (const extension of extensionApi.getAllExtensions?.() || []) extensionApi.removeExtension(extension.id);
         const defaultUA = entry.ses.getUserAgent().replace(/\s(?:Electron|Umbra)\/[^ ]+/g, "");
         entry.fp = normalizeFingerprint(payload.fingerprint || {}, defaultUA);
+        entry.fp.hardwareOrigins = await privacyStore().read(id);
+        // Remove only background worker registrations before opening the network
+        // gate. Old workers must not execute with a revoked/missing exception.
+        // Cookies, localStorage, IndexedDB and cache storage remain intact.
+        if (entry.ses.clearStorageData) await entry.ses.clearStorageData({ storages: ["serviceworkers"] });
+        if (entry.ses.webRequest.onBeforeSendHeaders) installSessionPrivacy(entry.ses, entry.fp);
         entry.ses.setUserAgent(entry.fp.userAgent, entry.fp.languages.join(","));
         // Warm the browser chrome while the authenticated proxy and cookies are
         // being prepared. Fingerprint application still completes before any
@@ -672,9 +692,10 @@ function createProfileRuntime(electron, options = {}) {
         entry.cookieSource = initialized.source;
         entry.cookieRestore = initialized.cookieRestore;
         entry.extensionsLoaded = new Map();
+        entry.allowedExtensions = await extensionConsent().read(id);
         if (extensionStore) {
           if (initialSettings && extensionStore.applyCloudSettings) await extensionStore.applyCloudSettings(initialSettings.extensions);
-          const extensionResult = await extensionStore.loadIntoSession(entry.ses, entry.extensionsLoaded);
+          const extensionResult = await extensionStore.loadIntoSession(entry.ses, entry.extensionsLoaded, entry.allowedExtensions);
           entry.extensionErrors = extensionResult.errors;
           await reloadExtensionList(entry);
         }
@@ -737,6 +758,9 @@ function createProfileRuntime(electron, options = {}) {
     if (!entry) return Promise.resolve(null);
     if (entry.closePromise) return entry.closePromise;
     entry.closingRequested = true;
+    // Revocation must block immediately, even while an asynchronous launch or
+    // durable cookie save is still in flight.
+    if (entry.ses) blockSession(entry.ses);
     entry.closePromise = (async () => {
       await entry.startPromise.catch(() => {});
       entry.state = "closing";
@@ -788,7 +812,7 @@ function createProfileRuntime(electron, options = {}) {
       await entry.startPromise.catch(() => {});
       if (!entry.ses || entry.state !== "running" || entry.closingRequested) return 0;
       entry.extensionsLoaded ||= new Map();
-      const extensionResult = await extensionStore.loadIntoSession(entry.ses, entry.extensionsLoaded);
+      const extensionResult = await extensionStore.loadIntoSession(entry.ses, entry.extensionsLoaded, entry.allowedExtensions);
       entry.extensionErrors = extensionResult.errors;
       await reloadExtensionList(entry);
       entry.browser?.publish?.();

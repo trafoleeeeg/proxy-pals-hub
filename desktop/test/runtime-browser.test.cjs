@@ -58,12 +58,13 @@ function harness() {
     await tab.loadURL(url);
     return tab;
   };
-  const start = async ({ withHome = false } = {}) => {
+  const start = async ({ withHome = false, privacy = {} } = {}) => {
     browser = await createProfileBrowser(electron, {
       name: "Тест", fp: { screen: { width: 1280, height: 720 } }, partition: "persist:test",
       openTab, closeProfile: async () => {}, show: false, onTabsChanged: () => changed.push(true),
       getBookmarks: () => bookmarks,
       getExtensions: () => extensions,
+      ...privacy,
       importCookies: async (text) => { importedCookies.push(text); return { imported: 2, skipped: 1 }; },
       setExtensionPinned: async (id, pinned) => { extensions = extensions.map((item) => item.id === id ? { ...item, pinned } : item); },
       addBookmark: async (bookmark) => { bookmarks = [...bookmarks, { id: "11111111-1111-4111-8111-111111111111", ...bookmark }]; },
@@ -81,6 +82,21 @@ function harness() {
   };
   return { start };
 }
+
+test("privacy consent is bound to the actual selected tab and origin", async () => {
+  const calls = [];
+  const h = await harness().start({ privacy: {
+    getPrivacy: (url) => ({ origin: url.startsWith("https:") ? new URL(url).origin : "", allowed: false }),
+    setPrivacy: async (...args) => { calls.push(args); },
+  } });
+  const state = h.stateEvents.at(-1);
+  assert.ok((await h.command({ action: "set-site-privacy", origin: "https://other.test", tabId: state.activeId, allowed: true })).error);
+  assert.ok((await h.command({ action: "set-site-privacy", origin: "https://two.example", tabId: "stale-tab", allowed: true })).error);
+  assert.equal(calls.length, 0);
+  await h.command({ action: "set-site-privacy", origin: "https://two.example", tabId: state.activeId, allowed: true });
+  assert.deepEqual(calls, [["https://two.example", true]]);
+  h.browser.destroy();
+});
 
 test("browser commands reorder tabs, preserve active tab and restore a closed tab", async () => {
   const h = await harness().start();
@@ -321,10 +337,9 @@ test("browser keeps quick tab actions outside the slow command queue", () => {
 test("profile tabs apply fingerprint without a preliminary about:blank load", () => {
   const source = require("node:fs").readFileSync(require.resolve("../runtime/profile-runtime.cjs"), "utf8");
   const block = source.slice(source.indexOf("async function makeWindow"), source.indexOf("function launchProfileWindow"));
-  assert.match(block, /const fingerprintAttempt = configureFingerprint\(win\.webContents, entry\.fp\)/);
-  assert.match(block, /Promise\.race\(\[\s*fingerprintAttempt/);
-  assert.ok(block.indexOf("configureFingerprint") < block.indexOf('await navigate(win, "about:blank")'),
-    "отпечаток должен применяться до запасной загрузки about:blank");
+  assert.match(block, /await configureFingerprint\(win\.webContents, entry\.fp, fingerprintOptions\)/);
+  assert.ok(block.indexOf("await configureFingerprint") < block.indexOf("await navigate(win, url"), "protection precedes remote navigation");
+  assert.equal((block.match(/configureFingerprint\(/g) || []).length, 1, "never race two privacy controllers");
   assert.match(block, /win\.webContents\.loadURL\("about:blank"\)\.catch/);
   assert.ok(!/await\s+win\.webContents\.loadURL\("about:blank"\)/.test(block),
     "запуск пустой страницы не должен ожидаться перед отпечатком");

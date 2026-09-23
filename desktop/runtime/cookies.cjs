@@ -6,12 +6,19 @@ const MAX_BYTES = 8 * 1024 * 1024;
 const MAX_IMPORT_BYTES = 5_000_000;
 const MAX_COOKIES = 10000;
 
+function assertSupportedPartition(cookie) {
+  if (cookie?.partitionKey != null || cookie?.partitioned === true || cookie?.partitionKeyOpaque === true) {
+    throw new Error("Partitioned cookies (CHIPS) пока не поддерживаются. Импорт отменён; существующие cookies сохранены");
+  }
+}
+
 function parseCookies(raw) {
   if (typeof raw !== "string" || Buffer.byteLength(raw) > MAX_BYTES) throw new Error("Invalid cookie snapshot size");
   let cookies;
   try { cookies = JSON.parse(raw); } catch { throw new Error("Invalid cookie snapshot"); }
   if (!Array.isArray(cookies) || cookies.length > MAX_COOKIES) throw new Error("Invalid cookie snapshot");
   for (const cookie of cookies) {
+    assertSupportedPartition(cookie);
     if (!cookie || typeof cookie !== "object" || typeof cookie.name !== "string" || typeof cookie.value !== "string" || typeof cookie.domain !== "string" || !cookie.domain || /[\s/@\\?#]/.test(cookie.domain) || (cookie.path != null && (typeof cookie.path !== "string" || !cookie.path.startsWith("/")))) throw new Error("Invalid cookie entry");
     if (cookie.expirationDate != null && !Number.isFinite(cookie.expirationDate)) throw new Error("Invalid cookie expiration");
   }
@@ -40,6 +47,7 @@ function expiration(cookie) {
 
 function normalizeImportedCookie(cookie) {
   if (!cookie || typeof cookie !== "object" || Array.isArray(cookie)) throw new Error("Некорректная запись cookie");
+  assertSupportedPartition(cookie);
   let domain = typeof cookie.domain === "string" ? cookie.domain.trim() : "";
   if (!domain && typeof cookie.url === "string") {
     try { domain = new URL(cookie.url).hostname; } catch { throw new Error("Некорректный домен cookie"); }
@@ -143,6 +151,8 @@ function retainedCount(actual, imported) {
 }
 
 async function restoreCookies(ses, cookies) {
+  // Validate before clearing anything: never silently remove a partition key.
+  for (const cookie of cookies) assertSupportedPartition(cookie);
   // Replace, including removals; merging would revive cookies deleted elsewhere.
   await ses.clearStorageData({ storages: ["cookies"] });
   let restored = 0;

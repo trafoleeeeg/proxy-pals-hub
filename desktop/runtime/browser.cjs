@@ -27,6 +27,8 @@ async function createProfileBrowser(electron, {
   getZoomLevel = () => 0, setZoomLevel = async () => {},
   getProxies = () => [], getProxyFailover = () => false, switchProxy = async () => {}, setProxyFailover = async () => {},
   getLeaks = () => null, checkLeaks = async () => {},
+  getPrivacy = () => ({ origin: "", allowed: false }), setPrivacy = async () => {},
+  setExtensionEnabled = async () => {},
 }) {
   const { BrowserWindow, WebContentsView, session, ipcMain } = electron;
   let registry = handlers.get(ipcMain);
@@ -98,7 +100,7 @@ async function createProfileBrowser(electron, {
     layout();
     const currentUrl = active()?.webContents.getURL() || active()?.url || "";
     const bookmarks = getBookmarks();
-    const payload = { name, activeId, error, home: isStartPage(active()), info: getInfo(),
+    const payload = { name, activeId, error, home: isStartPage(active()), info: getInfo(), privacy: getPrivacy(currentUrl),
        bookmarks, bookmarksOpen, proxiesOpen, proxies: getProxies(), proxyFailover: getProxyFailover(), leaks: getLeaks(), leakChecking, bookmarkBarVisible: getBookmarkBarVisible(), extensions: getExtensions(), bookmarked: bookmarks.some((item) => item.url === currentUrl),
       canRestoreTab: recentlyClosed.length > 0, find: active()?.find || null,
        overlay: overlayOpen, pageSnapshot: overlayOpen ? pageSnapshot : "",
@@ -294,6 +296,14 @@ async function createProfileBrowser(electron, {
     let response;
     switch (message.action) {
       case "state": break;
+      case "set-site-privacy": {
+        const url = tab?.webContents.getURL() || "";
+        const privacy = getPrivacy(url);
+        // Bind consent to the selected tab/origin, not a renderer-supplied URL.
+        if (!privacy.origin || message.origin !== privacy.origin || message.tabId !== tab?.id || typeof message.allowed !== "boolean") throw new Error("Страница изменилась. Откройте настройки защиты повторно");
+        await setPrivacy(privacy.origin, message.allowed);
+        break;
+      }
       case "new": bookmarksOpen = false; proxiesOpen = false; await openTab("about:blank"); focusAddress(); break;
       case "home": bookmarksOpen = false; proxiesOpen = false; select(homeTab()); break;
       case "focus-page":
@@ -430,6 +440,11 @@ async function createProfileBrowser(electron, {
       case "toggle-bookmark-bar": await setBookmarkBarVisible(!getBookmarkBarVisible()); break;
       case "manage-extensions": openExtensionManager(); break;
       case "pin-extension": await setExtensionPinned(message.id, message.pinned === true); break;
+      case "enable-extension": {
+        if (typeof message.enabled !== "boolean") throw new Error("Некорректное разрешение расширения");
+        await setExtensionEnabled(message.id, message.enabled);
+        break;
+      }
       case "close-extension": break;
       case "open-extension": {
         if (extensionPopupId === message.id) { closeExtensionPopup(); break; }
@@ -467,7 +482,7 @@ async function createProfileBrowser(electron, {
   // пользователя в интерфейсе — выполняется сразу, без ожидания фоновых задач.
   const SERIALIZED = new Set([
     "bookmark", "save-bookmark", "add-bookmark", "update-bookmark", "remove-bookmark",
-    "reorder-bookmarks", "toggle-bookmark-bar", "pin-extension",
+    "reorder-bookmarks", "toggle-bookmark-bar", "pin-extension", "enable-extension", "set-site-privacy",
     "switch-proxy", "toggle-proxy-failover", "check-connection", "check-leaks",
     "zoom-in", "zoom-out", "zoom-reset", "close-profile", "import-cookies",
   ]);

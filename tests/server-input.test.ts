@@ -56,10 +56,11 @@ describe("cookie imports", () => {
 });
 
 describe("server input validation", () => {
-  test("unfiled access is a valid explicit grant, not a default-folder alias", () => {
+  test("the private main folder cannot be shared or recreated", () => {
     const id = "10000000-0000-4000-8000-000000000001";
-    expect(folderAccessSchema.safeParse({ teamId: id, userId: id, folder: "", granted: true }).success).toBe(true);
-    expect(folderAccessSchema.safeParse({ teamId: id, userId: id, folder: "Основная", granted: true }).success).toBe(true);
+    expect(folderAccessSchema.safeParse({ teamId: id, userId: id, folder: "", granted: true }).success).toBe(false);
+    expect(folderAccessSchema.safeParse({ teamId: id, userId: id, folder: "Основная", granted: true }).success).toBe(false);
+    expect(folderAccessSchema.safeParse({ teamId: id, userId: id, folder: "Shared", granted: true }).success).toBe(true);
     expect(folderAccessSchema.safeParse({ teamId: id, userId: id, folder: "x".repeat(201), granted: true }).success).toBe(false);
   });
 
@@ -88,4 +89,3 @@ describe("server input validation", () => {
     expect(saveProfileSchema.safeParse({ ...input, id }).success).toBe(false);
   });
 });
-

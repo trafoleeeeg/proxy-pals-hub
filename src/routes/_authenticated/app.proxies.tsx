@@ -182,8 +182,9 @@ export function ProxiesPage() {
         previousIp: request.previousIp!,
         probe,
         record: async (result, final, confirmed) => {
-          await record({ data: { id, teamId: selectedTeam, ...result, rotationRequestedAt: request.requestedAt, rotationFinal: final, rotationConfirmed: confirmed } });
+          const saved = await record({ data: { id, teamId: selectedTeam, ...result, rotationRequestedAt: request.requestedAt, rotationFinal: final, rotationConfirmed: confirmed } });
           void invalidate();
+          return saved;
         },
       });
     },

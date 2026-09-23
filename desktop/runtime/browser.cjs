@@ -81,7 +81,9 @@ async function createProfileBrowser(electron, {
   let destroyed = false;
   let commandQueue = Promise.resolve();
   const active = () => tabs.get(activeId);
-  const isHome = (tab) => !!tab && tab.url === "about:blank";
+  const isHome = (tab) => !!tab?.pinnedHome;
+  const isStartPage = (tab) => !!tab && tab.url === "about:blank";
+  const homeTab = () => tabOrder.map((id) => tabs.get(id)).find((tab) => isHome(tab) && !tab.isDestroyed());
   // Тяжёлые списки (закладки со значками, расширения, прокси) отправляем в окно
   // только когда они действительно изменились, а сами обновления объединяем,
   // иначе поток событий загрузки страницы забивает канал и окно начинает тормозить.
@@ -95,13 +97,13 @@ async function createProfileBrowser(electron, {
     layout();
     const currentUrl = active()?.webContents.getURL() || active()?.url || "";
     const bookmarks = getBookmarks();
-    const payload = { name, activeId, error, home: isHome(active()), info: getInfo(),
+    const payload = { name, activeId, error, home: isStartPage(active()), info: getInfo(),
        bookmarks, bookmarksOpen, proxiesOpen, proxies: getProxies(), proxyFailover: getProxyFailover(), leaks: getLeaks(), leakChecking, bookmarkBarVisible: getBookmarkBarVisible(), extensions: getExtensions(), bookmarked: bookmarks.some((item) => item.url === currentUrl),
       canRestoreTab: recentlyClosed.length > 0, find: active()?.find || null,
        overlay: overlayOpen, pageSnapshot: overlayOpen ? pageSnapshot : "",
        zoomPercent: active() ? Math.round(100 * Math.pow(1.2, active().webContents.getZoomLevel())) : 100,
       tabs: tabOrder.map((id) => tabs.get(id)).filter((tab) => tab && !tab.isDestroyed()).map((tab) => ({
-      id: tab.id, url: tab.webContents.getURL() || tab.url, title: tab.webContents.getTitle(), favicon: tab.favicon || "", error: tab.error,
+      id: tab.id, url: tab.webContents.getURL() || tab.url, title: tab.webContents.getTitle(), favicon: tab.favicon || "", error: tab.error, pinnedHome: isHome(tab),
       loading: tab.webContents.isLoading(), canGoBack: tab.webContents.navigationHistory.canGoBack(), canGoForward: tab.webContents.navigationHistory.canGoForward(),
     })) };
     for (const key of ["bookmarks", "extensions", "proxies", "leaks", "info"]) {
@@ -132,7 +134,7 @@ async function createProfileBrowser(electron, {
     pageSnapshot = "";
     if (next) {
       const tab = active();
-      if (tab && !isHome(tab) && !bookmarksOpen && !proxiesOpen) {
+      if (tab && !isStartPage(tab) && !bookmarksOpen && !proxiesOpen) {
         try {
           const image = await tab.webContents.capturePage?.();
           if (image && !(image.isEmpty?.() === true)) pageSnapshot = image.toDataURL();
@@ -149,7 +151,7 @@ async function createProfileBrowser(electron, {
     for (const tab of tabs.values()) {
       const top = chromeHeight;
       tab.view.setBounds({ x: 0, y: top, width: Math.max(1, width), height: Math.max(1, height - top) });
-       tab.view.setVisible(tab.id === activeId && !isHome(tab) && !bookmarksOpen && !proxiesOpen && !overlayOpen);
+       tab.view.setVisible(tab.id === activeId && !isStartPage(tab) && !bookmarksOpen && !proxiesOpen && !overlayOpen);
     }
     positionExtensionPopup();
   }
@@ -255,13 +257,13 @@ async function createProfileBrowser(electron, {
     // Do not let focusing a tab reveal the shell while profiles are still
     // initializing (or while a native test deliberately keeps it hidden).
     if (show && shell.isVisible()) {
-      if (isHome(tab)) shell.webContents.focus(); else tab.webContents.focus();
+      if (isStartPage(tab)) shell.webContents.focus(); else tab.webContents.focus();
     }
     flushPublish();
     if (ready) onTabsChanged();
   }
   function closeTab(target) {
-    if (!target || target.isDestroyed()) return;
+    if (!target || target.isDestroyed() || isHome(target)) return;
     const url = target.webContents.getURL() || target.url;
     if (url && url !== "about:blank") {
       recentlyClosed.push({ url, title: target.webContents.getTitle() || "" });
@@ -280,7 +282,7 @@ async function createProfileBrowser(electron, {
     switch (message.action) {
       case "state": break;
       case "new": bookmarksOpen = false; proxiesOpen = false; await openTab("about:blank"); focusAddress(); break;
-      case "home": bookmarksOpen = false; proxiesOpen = false; if (tab) await tab.loadURL("about:blank"); break;
+      case "home": bookmarksOpen = false; proxiesOpen = false; select(homeTab()); break;
       case "show-bookmarks": bookmarksOpen = true; proxiesOpen = false; layout(); break;
       case "hide-bookmarks": bookmarksOpen = false; layout(); break;
       case "show-proxies": proxiesOpen = true; bookmarksOpen = false; layout(); void checkConnection(); void command({ action: "check-leaks" }); break;
@@ -304,7 +306,7 @@ async function createProfileBrowser(electron, {
       case "select": bookmarksOpen = false; proxiesOpen = false; select(tabs.get(message.id)); break;
       case "close-tab": {
         const target = tabs.get(message.id || activeId);
-        if (target) {
+        if (target && !isHome(target)) {
           if (tabs.size === 1) await openTab("about:blank");
           closeTab(target);
         }
@@ -316,7 +318,7 @@ async function createProfileBrowser(electron, {
         break;
       }
       case "reorder-tabs": {
-         if (!Array.isArray(message.ids) || message.ids.length !== tabOrder.length || new Set(message.ids).size !== tabOrder.length || message.ids.some((id) => !tabs.has(id))) throw new Error("Некорректный порядок вкладок");
+         if (!Array.isArray(message.ids) || message.ids.length !== tabOrder.length || new Set(message.ids).size !== tabOrder.length || message.ids.some((id) => !tabs.has(id)) || (homeTab() && message.ids[0] !== homeTab().id)) throw new Error("Некорректный порядок вкладок");
         tabOrder = [...message.ids]; if (ready) onTabsChanged(); break;
       }
       case "close-profile": await closeProfile(); break;
@@ -326,7 +328,7 @@ async function createProfileBrowser(electron, {
           // Уже загруженный документ не повторяет HTTP-запрос сам по себе,
           // поэтому без reload сайт продолжал показывать прежнюю авторизацию.
           for (const open of tabs.values()) {
-            if (!open.isDestroyed() && !isHome(open)) {
+            if (!open.isDestroyed() && !isStartPage(open)) {
               try { open.webContents.reload(); } catch { /* cookie уже сохранён; вкладку можно обновить вручную */ }
             }
           }
@@ -364,10 +366,10 @@ async function createProfileBrowser(electron, {
         bookmarksOpen = false; proxiesOpen = false;
         if (saved.url.startsWith("javascript:")) {
           // Букмарклет выполняется на текущей странице, а не открывается как адрес.
-          if (tab && !isHome(tab)) void tab.webContents.executeJavaScript(saved.url.slice("javascript:".length), true).catch(() => {});
+          if (tab && !isStartPage(tab)) void tab.webContents.executeJavaScript(saved.url.slice("javascript:".length), true).catch(() => {});
           break;
         }
-        if (message.newTab || !tab) await openTab(saved.url);
+        if (message.newTab || !tab || isHome(tab)) await openTab(saved.url);
         else { tab.error = ""; void tab.loadURL(saved.url).catch(() => {}); }
         break;
       }
@@ -442,7 +444,7 @@ async function createProfileBrowser(electron, {
         if (Number.isFinite(next) && rounded >= 80 && rounded <= 180 && rounded !== chromeHeight) { chromeHeight = rounded; layout(); }
         return;
       }
-      case "navigate": if (tab) { bookmarksOpen = false; proxiesOpen = false; tab.error = ""; void tab.loadURL(addressUrl(message.value)).catch(() => {}); } break;
+      case "navigate": if (tab) { bookmarksOpen = false; proxiesOpen = false; tab.error = ""; const url = addressUrl(message.value); if (isHome(tab)) await openTab(url); else void tab.loadURL(url).catch(() => {}); } break;
       case "back": if (tab?.webContents.navigationHistory.canGoBack()) tab.webContents.navigationHistory.goBack(); break;
       case "forward": if (tab?.webContents.navigationHistory.canGoForward()) tab.webContents.navigationHistory.goForward(); break;
       case "reload": if (tab) { tab.error = ""; if (tab.webContents.isLoading()) tab.webContents.stop(); else tab.webContents.reload(); } break;
@@ -535,25 +537,30 @@ async function createProfileBrowser(electron, {
   finally { clearTimeout(loadTimer); }
   return {
     shell, publish,
-    createTab() {
-      if (destroyed || tabs.size >= 32) throw new Error("Достигнут лимит вкладок профиля");
+    createTab({ pinnedHome = false, activate = true } = {}) {
+      if (destroyed || tabs.size >= (homeTab() ? 33 : 32)) throw new Error("Достигнут лимит вкладок профиля");
+      if (pinnedHome && homeTab()) throw new Error("Стартовая вкладка уже открыта");
       const view = new WebContentsView({ webPreferences: { partition, contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, devTools: false } });
       const wc = view.webContents;
       const tab = new EventEmitter();
       Object.assign(tab, {
-        id: randomUUID(), view, webContents: wc, url: "about:blank", error: "",
+        id: randomUUID(), view, webContents: wc, url: "about:blank", error: "", pinnedHome,
         isDestroyed: () => wc.isDestroyed(),
         focus: () => { shell.focus(); select(tab); },
         show: () => { if (show && !shell.isDestroyed()) shell.show(); select(tab); },
         destroy: () => { tab.closing = true; if (!wc.isDestroyed()) wc.close({ waitForBeforeUnload: false }); },
         async loadURL(url, options) {
-          tab.url = startUrl(url, { allowBlank: true }); tab.error = ""; publish();
+          const target = startUrl(url, { allowBlank: true });
+          if (pinnedHome && target !== "about:blank") throw new Error("Стартовую вкладку нельзя заменить сайтом");
+          tab.url = target;
+          tab.error = ""; publish();
           try { await wc.loadURL(tab.url, options); }
           catch (failure) { if (failure.code !== "ERR_ABORTED") tab.error = "Не удалось загрузить страницу. Проверьте адрес и подключение прокси."; throw failure; }
           finally { publish(); }
         },
       });
-      tabs.set(tab.id, tab); tabOrder.push(tab.id); shell.contentView.addChildView(view); select(tab);
+      tabs.set(tab.id, tab); if (pinnedHome) tabOrder.unshift(tab.id); else tabOrder.push(tab.id); shell.contentView.addChildView(view);
+      if (activate || !activeId) select(tab); else { layout(); publish(); }
        wc.setZoomLevel(getZoomLevel());
       wc.on("before-input-event", shortcuts);
       wc.on("found-in-page", (_event, result) => { tab.find = { active: result.activeMatchOrdinal, total: result.matches }; publish(); });
@@ -596,16 +603,19 @@ async function createProfileBrowser(electron, {
         tabs.delete(tab.id);
         tabOrder = tabOrder.filter((id) => id !== tab.id);
         if (!shell.isDestroyed()) shell.contentView.removeChildView(view);
-        if (activeId === tab.id) select(tabs.get(tabOrder.at(-1)));
+        if (activeId === tab.id) select(homeTab() || tabs.get(tabOrder.at(-1)));
         tab.emit("closed"); publish(); if (ready) onTabsChanged();
       });
       return tab;
     },
     markReady: () => { ready = true; },
-    getTabSnapshot: () => ({
-      tabs: tabOrder.map((id) => tabs.get(id)).filter((tab) => tab && !tab.isDestroyed()).map((tab) => tab.webContents.getURL() || tab.url || "about:blank"),
-      activeIndex: Math.max(0, tabOrder.indexOf(activeId)),
-    }),
+    getTabSnapshot: () => {
+      const savedTabs = tabOrder.map((id) => tabs.get(id)).filter((tab) => tab && !tab.isDestroyed() && !isHome(tab));
+      return {
+        tabs: savedTabs.map((tab) => tab.webContents.getURL() || tab.url || "about:blank"),
+        activeIndex: Math.max(0, savedTabs.findIndex((tab) => tab.id === activeId)),
+      };
+    },
     destroy: () => { if (!shell.isDestroyed()) shell.destroy(); },
   };
 }

@@ -28,6 +28,8 @@ function harness() {
         setUserAgent: (ua) => { this.ua = ua; },
         setWebRTCIPHandlingPolicy: (policy) => { this.policy = policy; },
         getWebRTCIPHandlingPolicy: () => this.policy,
+        getURL: () => this.url || "", isLoading: () => false,
+        loadURL: (url) => this.loadURL(url),
         setWindowOpenHandler: (handler) => { this.openHandler = handler; }, stop: () => {},
       });
       this.webContents.debugger = new EventEmitter();
@@ -103,15 +105,22 @@ test("team bookmarks update in running profiles without changing personal bookma
   await h.runtime.closeAllProfiles();
 });
 
-test("saved tabs win over the profile home page unless launch requests an explicit URL", async () => {
+test("saved tabs reopen beside one pinned home page, which becomes active", async () => {
   const h = harness();
   h.tabRecords.set(ID, { tabs: ["https://one.test/", "https://two.test/"], activeIndex: 1 });
   const launch = payload();
   delete launch.startUrl;
   launch.fingerprint = { ...FP, startUrl: "https://home.test/" };
   await h.runtime.launchProfileWindow(launch);
-  assert.deepEqual(h.windows.map((win) => win.url), ["https://one.test/", "https://two.test/"]);
-  assert.equal(h.windows[1].shown, true);
+  assert.deepEqual(h.windows.map((win) => win.url), ["about:blank", "https://one.test/", "https://two.test/"]);
+  assert.equal(h.windows[0].shown, true);
+  assert.equal(h.windows[1].shown, undefined);
+  assert.equal(h.windows[2].shown, undefined);
+  await h.runtime.closeAllProfiles();
+  assert.deepEqual(h.tabRecords.get(ID).tabs, ["https://one.test/", "https://two.test/"]);
+  await h.runtime.launchProfileWindow(launch);
+  assert.deepEqual(h.windows.slice(3).map((win) => win.url), ["about:blank", "https://one.test/", "https://two.test/"]);
+  assert.equal(h.windows[3].shown, true);
   await h.runtime.closeAllProfiles();
 });
 
@@ -177,14 +186,14 @@ test("concurrent launches deduplicate before async work and popup inherits harde
   assert.strictEqual(p1, p2);
   await p1;
   assert.equal(h.configured, 1);
-  assert.equal(h.windows.length, 1);
+  assert.equal(h.windows.length, 2);
   const first = h.windows[0];
   assert.equal(first.options.webPreferences.partition, `persist:profile-${ID}`);
   assert.deepEqual(first.openHandler({ url: "https://popup.test" }), { action: "deny" });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(h.windows.length, 2);
-  assert.deepEqual(h.windows[1].options.webPreferences, first.options.webPreferences);
-  assert.equal(h.windows[1].policy, "disable_non_proxied_udp");
+  assert.equal(h.windows.length, 3);
+  assert.deepEqual(h.windows[2].options.webPreferences, first.options.webPreferences);
+  assert.equal(h.windows[2].policy, "disable_non_proxied_udp");
   assert.equal(first.options.webPreferences.contextIsolation, true);
   assert.equal(first.options.webPreferences.sandbox, true);
   assert.equal(first.options.webPreferences.nodeIntegration, false);

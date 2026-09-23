@@ -5,6 +5,16 @@ const os = require("node:os");
 const path = require("node:path");
 const { createExtensionStore } = require("../extensions.cjs");
 
+test("cloud metadata cannot trigger downloads or installation", async (t) => {
+  const temp = await fs.mkdtemp(path.join(os.tmpdir(), "umbra-extension-cloud-"));
+  t.after(() => fs.rm(temp, { recursive: true, force: true }));
+  let downloads = 0;
+  const store = createExtensionStore(() => temp, { fetchBuffer: async () => { downloads++; throw new Error("unexpected network"); } });
+  await store.applyCloudSettings([{ id: "aaaaaaaaaaaaaaaaaaaaaaaa", url: "https://example.test/fixture.zip", pinned: true }]);
+  assert.equal(downloads, 0);
+  assert.deepEqual(await store.list(), []);
+});
+
 test("extension store validates manifests, copies entries and loads them into sessions", async () => {
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), "umbra-extensions-"));
   const source = path.join(temp, "source");
@@ -16,7 +26,8 @@ test("extension store validates manifests, copies entries and loads them into se
   assert.deepEqual(await store.list(), [added]);
   const loaded = [];
   const session = { loadExtension: async (extensionPath) => { loaded.push(extensionPath); return { id: "chrome-test" }; } };
-  const loadedState = await store.loadIntoSession(session, new Map());
+  assert.equal((await store.loadIntoSession(session, new Map())).loaded.length, 0, "installation is not consent for every profile");
+  const loadedState = await store.loadIntoSession(session, new Map(), [added.id]);
   assert.equal(loadedState.loaded.length, 1);
   assert.equal(loaded.length, 1);
   await store.setPinned(added.id, true);
@@ -47,7 +58,7 @@ test("managed paths ignore registry path injection and reject linked source dire
     await fs.writeFile(path.join(data, "extensions.json"), JSON.stringify([{ id: added.id, path: outside }]));
     const paths = [];
     const loaded = new Map();
-    await store.loadIntoSession({ extensions: { loadExtension: async (dir) => { paths.push(dir); return { id: "fixture" }; } } }, loaded);
+    await store.loadIntoSession({ extensions: { loadExtension: async (dir) => { paths.push(dir); return { id: "fixture" }; } } }, loaded, [added.id]);
     assert.equal(paths[0], path.join(data, "extensions", added.id));
     await store.remove(added.id);
     const removed = [];

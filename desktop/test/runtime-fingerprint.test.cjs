@@ -84,16 +84,16 @@ function webContents({ policy = "disable_non_proxied_udp", reject = null } = {})
   };
 }
 
-test("native screen CSS and hardware concurrency overrides preserve the viewport and DPI", async () => {
+test("native screen CSS and hardware concurrency preserve viewport size but mask host DPI", async () => {
   const wc = webContents();
   const fp = fingerprint({ hardwareConcurrency: 12, screen: { width: 1512, height: 982 } });
   const diagnostics = await applyFingerprint(wc, fp);
   assert.deepEqual(wc.commands.find((item) => item.command === "Emulation.setHardwareConcurrencyOverride").args, { hardwareConcurrency: 12 });
   assert.deepEqual(wc.commands.find((item) => item.command === "Emulation.setDeviceMetricsOverride").args, {
-    width: 0, height: 0, deviceScaleFactor: 0, mobile: false, screenWidth: 1512, screenHeight: 982,
+    width: 0, height: 0, deviceScaleFactor: 1, mobile: false, screenWidth: 1512, screenHeight: 982,
   });
-  assert.equal(diagnostics.screenMetrics, "cdp-screen-only");
-  assert.ok(diagnostics.limitations.some((item) => item.includes("Workers")));
+  assert.equal(diagnostics.screenMetrics, "cdp-screen-and-dpr");
+  assert.ok(diagnostics.limitations.some((item) => item.includes("Shared/service workers")));
 });
 
 test("unsafe native WebRTC policy or failed CDP protection prevents navigation setup", async () => {

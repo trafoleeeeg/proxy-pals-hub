@@ -198,22 +198,18 @@ function createExtensionStore(getUserData, deps = {}) {
 
   async function applyCloudSettings(settings) {
     const wanted = Array.isArray(settings) ? settings : [];
-    let entries = await read();
-    for (const item of wanted) {
-      if (!item || !/^[a-f0-9]{24}$/.test(String(item.id))) continue;
-      if (!entries.some((entry) => entry.id === item.id) && typeof item.url === "string") {
-        try { await installFromSource(parseExtensionUrl(item.url), item.id); } catch { /* keep other extensions usable */ }
-        entries = await read();
-      }
-    }
+    // Cloud metadata must never initiate an unproxied download or installation.
+    // Installation is a separate, explicit action in the trusted app panel.
+    const entries = await read();
     await write(entries.map((entry) => {
       const remote = wanted.find((item) => item.id === entry.id);
       return remote ? { ...entry, pinned: remote.pinned === true } : entry;
     }));
   }
 
-  async function loadIntoSession(ses, loaded = new Map()) {
-    const entries = await read();
+  async function loadIntoSession(ses, loaded = new Map(), allowedIds = []) {
+    const allowed = new Set(allowedIds);
+    const entries = (await read()).filter((entry) => allowed.has(entry.id));
     const errors = [];
     const api = ses.extensions || ses;
     for (const [id, extensionId] of loaded) {
@@ -248,7 +244,7 @@ function createExtensionStore(getUserData, deps = {}) {
     remove: (id) => serialize(() => remove(id)),
     setPinned: (id, pinned) => serialize(() => setPinned(id, pinned)),
     applyCloudSettings: (settings) => serialize(() => applyCloudSettings(settings)),
-    loadIntoSession: (ses, loaded) => serialize(() => loadIntoSession(ses, loaded)),
+    loadIntoSession: (ses, loaded, allowedIds) => serialize(() => loadIntoSession(ses, loaded, allowedIds)),
   };
 }
 

@@ -19,6 +19,7 @@ function harness() {
   const records = new Map();
   const tabRecords = new Map();
   const bookmarkRecords = new Map();
+  const privacyRecords = new Map();
   let browserConfig;
   class Window extends EventEmitter {
     constructor(options) {
@@ -59,7 +60,7 @@ function harness() {
       const cookies = new EventEmitter();
       let data = [];
       Object.assign(cookies, { get: async () => data, set: async (cookie) => { data.push({ ...cookie, domain: cookie.domain || new URL(cookie.url).hostname, session: true, hostOnly: !cookie.domain }); }, flushStore: async () => { if (flushGate) await flushGate.promise; }, update: (value) => { data = value; cookies.emit("changed"); } });
-      const ses = { cookies, webRequest: { onBeforeRequest() {} }, getUserAgent: () => "Chrome/144.0.0.0", setUserAgent() {}, flushStorageData() {}, closeAllConnections: async () => {}, clearStorageData: async () => { data = []; },
+      const ses = { cookies, webRequest: { onBeforeRequest() {} }, getUserAgent: () => "Chrome/144.0.0.0", setUserAgent() {}, flushStorageData() {}, closeAllConnections: async () => {}, clearStorageData: async (options) => { if (!options?.storages || options.storages.includes("cookies")) data = []; },
         setPermissionRequestHandler(handler) { this.permissionRequest = handler; },
         setPermissionCheckHandler(handler) { this.permissionCheck = handler; },
         setDevicePermissionHandler(handler) { this.devicePermission = handler; },
@@ -90,11 +91,33 @@ function harness() {
       readState: async (id) => bookmarkRecords.get(id) || { bookmarks: [], barVisible: true },
       write: async (id, state) => { bookmarkRecords.set(id, structuredClone(state)); return structuredClone(state); },
     },
+    privacyStore: { read: async (id) => privacyRecords.get(id) || [], write: async (id, origins) => { privacyRecords.set(id, [...origins]); } },
   });
   return { runtime, windows, sessions, records, tabRecords, bookmarkRecords, get browserConfig() { return browserConfig; }, get configured() { return configured; }, get disposed() { return disposed; }, setFlushGate: (gate) => { flushGate = gate; }, setNavigationGate: (gate) => { navigationGate = gate; }, setSnapshotFailure: (value) => { snapshotFailure = value; } };
 }
 
 const payload = () => ({ profileId: ID, deviceId: "test-device", name: "Test", lockToken: "test-lock-token", fingerprint: FP, cookies: "[]", cookiesUpdatedAt: null, proxy: null, startUrl: "https://example.test" });
+
+test("privacy consent closes profile durably and applies to one origin after restart", async () => {
+  const h = harness();
+  const closures = [];
+  await h.runtime.launchProfileWindow(payload(), (snapshot) => closures.push(snapshot));
+  const ses = h.sessions.get(`persist:profile-${ID}`);
+  await ses.cookies.set({ url: "https://example.test/", name: "fixture", value: "persist-me" });
+  assert.equal(h.browserConfig.getPrivacy("https://example.test/").allowed, false);
+  await h.browserConfig.setPrivacy("https://example.test", true);
+  assert.equal(h.runtime.getRunningProfile(ID), null);
+  assert.equal(closures.length, 1);
+  assert.match(closures[0].cookies, /persist-me/);
+  await h.runtime.launchProfileWindow(payload());
+  assert.equal(h.browserConfig.getPrivacy("https://example.test/path").allowed, true);
+  assert.equal(h.browserConfig.getPrivacy("https://sub.example.test/").allowed, false);
+  assert.equal(h.browserConfig.getPrivacy("http://example.test/").allowed, false);
+  await h.browserConfig.setPrivacy("https://example.test", false);
+  await h.runtime.launchProfileWindow(payload());
+  assert.equal(h.browserConfig.getPrivacy("https://example.test").allowed, false);
+  await h.runtime.closeAllProfiles();
+});
 
 test("team bookmarks update in running profiles without changing personal bookmarks", async () => {
   const h = harness();

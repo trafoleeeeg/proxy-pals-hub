@@ -181,6 +181,12 @@ handle("umbra:extensions-add", async () => {
 });
 handle("umbra:extensions-add-url", async (url) => {
   if (typeof url !== "string" || url.length > 2048) throw new Error("Ссылка указана неверно");
+  const consent = await dialog.showMessageBox(mainWindow, {
+    type: "warning", title: "Загрузка расширения", message: "Скачать расширение на этот компьютер?",
+    detail: "Загрузка выполняется приложением вне прокси профиля. Сервер загрузки увидит адрес вашей сети. Расширение не включается в профилях автоматически; разрешайте только доверенный код.",
+    buttons: ["Отмена", "Скачать"], defaultId: 0, cancelId: 0,
+  });
+  if (consent.response !== 1) return { ok: false, error: "Загрузка отменена" };
   if (extensionDownloads >= 2) throw new Error("Дождитесь окончания текущей загрузки расширения");
   extensionDownloads++;
   try {
@@ -191,6 +197,12 @@ handle("umbra:extensions-add-url", async (url) => {
 });
 handle("umbra:extensions-update", async (id) => {
   if (typeof id !== "string") throw new Error("Некорректный идентификатор расширения");
+  const consent = await dialog.showMessageBox(mainWindow, {
+    type: "warning", title: "Обновление расширения", message: "Скачать обновление расширения?",
+    detail: "Запрос выполняется вне прокси профиля. Сервер загрузки увидит адрес вашей сети. Обновление меняет код расширения во всех профилях, где вы его разрешили.",
+    buttons: ["Отмена", "Обновить"], defaultId: 0, cancelId: 0,
+  });
+  if (consent.response !== 1) return { ok: false, error: "Обновление отменено" };
   if (extensionDownloads >= 2) throw new Error("Дождитесь окончания текущей загрузки расширения");
   extensionDownloads++;
   try {

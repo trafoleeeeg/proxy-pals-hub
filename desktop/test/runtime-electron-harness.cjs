@@ -155,14 +155,16 @@ if (process.versions.electron) {
     fs.writeFileSync(path.join(extensionSource, "manifest.json"), JSON.stringify({ name: "Fixture", version: "1.0", manifest_version: 3, content_scripts: [{ matches: ["https://localhost/*"], js: ["content.js"], run_at: "document_end" }] }));
     fs.writeFileSync(path.join(extensionSource, "content.js"), "document.documentElement.dataset.umbraExtension = 'loaded';");
     const extension = await extensionStore.addFromDirectory(extensionSource);
-    runtime = createProfileRuntime(electron, { show: false, cookieStore, extensionStore, applyFingerprint: async (wc, fp) => {
+    runtime = createProfileRuntime(electron, { show: false, cookieStore, extensionStore,
+      extensionConsent: { read: async (id) => id === ID ? [extension.id] : [], write: async () => {} },
+      applyFingerprint: async (wc, fp, privacyOptions) => {
       const send = wc.debugger.sendCommand.bind(wc.debugger);
       wc.debugger.sendCommand = async (...args) => {
         process.stdout.write(`NATIVE_CDP_START ${wc.id} ${args[0]}\n`);
         const result = await send(...args);
         process.stdout.write(`NATIVE_CDP_DONE ${wc.id} ${args[0]}\n`); return result;
       };
-      return applyFingerprint(wc, fp);
+      return applyFingerprint(wc, fp, privacyOptions);
     }, setupProxy: async (ses, proxy) => {
       const bridge = await createRuntimeProxy(trustFixture(ses), proxy);
       process.stdout.write("NATIVE_BRIDGE_READY\n"); return bridge;
@@ -177,6 +179,9 @@ if (process.versions.electron) {
 
     if (process.env.UMBRA_RUNTIME_TEST_PHASE === "restart") {
       const old = payload();
+      // Exercise OS-encrypted offline recovery. A versioned cloud snapshot is
+      // intentionally authoritative even if its wall-clock timestamp is older.
+      old.cookiesUpdatedAt = null;
       old.cookies = JSON.stringify([{ name: "__Host-fixture", value: "stale-cloud", domain: "localhost", path: "/", hostOnly: true, secure: true, httpOnly: true, session: true }]);
       await runtime.launchProfileWindow(old, onClosed);
       const snapshot = await runtime.snapshotProfileCookies(ID);
@@ -201,11 +206,13 @@ if (process.versions.electron) {
     const win = profileTabs(ses).find((view) => view !== homeView);
     assert.ok(win);
     assert.equal(shell.isVisible(), false);
-    shell.show();
+    // Keep the native fixture hidden on CI and non-interactive Windows
+    // desktops; renderer/toolbar actions below do not require an OS window.
     await shell.webContents.executeJavaScript("window.profileBrowser.command({action:'state'})");
     assert.equal(await shell.webContents.executeJavaScript("document.querySelectorAll('#tabs .pinned-home').length"), 1);
     assert.equal(await win.webContents.executeJavaScript("document.documentElement.dataset.umbraExtension"), "loaded");
     assert.equal(runtime.getRunningProfile(ID).diagnostics.extensions.loaded, 1);
+    assert.equal(runtime.getRunningProfile(SECOND).diagnostics.extensions.loaded, 0);
     await extensionStore.remove(extension.id);
     assert.equal(await runtime.refreshExtensions(), 0);
     assert.equal(runtime.getRunningProfile(ID).diagnostics.extensions.loaded, 0);
@@ -245,16 +252,15 @@ if (process.versions.electron) {
     const preferences = win.webContents.getLastWebPreferences();
     assert.equal(preferences.contextIsolation, true); assert.equal(preferences.sandbox, true); assert.equal(preferences.nodeIntegration, false);
     assert.ok(!preferences.preload); assert.notEqual(shell.webContents.session, ses);
-    const stableNoise = await win.webContents.executeJavaScript(`(() => {
+    const hardwareProtection = await win.webContents.executeJavaScript(`(() => {
       const canvas=document.createElement('canvas');canvas.width=40;canvas.height=40;
       const context=canvas.getContext('2d');context.fillStyle='rgb(100,100,100)';context.fillRect(0,0,40,40);
-      const first=canvas.toDataURL();const second=canvas.toDataURL();
-      const a=context.getImageData(0,0,40,40).data;const b=context.getImageData(0,0,40,40).data;
-      const audio=new AudioBuffer({length:128,sampleRate:44100});const original=audio.getChannelData(0);original.fill(0.5);
-      const copy1=new Float32Array(128),copy2=new Float32Array(128);audio.copyFromChannel(copy1,0);audio.copyFromChannel(copy2,0);
-      return {canvas:first===second,pixels:a.every((value,i)=>value===b[i]),audio:copy1.every((value,i)=>value===copy2[i]),original:original.every(value=>value===0.5),changed:copy1[0]!==0.5};
+      let serialization=false,pixels=false;
+      try{canvas.toDataURL();}catch(e){serialization=e.name==='SecurityError';}
+      try{context.getImageData(0,0,40,40);}catch(e){pixels=e.name==='SecurityError';}
+      return {serialization,pixels,audio:typeof AudioContext==='undefined',webgpu:navigator.gpu===undefined};
     })()`);
-    assert.deepEqual(stableNoise, { canvas: true, pixels: true, audio: true, original: true, changed: true });
+    assert.deepEqual(hardwareProtection, { serialization: true, pixels: true, audio: true, webgpu: true });
 
     await ses.cookies.set({ url: `https://localhost:${local.port}/`, name: "__Host-fixture", value: "durable-local", path: "/", secure: true, httpOnly: true });
     const snapshot = await runtime.snapshotProfileCookies(ID);
@@ -271,7 +277,7 @@ if (process.versions.electron) {
     assert.equal(runtime.getRunningProfile(ID).windowCount, 1);
     const popup = profileTabs(ses).find((item) => item !== homeView && item !== win);
     await waitUntil(() => popup.webContents.getURL().endsWith("/popup") && !popup.webContents.isLoading());
-    assert.equal(shell.isVisible(), true);
+    assert.equal(shell.isVisible(), false, "managed popups must not reveal a hidden test profile");
     assert.equal(popup.webContents.getLastWebPreferences().preload, preferences.preload);
     assert.equal(popup.webContents.getWebRTCIPHandlingPolicy(), "disable_non_proxied_udp");
     assert.equal((await popup.webContents.executeJavaScript("firstDocument")).timezone, "Asia/Tokyo");
@@ -323,7 +329,7 @@ if (process.versions.electron) {
     await shell.webContents.executeJavaScript("document.getElementById('reload').click()");
     await waitUntil(() => httpHits.length > beforeReload && !fresh.webContents.isLoading());
     await shell.webContents.executeJavaScript("document.getElementById('star').click(); document.getElementById('bookmark-title').value='Локальная закладка'; document.getElementById('bookmark-save').click()");
-    await waitUntil(() => shell.webContents.executeJavaScript("document.querySelectorAll('#bookmarks-bar .bookmark').length").catch(() => 0));
+    await waitUntil(async () => (await shell.webContents.executeJavaScript("document.querySelectorAll('#bookmarks-bar .bookmark').length").catch(() => 0)) === defaultBookmarks().length + 1);
     const bookmarkState = await shell.webContents.executeJavaScript("({count:document.querySelectorAll('#bookmarks-bar .bookmark').length,hidden:document.getElementById('bookmarks-bar').hidden,titles:[...document.querySelectorAll('#bookmarks-bar .bookmark span')].map((el)=>el.textContent)})");
     assert.equal(bookmarkState.hidden, false);
     assert.equal(bookmarkState.count, defaultBookmarks().length + 1);
@@ -333,6 +339,13 @@ if (process.versions.electron) {
     await waitUntil(() => shell.webContents.executeJavaScript("document.getElementById('bookmarks-bar').hidden").catch(() => false));
     await shell.webContents.executeJavaScript("document.getElementById('extensions').click()");
     assert.match(await shell.webContents.executeJavaScript("document.getElementById('extensions-list').textContent"), /Fixture/);
+    await shell.webContents.executeJavaScript("document.getElementById('privacy-button').click()");
+    const privacyUI = await shell.webContents.executeJavaScript("({visible:!document.getElementById('privacy-popover').hidden,allowed:document.getElementById('privacy-allow').checked,origin:document.getElementById('privacy-origin').textContent,warning:document.getElementById('privacy-popover').textContent})");
+    assert.equal(privacyUI.visible, true);
+    assert.equal(privacyUI.allowed, false);
+    assert.equal(privacyUI.origin, `http://127.0.0.1:${plain.port}`);
+    assert.match(privacyUI.warning, /реальную видеокарту/);
+    await shell.webContents.executeJavaScript("document.getElementById('privacy-button').click()");
     await navigateFromToolbar("file:///C:/Windows/win.ini");
     await waitUntil(() => !fresh.webContents.isLoading());
     assert.ok(fresh.webContents.getURL().endsWith("/second-page"));
@@ -353,7 +366,7 @@ if (process.versions.electron) {
     for (const cleanup of cleanups.reverse()) await cleanup();
     process.stdout.write("UMBRA_NATIVE_TEST_OK\n"); app.exit(0);
   }).catch(async (error) => {
-    process.stdout.write(`UMBRA_NATIVE_TEST_FAILED ${error.name}: ${error.message}\n${error.stack?.split("\n").slice(1, 3).join("\n")}\n`);
+    process.stdout.write(`UMBRA_NATIVE_TEST_FAILED ${error.name}: ${error.message}\n${error.stack?.split("\n").filter((line) => /^\s+at /.test(line)).slice(0, 3).join("\n")}\n`);
     if (runtime) await runtime.closeAllProfiles().catch(() => {});
     for (const cleanup of cleanups.reverse()) await cleanup().catch(() => {});
     app.exit(1);

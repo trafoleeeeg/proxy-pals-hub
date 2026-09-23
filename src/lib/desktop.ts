@@ -108,6 +108,14 @@ function terminalClose(response: unknown): TerminalClose | null {
   if (!response || typeof response !== "object" || !("ok" in response) || response.ok !== false || !("terminal" in response)) return null;
   return response.terminal === "access_revoked" || response.terminal === "lease_lost" ? response.terminal : null;
 }
+function terminalSessionFailure(error: unknown): TerminalClose | null {
+  const structured = terminalClose(error);
+  if (structured) return structured;
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  if (message.includes("no profile access")) return "access_revoked";
+  if (message.includes("session lease lost")) return "lease_lost";
+  return null;
+}
 function safeLaunchError(error: unknown): string {
   const message = error instanceof Error ? error.message.trim() : "";
   // The desktop process translates expected launch failures. Do not surface
@@ -385,13 +393,32 @@ export class DesktopProfileLifecycle {
           const profile = this.sessions.get(id);
           if (!profile) return;
           const key = this.key(profile);
-          await this.api.heartbeat(key);
+          const heartbeat = await this.api.heartbeat(key);
+          if (terminalClose(heartbeat)) throw heartbeat;
           const snapshot = await this.bridge.profileCookies(id);
           if (!snapshot.ok || typeof snapshot.cookies !== "string" || snapshot.lockToken !== key.lockToken || (snapshot.profileId && snapshot.profileId !== id)) throw new Error();
-          await this.api.save({ ...key, cookies: snapshot.cookies });
+          const saved = await this.api.save({ ...key, cookies: snapshot.cookies });
+          if (terminalClose(saved)) throw saved;
           if (![...this.pending.values()].some((p) => p.profileId === id) && !this.outboxFailures.has(id)) delete this.errors[id];
-        } catch {
-          this.errors[id] ??= "Нет подтверждения сохранения cookies или продления блокировки. Проверьте подключение.";
+        } catch (error) {
+          const terminal = terminalSessionFailure(error);
+          if (terminal) {
+            // Native close blocks networking before snapshot persistence. A
+            // failed flush leaves the profile blocked, with its data retained.
+            this.errors[id] = terminal === "access_revoked" ? "Доступ к профилю отозван. Профиль остановлен; локальные данные сохраняются." : "Блокировка профиля потеряна. Профиль остановлен; локальные данные сохраняются.";
+            try {
+              const closed = await withDesktopTimeout(this.bridge.closeProfile(id), "Остановка профиля не подтверждена");
+              if (!closed.ok) throw new Error();
+              const outbox = await this.bridge.pendingProfileClosures();
+              if (!outbox.ok) throw new Error();
+              const token = this.sessions.get(id)?.lockToken;
+              const records = outbox.profiles.filter((record) => record.profileId === id && record.lockToken === token);
+              if (!records.length) throw new Error();
+              for (const record of records) await this.finish(record);
+            } catch {
+              this.errors[id] = "Доступ или блокировка потеряны. Запрошена остановка; сохранение не подтверждено. Не закрывайте приложение до повторной синхронизации.";
+            }
+          } else this.errors[id] ??= "Нет подтверждения сохранения cookies или продления блокировки. Проверьте подключение.";
         }
       })));
     })();

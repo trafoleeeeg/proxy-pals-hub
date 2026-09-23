@@ -37,6 +37,28 @@ function fixture(running: RunningProfile[] = []) {
 }
 
 describe("desktop profile lifecycle", () => {
+  for (const failure of ["No profile access", "Session lease lost; reopen the profile"]) {
+    test(`confirmed terminal failure stops the native profile: ${failure}`, async () => {
+      const f = fixture([{ profileId: "a", name: "A", lockToken: "lease-a" }]);
+      await f.controller.restore();
+      f.api.heartbeat = async () => { throw new Error(failure); };
+      f.api.close = async () => ({ ok: false, terminal: failure.includes("access") ? "access_revoked" : "lease_lost" });
+      await f.controller.sync();
+      expect(f.state.running).toHaveLength(0);
+      expect(f.state.saves).toHaveLength(0);
+      expect(f.state.archiveCalls).toHaveLength(1);
+      expect(f.controller.getSnapshot().running).toHaveLength(0);
+    });
+  }
+  test("network failure alone is not classified as revoked access", async () => {
+    const f = fixture([{ profileId: "a", name: "A", lockToken: "lease-a" }]);
+    await f.controller.restore();
+    f.api.heartbeat = async () => { throw new Error("offline"); };
+    await f.controller.sync();
+    expect(f.state.running).toHaveLength(1);
+    expect(f.state.saves).toHaveLength(0);
+  });
+
   test("restores running profiles and carries their token through heartbeat and save", async () => {
     const f = fixture([{ profileId: "a", name: "A", lockToken: "restored-lease" }]);
     await f.controller.restore(); await f.controller.sync();

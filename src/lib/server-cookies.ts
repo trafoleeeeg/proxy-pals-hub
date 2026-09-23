@@ -52,6 +52,9 @@ export function parseCookieImport(text: string): ProfileCookie[] {
   return raw.map((item, index) => {
     if (!item || typeof item !== "object") throw new Error(`Invalid cookie at position ${index + 1}`);
     const value = { ...item };
+    if (value.partitionKey != null || value.partitioned === true || value.partitionKeyOpaque === true) {
+      throw new Error("Partitioned cookies (CHIPS) пока не поддерживаются. Импорт отменён; существующие cookies сохранены");
+    }
     const expires = expirationDate(value);
     if (expires !== undefined) value.expirationDate = expires;
     if (value.sameSite != null && value.sameSite !== "") {

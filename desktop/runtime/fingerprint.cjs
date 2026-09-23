@@ -3,6 +3,36 @@ const path = require("node:path");
 const DOCUMENT_SOURCE = fs.readFileSync(path.join(__dirname, "..", "fingerprint-preload.cjs"), "utf8");
 const WEBRTC_POLICY = "disable_non_proxied_udp";
 
+function installSessionPrivacy(ses, fp) {
+  const identity = userAgentOverride(fp);
+  const meta = identity.userAgentMetadata;
+  const quoted = (value) => JSON.stringify(String(value));
+  const brands = (items) => items.map((item) => `${quoted(item.brand)};v=${quoted(item.version)}`).join(", ");
+  const hints = meta ? {
+    "sec-ch-ua": brands(meta.brands), "sec-ch-ua-full-version-list": brands(meta.fullVersionList),
+    "sec-ch-ua-full-version": quoted(meta.fullVersion), "sec-ch-ua-platform": quoted(meta.platform),
+    "sec-ch-ua-platform-version": quoted(meta.platformVersion), "sec-ch-ua-arch": quoted(meta.architecture),
+    "sec-ch-ua-bitness": quoted(meta.bitness), "sec-ch-ua-model": '""', "sec-ch-ua-mobile": "?0", "sec-ch-ua-wow64": "?0",
+  } : {};
+  ses.webRequest.onBeforeSendHeaders((details, callback) => {
+    const headers = { ...details.requestHeaders };
+    const offeredHints = [];
+    for (const key of Object.keys(headers)) {
+      const lower = key.toLowerCase();
+      if (lower === "service-worker") {
+        let origin; try { origin = new URL(details.url).origin; } catch { /* deny below */ }
+        if (!fp.hardwareOrigins?.includes(origin)) { callback({ cancel: true }); return; }
+      }
+      if (lower.startsWith("sec-ch-ua")) { offeredHints.push(lower); delete headers[key]; }
+      if (["user-agent", "accept-language"].includes(lower)) delete headers[key];
+    }
+    headers["User-Agent"] = fp.userAgent;
+    headers["Accept-Language"] = fp.languages.map((language, i) => i ? `${language};q=${Math.max(0.1, 1 - i / 10).toFixed(1)}` : language).join(",");
+    for (const key of offeredHints) if (hints[key]) headers[key] = hints[key];
+    callback({ requestHeaders: headers });
+  });
+}
+
 function normalizeFingerprint(raw = {}, defaultUA, runtimeChrome = process.versions.chrome) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Invalid fingerprint");
   const integer = (value, fallback, min, max) => {
@@ -73,40 +103,98 @@ function userAgentOverride(fp) {
   return result;
 }
 
-async function applyFingerprint(wc, fp) {
+async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
   wc.setUserAgent(fp.userAgent);
   wc.setWebRTCIPHandlingPolicy(WEBRTC_POLICY);
   if (wc.getWebRTCIPHandlingPolicy() !== WEBRTC_POLICY) throw new Error("Unable to apply fingerprint WebRTC policy");
   wc.debugger.attach("1.3");
+  const source = `(${DOCUMENT_SOURCE})(${JSON.stringify(fp)});`;
+  let stopped = false;
+  const children = new Set();
+  const fail = () => {
+    if (stopped || wc.isDestroyed?.()) return;
+    stopped = true;
+    // Never leave a running renderer behind when protection disappears.
+    wc.session?.webRequest?.onBeforeRequest((_details, callback) => callback({ cancel: true }));
+    void wc.session?.closeAllConnections?.().catch(() => {});
+    wc.stop?.();
+    void wc.debugger.sendCommand("Emulation.setScriptExecutionDisabled", { value: true }).catch(() => {});
+    onFailure("Защита страницы недоступна, профиль остановлен");
+  };
+  const send = async (method, params, id) => {
+    let timer;
+    try {
+      return await Promise.race([wc.debugger.sendCommand(method, params, id), new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("Privacy setup timeout")), 4000); timer.unref?.();
+      })]);
+    } finally { clearTimeout(timer); }
+  };
+  // Shared/service workers cannot be configured reliably before execution in
+  // this Electron version. The strict document policy blocks their creation;
+  // only explicit site exceptions can use their native implementation.
+  const autoAttach = (id) => send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true,
+    filter: [{ type: "worker" }, { type: "iframe" }, { type: "page" }, { exclude: true }],
+  }, id);
+  async function configureChild(id, type) {
+    const page = type === "iframe" || type === "page";
+    await send("Runtime.enable", {}, id);
+    await send("Network.setUserAgentOverride", userAgentOverride(fp), id);
+    if (page) {
+      await send("Page.enable", {}, id);
+      await send("Emulation.setTimezoneOverride", { timezoneId: fp.timezone }, id);
+      await send("Emulation.setLocaleOverride", { locale: fp.languages[0] }, id);
+      await send("Emulation.setHardwareConcurrencyOverride", { hardwareConcurrency: fp.hardwareConcurrency }, id);
+      // OOPIFs inherit top-level device metrics. CDP rejects this method on
+      // iframe targets; Screen prototypes cover their JavaScript accessors.
+      if (type === "page") await send("Emulation.setDeviceMetricsOverride", { width: 0, height: 0, deviceScaleFactor: fp.os === "macos" ? 2 : 1, mobile: false, screenWidth: fp.screen.width, screenHeight: fp.screen.height }, id);
+      await send("Page.addScriptToEvaluateOnNewDocument", { source, runImmediately: true }, id);
+    } else {
+      const evaluated = await send("Runtime.evaluate", { expression: source, returnByValue: true }, id);
+      if (evaluated.exceptionDetails) throw new Error("Worker privacy setup failed");
+    }
+    await autoAttach(id);
+    await send("Runtime.runIfWaitingForDebugger", {}, id);
+  }
+  wc.debugger.on?.("message", (_event, method, params) => {
+    if (method === "Target.detachedFromTarget") { children.delete(params.sessionId); return; }
+    if (method !== "Target.attachedToTarget") return;
+    children.add(params.sessionId);
+    void configureChild(params.sessionId, params.targetInfo.type).catch(() => {
+      if (children.has(params.sessionId)) fail();
+    });
+  });
+  wc.debugger.on?.("detach", (_event, reason) => { if (reason !== "target closed") fail(); });
   try {
-    await wc.debugger.sendCommand("Page.enable");
+    await autoAttach();
+    await send("Page.enable");
     await Promise.all([
-      wc.debugger.sendCommand("Emulation.setUserAgentOverride", userAgentOverride(fp)),
-      wc.debugger.sendCommand("Emulation.setLocaleOverride", { locale: fp.languages[0] }),
-      wc.debugger.sendCommand("Emulation.setTimezoneOverride", { timezoneId: fp.timezone }),
-      wc.debugger.sendCommand("Emulation.setHardwareConcurrencyOverride", { hardwareConcurrency: fp.hardwareConcurrency }),
-      // Match screen CSS queries to window.screen without forcing a viewport,
-      // zoom or host DPI. Width/height/DPR zero preserve native window sizing.
-      wc.debugger.sendCommand("Emulation.setDeviceMetricsOverride", {
-        width: 0, height: 0, deviceScaleFactor: 0, mobile: false,
+      send("Emulation.setUserAgentOverride", userAgentOverride(fp)),
+      send("Emulation.setLocaleOverride", { locale: fp.languages[0] }),
+      send("Emulation.setTimezoneOverride", { timezoneId: fp.timezone }),
+      send("Emulation.setHardwareConcurrencyOverride", { hardwareConcurrency: fp.hardwareConcurrency }),
+      // Preserve viewport size, but do not expose the physical host's DPI.
+      send("Emulation.setDeviceMetricsOverride", {
+        width: 0, height: 0, deviceScaleFactor: fp.os === "macos" ? 2 : 1, mobile: false,
         screenWidth: fp.screen.width, screenHeight: fp.screen.height,
       }),
-      wc.debugger.sendCommand("Page.addScriptToEvaluateOnNewDocument", { source: `(${DOCUMENT_SOURCE})(${JSON.stringify(fp)});` }),
+      send("Page.addScriptToEvaluateOnNewDocument", { source }),
     ]);
   } catch {
+    stopped = true;
     if (wc.debugger.isAttached()) wc.debugger.detach();
     throw new Error("Unable to apply fingerprint before navigation");
   }
   return {
     engine: "stock-electron", chromiumVersion: process.versions.chrome || null,
     uaLocaleTimezone: "cdp", documentOverrides: "main-world-javascript",
-    screenMetrics: "cdp-screen-only", hardwareConcurrency: "cdp-and-document",
+    screenMetrics: "cdp-screen-and-dpr", hardwareConcurrency: "cdp-and-prototype",
     webRTCPolicy: wc.getWebRTCIPHandlingPolicy(),
     canvasNoise: fp.canvasNoise ? "document-2d-readback-and-html-canvas-serialization-only" : "disabled",
     audioNoise: fp.audioNoise ? "document-analyser-and-copyFromChannel-only" : "disabled",
     unsupportedControls: ["fontsPreset", "webglNoise"],
-    limitations: ["No custom browser kernel or undetectability guarantee", "Workers, service workers and out-of-process frames are not independently configured by this runtime", "Canvas overrides do not cover OffscreenCanvas, worker canvases or WebGL readPixels; subregion reads need not match serialization", "AudioBuffer.getChannelData retains native writable-buffer behavior", "GPU values are document WebGL overrides, not native GPU or WebGPU emulation; fonts and host DPI remain native", "WebRTC disabling is document-only; native policy restricts non-proxied UDP", "Popup opener and form POST are unsupported", "Navigation history is not restored after restart"],
+    hardwarePolicy: "blocked-by-default-with-explicit-local-origin-exceptions",
+    limitations: ["No custom browser kernel or undetectability guarantee", "Shared/service workers are blocked by default; site exceptions expose their native identity", "Compatibility exceptions expose native GPU, audio and canvas characteristics", "Installed fonts can still affect CSS layout", "JavaScript privacy restrictions are observable", "Native WebRTC policy restricts non-proxied UDP", "Popup opener and form POST are unsupported", "Navigation history is not restored after restart"],
   };
 }
 
-module.exports = { normalizeFingerprint, applyFingerprint, userAgentOverride };
+module.exports = { normalizeFingerprint, applyFingerprint, userAgentOverride, installSessionPrivacy };

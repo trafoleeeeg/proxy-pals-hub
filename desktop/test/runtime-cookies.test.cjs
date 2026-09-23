@@ -11,6 +11,16 @@ const OLD = "2026-01-01T00:00:00.000Z";
 const NEW = "2026-02-01T00:00:00.000Z";
 const cookie = (value) => ({ name: "session", value, domain: "localhost", path: "/", hostOnly: true, session: true, secure: true, httpOnly: true, sameSite: "lax" });
 
+test("unsupported CHIPS import and restore fail before clearing cookies", async () => {
+  for (const fields of [{ partitionKey: { topLevelSite: "https://example.test" } }, { partitioned: true }, { partitionKeyOpaque: true }]) {
+    const input = { ...cookie("synthetic-value"), ...fields };
+    assert.throws(() => parseCookieImport(JSON.stringify([input])), /CHIPS/);
+    let cleared = false;
+    await assert.rejects(restoreCookies({ clearStorageData: async () => { cleared = true; } }, [input]), /CHIPS/);
+    assert.equal(cleared, false);
+  }
+});
+
 function encryption() {
   const key = crypto.randomBytes(32);
   return {

@@ -1,75 +1,40 @@
-const { randomUUID } = require("node:crypto");
 const { isIP } = require("node:net");
 const { requestJson } = require("./proxy-probe.cjs");
 const { blockSession } = require("./proxy.cjs");
-
 const IP_ENDPOINT = "https://api.ipify.org?format=json";
-const DNS_ENDPOINT = "https://edns.ip-api.com/json";
 const SAFE_WEBRTC = "disable_non_proxied_udp";
 
-function pickIp(json) {
-  if (!json) return "";
-  if (typeof json.ip === "string" && isIP(json.ip)) return json.ip;
-  const dns = json.dns;
-  if (dns && typeof dns.ip === "string" && isIP(dns.ip)) return dns.ip;
-  return "";
-}
-
-// Проверка утечек: сравниваем внешний адрес профиля и адрес DNS-резолвера
-// с реальным адресом компьютера. Совпадение означает, что трафик идёт мимо прокси.
-function createLeakAudit({ session, net }, options = {}) {
+// Connection diagnostics are not proof of leak absence. Never contact a
+// service through a direct session just to discover the host's real IP.
+function createLeakAudit({ net }, options = {}) {
   const fetchJson = options.requestJson || requestJson;
   const block = options.blockSession || blockSession;
-  const timeoutMs = options.timeoutMs || 15000;
-  const ipEndpoint = options.ipEndpoint || IP_ENDPOINT;
-  const dnsEndpoint = options.dnsEndpoint || DNS_ENDPOINT;
-
-  async function directIp() {
-    const ses = session.fromPartition(`leak-check-${randomUUID()}`, { cache: false });
-    try {
-      await ses.setProxy({ mode: "direct" });
-      return pickIp(await fetchJson(net, ses, ipEndpoint, timeoutMs));
-    } finally {
-      await Promise.allSettled([ses.closeAllConnections(), ses.clearStorageData(), ses.clearCache()]);
-    }
-  }
-
   return async function auditLeaks({ ses, hasProxy, webrtcPolicy }) {
-    const checks = [];
-    let leaked = false;
-    const add = (id, label, state, detail) => {
-      checks.push({ id, label, state, detail: detail || "" });
-      if (state === "leak") leaked = true;
-    };
-
-    const policy = webrtcPolicy || (ses?.getWebRTCIPHandlingPolicy?.() ?? "");
-    if (policy === SAFE_WEBRTC || !hasProxy) add("webrtc", "WebRTC", hasProxy ? "ok" : "skip", hasProxy ? "Локальные адреса скрыты" : "Прокси не используется");
-    else add("webrtc", "WebRTC", "leak", "WebRTC может раскрыть реальный адрес");
-
-    if (!hasProxy) {
-      add("ip", "Внешний IP", "skip", "Прокси не используется");
-      add("dns", "DNS", "skip", "Прокси не используется");
-      return { ok: !leaked, leaked, checks, ip: "", directIp: "" };
+    if (!hasProxy) return { ok: false, complete: false, leaked: false, ip: "", checks: [
+      { id: "ip", label: "Внешний IP", state: "skip", detail: "Прямое подключение: сайт видит адрес вашей сети" },
+      { id: "dns", label: "DNS", state: "skip", detail: "Прокси не используется" },
+      { id: "webrtc", label: "WebRTC", state: "skip", detail: "Прокси не используется" },
+    ] };
+    const policy = webrtcPolicy || ses?.getWebRTCIPHandlingPolicy?.() || "";
+    const leaked = policy !== SAFE_WEBRTC;
+    const checks = [{ id: "webrtc", label: "WebRTC", state: leaked ? "leak" : "unknown",
+      detail: leaked ? "Защитная политика не подтверждена — трафик заблокирован" : "Запрет непроксируемого UDP установлен; ICE-кандидаты не проверялись" }];
+    if (leaked && ses) {
+      block(ses);
+      await ses.closeAllConnections?.().catch(() => {});
     }
-
-    let real = "";
-    try { real = await directIp(); } catch { real = ""; }
-
-    let profileIp = "";
-    try { profileIp = pickIp(await fetchJson(net, ses, ipEndpoint, timeoutMs)); } catch { profileIp = ""; }
-    if (!profileIp) add("ip", "Внешний IP", "error", "Не удалось определить адрес профиля");
-    else if (real && profileIp === real) add("ip", "Внешний IP", "leak", `Виден реальный адрес ${profileIp}`);
-    else add("ip", "Внешний IP", "ok", profileIp);
-
-    let dnsIp = "";
-    try { dnsIp = pickIp(await fetchJson(net, ses, dnsEndpoint, timeoutMs)); } catch { dnsIp = ""; }
-    if (!dnsIp) add("dns", "DNS", "error", "Не удалось проверить DNS-сервер");
-    else if (real && dnsIp === real) add("dns", "DNS", "leak", `DNS-запросы идут мимо прокси (${dnsIp})`);
-    else add("dns", "DNS", "ok", dnsIp);
-
-    if (leaked && ses) { try { block(ses); await ses.closeAllConnections?.(); } catch { /* сессия уже закрыта */ } }
-    return { ok: !leaked, leaked, checks, ip: profileIp, directIp: real };
+    let ip = "";
+    if (!leaked) {
+      try {
+        const json = await fetchJson(net, ses, options.ipEndpoint || IP_ENDPOINT, options.timeoutMs || 15000);
+        if (typeof json?.ip === "string" && isIP(json.ip)) ip = json.ip;
+      } catch { /* Unknown is not a successful test. */ }
+    }
+    checks.push({ id: "ip", label: "Внешний IP", state: ip ? "unknown" : "error",
+      detail: ip ? ip + " · адрес получен через сессию профиля; отсутствие обходных маршрутов не доказано" : "Не удалось определить адрес профиля" });
+    checks.push({ id: "dns", label: "DNS", state: "unknown", detail: "Нужен отдельный DNS challenge-тест; адрес резолвера сам по себе не доказывает отсутствие утечки" });
+    return { ok: false, complete: false, leaked, checks, ip };
   };
 }
 
-module.exports = { createLeakAudit, SAFE_WEBRTC, IP_ENDPOINT, DNS_ENDPOINT };
+module.exports = { createLeakAudit, SAFE_WEBRTC, IP_ENDPOINT };

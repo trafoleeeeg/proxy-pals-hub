@@ -12,7 +12,7 @@ import { toast } from "sonner";
 import { useWorkspace } from "@/lib/useWorkspace";
 import { parseCookieImport } from "@/lib/server-cookies";
 import { MAIN_FOLDER, useProfileFolder } from "@/lib/useProfileFolder";
-import { listProfiles, saveProfile, cloneProfile, bulkCreateProfiles } from "@/lib/profiles.functions";
+import { listProfiles, saveProfile, cloneProfile, bulkCreateProfiles, getProfileCookieStatus } from "@/lib/profiles.functions";
 import { listProxies } from "@/lib/proxies.functions";
 import { listFolders } from "@/lib/folders.functions";
 import { usePermissions } from "@/lib/usePermissions";
@@ -20,7 +20,7 @@ import { useDesktopProfileLifecycle } from "@/hooks/useDesktopProfileLifecycle";
 import { generateFingerprint, describeFingerprint, type Fingerprint } from "@/lib/fingerprint";
 import { ProfileFingerprint } from "@/components/profile-fingerprint";
 import { ProfileCookies } from "@/components/profile-cookies";
-import { ProfileDragHandle } from "@/components/profile-dnd";
+import { ProfileDragHandle, ProfileDragRow } from "@/components/profile-dnd";
 import { ProfileBulkDialog, type BulkAction } from "@/components/profile-bulk";
 import { ProfileProxyCell, useProxyOps } from "@/components/profile-proxy";
 import { ColumnSettings, InlineText, MetadataManager, NotesCell, ResizableHead, StatusCell, useColumnWidths, type FixedColumn } from "@/components/profile-table-tools";
@@ -73,6 +73,7 @@ function ProfilesWorkspace() {
   const saveFn = useServerFn(saveProfile);
   const cloneFn = useServerFn(cloneProfile);
   const createMany = useServerFn(bulkCreateProfiles);
+  const cookieStatusFn = useServerFn(getProfileCookieStatus);
   const proxiesFn = useServerFn(listProxies);
   const metadataFn = useServerFn(listProfileMetadata);
   const addStatusFn = useServerFn(createProfileStatus);
@@ -89,6 +90,7 @@ function ProfilesWorkspace() {
   const [action, setAction] = useState<{ mode: BulkAction; ids: string[] } | null>(null);
   const [cookiesId, setCookiesId] = useState<string | null>(null);
   const [editing, setEditing] = useState<Edit | null>(null);
+  const cookieStatus = useQuery({ queryKey: ["profile-cookie-status", editing?.id], queryFn: () => cookieStatusFn({ data: { profileId: editing!.id! } }), enabled: !!editing?.id && owner });
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkForm, setBulkForm] = useState({ prefix: "Профиль", count: "10", folder: MAIN_FOLDER });
   const [busy, setBusy] = useState<string | null>(null);
@@ -241,7 +243,7 @@ function ProfilesWorkspace() {
           const processing = runtime.busy.includes(profile.id);
           const proxy = proxies.data?.find((p) => p.id === profile.proxy_id);
           const busyBy = !active && profile.lock ? (profile.lock.name || profile.lock.email || "другой сотрудник") : null;
-          return <ContextMenu key={profile.id}><ContextMenuTrigger asChild><TableRow data-state={selected.includes(profile.id) ? "selected" : undefined}>
+          return <ContextMenu key={profile.id}><ContextMenuTrigger asChild><ProfileDragRow id={profile.id} name={profile.name} disabled={!canEdit || !!busy || locked(profile.id)} data-state={selected.includes(profile.id) ? "selected" : undefined}>
             {manage && <TableCell><Checkbox aria-label={"Выбрать " + profile.name} checked={selected.includes(profile.id)} onCheckedChange={(v) => setSelected((current) => toggleVisibleSelection(current, [profile.id], v === true))} /></TableCell>}
             <TableCell><Button variant={active ? "outline" : "default"} size="icon" title={active ? "Закрыть профиль" : busyBy ? `Профиль занят: ${busyBy}` : runtime.available ? "Запустить профиль" : "Запуск в приложении Windows"} aria-label={busyBy ? `Профиль ${profile.name} занят: ${busyBy}` : (active ? "Закрыть " : "Запустить ") + profile.name} disabled={!runtime.available || !runtime.ready || runtime.restoring || processing || (!active && locked(profile.id))} onClick={() => { void (active ? runtime.stop(profile.id) : runtime.start(profile.id)).catch((e: Error) => toast.error(e.message)); }}>{processing ? <RefreshCw className="size-4 animate-spin" /> : active ? <Square className="size-4" /> : busyBy ? <LockKeyhole className="size-4" /> : <Play className="size-4" />}</Button></TableCell>
             {manage && <TableCell><DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="size-7" title="Действия с профилем" aria-label={"Действия " + profile.name}><MoreVertical className="size-4" /></Button></DropdownMenuTrigger><DropdownMenuContent align="start" className="w-44">
@@ -250,7 +252,7 @@ function ProfilesWorkspace() {
               <DropdownMenuItem disabled={!!busy} onSelect={() => setCookiesId(profile.id)}><Cookie className="size-4" />Cookies</DropdownMenuItem>
               <DropdownMenuItem disabled={!canDelete || !!busy || locked(profile.id)} onSelect={() => setAction({ mode: "delete", ids: [profile.id] })}><Trash2 className="size-4 text-destructive" />Удалить</DropdownMenuItem>
             </DropdownMenuContent></DropdownMenu></TableCell>}
-            <TableCell style={cellStyle("name")} className="max-w-36"><div className="flex items-center">{canEdit && <ProfileDragHandle id={profile.id} name={profile.name} disabled={!!busy || locked(profile.id)} />}{editMode ? <InlineText value={profile.name} placeholder="Название" disabled={!canEdit || !!busy || locked(profile.id)} onSave={(name) => patchProfile(profile, { name })} /> : <span className="block truncate font-medium" title={busyBy ? `${profile.name} — занят: ${busyBy}` : profile.name}>{profile.name}{busyBy && <span className="ml-1 text-[11px] font-normal text-warning">занят</span>}</span>}</div></TableCell>
+            <TableCell style={cellStyle("name")} className="max-w-36"><div className="flex items-center">{canEdit && <ProfileDragHandle />}{editMode ? <InlineText value={profile.name} placeholder="Название" disabled={!canEdit || !!busy || locked(profile.id)} onSave={(name) => patchProfile(profile, { name })} /> : <span className="block truncate font-medium" title={busyBy ? `${profile.name} — занят: ${busyBy}` : profile.name}>{profile.name}{busyBy && <span className="ml-1 text-[11px] font-normal text-warning">занят</span>}</span>}</div></TableCell>
             {shown("folder") && <TableCell style={cellStyle("folder")} className="max-w-28"><span className="block truncate text-muted-foreground" title={profile.folder || MAIN_FOLDER}>{profile.folder || MAIN_FOLDER}</span></TableCell>}
                         {shown("status") && <TableCell style={cellStyle("status")} className="max-w-32"><StatusCell statusId={profile.status_id} statuses={metadata.data?.statuses ?? []} disabled={!canEdit || !!busy || locked(profile.id)} canCreate={!!canEdit} onSelect={(statusId) => patchProfile(profile, { statusId })} onCreate={createStatus} /></TableCell>}
             {shown("proxy") && <TableCell style={cellStyle("proxy")} className="text-xs">{profile.proxy_id && !proxy ? <span className="text-warning">Прокси недоступен</span> : <ProfileProxyCell proxy={proxy} ops={proxyOps} compact />}</TableCell>}
@@ -259,7 +261,7 @@ function ProfilesWorkspace() {
             {shown("fingerprint") && <TableCell style={cellStyle("fingerprint")} className="max-w-40"><span className="block truncate text-muted-foreground" title={describeFingerprint(profile.fingerprint)}>{describeFingerprint(profile.fingerprint)}</span></TableCell>}
             {shown("updated") && <TableCell className="whitespace-nowrap text-muted-foreground">{dateTime(profile.updated_at)}</TableCell>}
             {shown("created") && <TableCell className="whitespace-nowrap text-muted-foreground">{dateTime(profile.created_at)}</TableCell>}
-          </TableRow></ContextMenuTrigger><ContextMenuContent>
+          </ProfileDragRow></ContextMenuTrigger><ContextMenuContent>
             <ContextMenuItem disabled={!runtime.available || !runtime.ready || runtime.restoring || processing || (!active && locked(profile.id))} onSelect={() => void (active ? runtime.stop(profile.id) : runtime.start(profile.id)).catch((error: Error) => toast.error(error.message))}>{active ? <Square className="size-4" /> : <Play className="size-4" />}{active ? "Закрыть" : "Открыть"}</ContextMenuItem>
             <ContextMenuItem disabled={!canEdit || !!busy || locked(profile.id)} onSelect={() => { setError(null); setEditing({ id: profile.id, name: profile.name, folder: profile.folder, tags: profile.tags.join(", "), notes: profile.notes, proxyId: profile.proxy_id ?? "none", fingerprint: profile.fingerprint, statusId: profile.status_id, customFields: profile.custom_fields }); }}><Pencil className="size-4" />Изменить</ContextMenuItem>
             <ContextMenuItem disabled={!canCreate || !!busy} onSelect={() => void perform(profile.id, () => cloneFn({ data: { id: profile.id } }))}><Copy className="size-4" />Создать копию</ContextMenuItem>
@@ -281,7 +283,15 @@ function ProfilesWorkspace() {
         <Label className="grid gap-2">Название<Input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></Label>
         <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label>Папка</Label><Select value={editing.folder || MAIN_FOLDER} disabled={folderList.isPending} onValueChange={(value) => setEditing({ ...editing, folder: value })}><SelectTrigger aria-label="Папка профиля"><SelectValue placeholder="Выберите папку" /></SelectTrigger><SelectContent>{folderNames.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent></Select></div><Label className="grid gap-2">Метки через запятую<Input value={editing.tags} onChange={(e) => setEditing({ ...editing, tags: e.target.value })} /></Label></div>
         <div className="space-y-2"><Label>Прокси</Label><Select disabled={!!busy || proxies.isPending || proxies.isError} value={editing.proxyId} onValueChange={(proxyId) => setEditing({ ...editing, proxyId })}><SelectTrigger aria-label="Прокси профиля"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">Без прокси</SelectItem>{(proxies.data ?? []).map((proxy) => <SelectItem key={proxy.id} value={proxy.id}>{proxy.label} · {proxy.host}:{proxy.port}</SelectItem>)}</SelectContent></Select></div>
-        <Label className="grid gap-2">Заметки<Textarea rows={2} value={editing.notes} onChange={(e) => setEditing({ ...editing, notes: e.target.value })} /></Label>
+        <Label className="grid gap-2">Заметки<Textarea rows={5} value={editing.notes} onChange={(e) => setEditing({ ...editing, notes: e.target.value })} /></Label>
+        {editing.id && owner && <div className="rounded-md border border-border bg-secondary/30 p-3 text-sm">
+          <p className="font-medium">Cookies профиля</p>
+          {cookieStatus.isPending ? <p className="text-muted-foreground">Проверяем сохранённые cookies…</p>
+            : cookieStatus.isError ? <p role="alert" className="text-destructive">Не удалось проверить cookies. Повторите открытие профиля.</p>
+            : cookieStatus.data?.total ? <p className="text-muted-foreground">Сохранено: {cookieStatus.data.total} · не истекли: {cookieStatus.data.usable}{cookieStatus.data.updatedAt ? ` · обновлены ${dateTime(cookieStatus.data.updatedAt)}` : ""}. Это не подтверждает, что сайт сохранил авторизацию.</p>
+            : <p className="text-muted-foreground">Cookies ещё не импортированы.</p>}
+          <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => { setCookiesId(editing.id!); setEditing(null); }}>Открыть управление cookies</Button>
+        </div>}
         <div className="space-y-2"><Label>Статус</Label><Select value={editing.statusId ?? "none"} onValueChange={(value) => setEditing({ ...editing, statusId: value === "none" ? null : value })}><SelectTrigger><SelectValue placeholder="Без статуса" /></SelectTrigger><SelectContent><SelectItem value="none">Без статуса</SelectItem>{(metadata.data?.statuses ?? []).map((status) => <SelectItem key={status.id} value={status.id}>{status.name}</SelectItem>)}</SelectContent></Select></div>
         {(metadata.data?.fields ?? []).map((field) => <Label key={field.id} className="grid gap-2">{field.name}<Input type={field.field_type === "number" ? "number" : field.field_type === "date" ? "date" : field.field_type === "url" ? "url" : "text"} value={editing.customFields[field.id] ?? ""} onChange={(event) => setEditing({ ...editing, customFields: { ...editing.customFields, [field.id]: event.target.value } })} /></Label>)}
         {!editing.id && <div className="space-y-2 rounded-md border border-border p-3">

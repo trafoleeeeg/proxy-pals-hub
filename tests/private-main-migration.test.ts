@@ -30,7 +30,7 @@ describe("private main folder rollout", () => {
       `);
       const dir = fileURLToPath(new URL("../supabase/migrations/", import.meta.url));
       const rollout = "20260924120000_private_main_folder.sql";
-      for (const file of (await readdir(dir)).filter((name) => name.endsWith(".sql") && name !== rollout).sort()) {
+      for (const file of (await readdir(dir)).filter((name) => name.endsWith(".sql") && name < rollout).sort()) {
         if (file === "20260924100000_enable_retention_cron.sql") continue;
         if (file.startsWith("20260919215434_")) {
           await db.query("insert into auth.users(id, email, email_confirmed_at) values ('8f9bf3e6-def2-47ac-938a-d37c7f6b33ff', 'owner@migration.test', now())");
@@ -62,3 +62,4 @@ describe("private main folder rollout", () => {
     } finally { await db.close(); }
   }, 30000);
 });
+

@@ -1,13 +1,13 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 
-export const ALL_FOLDERS = "__all__";
+export const MAIN_FOLDER = "Основная";
 
 type FolderContext = { folder: string; setFolder: (value: string) => void };
 
 const Context = createContext<FolderContext | null>(null);
 
 export function ProfileFolderProvider({ children }: { children: ReactNode }) {
-  const [folder, setFolder] = useState(ALL_FOLDERS);
+  const [folder, setFolder] = useState(MAIN_FOLDER);
   const value = useMemo(() => ({ folder, setFolder }), [folder]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

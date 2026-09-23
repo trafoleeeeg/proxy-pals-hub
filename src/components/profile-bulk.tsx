@@ -74,7 +74,7 @@ export function ProfileBulkDialog({ action, ids, teamId, isOwner, blocked, proxi
           <label className="flex items-center gap-2 text-sm"><Checkbox checked={active} disabled={!enabled || action === "move"} onCheckedChange={(v) => setFields((current) => v === true ? [...current, field] : current.filter((key) => key !== field))} />{labels[field]}</label>
           {active && field === "folder" && (folders.length > 0
             ? <Select value={folder} disabled={!enabled} onValueChange={setFolder}><SelectTrigger aria-label="Новая папка"><SelectValue placeholder="Выберите папку" /></SelectTrigger><SelectContent>{folders.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent></Select>
-            : <Input aria-label="Новая папка" placeholder="Без папки" value={folder} onChange={(e) => setFolder(e.target.value)} />)}
+            : <Input aria-label="Новая папка" placeholder="Основная" value={folder} onChange={(e) => setFolder(e.target.value)} />)}
           {active && field === "tags" && <Input aria-label="Новые метки через запятую" value={tags} onChange={(e) => setTags(e.target.value)} />}
           {active && field === "notes" && <Textarea aria-label="Новые заметки" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />}
           {active && field === "proxyId" && <Select value={proxyId} disabled={!enabled} onValueChange={setProxyId}><SelectTrigger aria-label="Новый прокси"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">Без прокси</SelectItem>{proxies.map((proxy) => <SelectItem key={proxy.id} value={proxy.id}>{proxy.label}</SelectItem>)}</SelectContent></Select>}

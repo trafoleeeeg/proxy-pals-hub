@@ -75,8 +75,10 @@ export const inviteSchema = z.object({ teamId: uuidSchema, email: z.string().tri
 export const inviteIdSchema = z.object({ inviteId: uuidSchema }).strict();
 export const acceptInviteSchema = z.object({ token: z.string().trim().regex(/^[a-fA-F0-9]{64}$/) }).strict();
 export const memberSchema = z.object({ teamId: uuidSchema, userId: uuidSchema }).strict();
+const sharedFolderName = folder.pipe(z.string().min(1).max(200))
+  .refine((value) => value.toLocaleLowerCase("ru") !== "основная", "Основная папка личная");
 export const folderAccessSchema = z.object({
-  teamId: uuidSchema, folder, userId: uuidSchema, granted: z.boolean(),
+  teamId: uuidSchema, folder: sharedFolderName, userId: uuidSchema, granted: z.boolean(),
 }).strict();
 // Профили передаются только между папками: точечная передача сотруднику убрана.
 export const transferSchema = z.object({
@@ -84,7 +86,7 @@ export const transferSchema = z.object({
   folder: folder.pipe(z.string().min(1).max(200)),
 }).strict();
 
-const folderName = folder.pipe(z.string().min(1).max(200));
+const folderName = sharedFolderName;
 export const createFolderSchema = z.object({ teamId: uuidSchema, name: folderName }).strict();
 export const renameFolderSchema = z.object({ teamId: uuidSchema, id: uuidSchema, name: folderName }).strict();
 export const folderIdSchema = z.object({ teamId: uuidSchema, id: uuidSchema }).strict();
@@ -105,4 +107,3 @@ export const updateEmployeeSchema = z.object({
   password: z.string().min(12, "Пароль должен содержать не менее 12 символов").max(72).optional(),
   displayName: text(120),
 }).strict();
-

@@ -49,7 +49,7 @@ beforeAll(async () => {
     if (file.startsWith("20260919215434_")) {
       // Одноразовая миграция объединения команд привязана к реальным идентификаторам —
       // создаём целевую команду и суперадмина, как в рабочей базе.
-      await db.query("insert into auth.users(id, email, email_confirmed_at) values ($1, $2, now())", ["8f9bf3e6-def2-47ac-938a-d37c7f6b33ff", "mafiatrafa@umbra.app"]);
+      await db.query("insert into auth.users(id, email, email_confirmed_at) values ($1, $2, now())", ["8f9bf3e6-def2-47ac-938a-d37c7f6b33ff", "owner@example.invalid"]);
       await db.query("insert into public.teams(id, owner_id) values ($1, $2)", ["edab663b-a15f-4f9c-a914-fca4bce85d7e", "8f9bf3e6-def2-47ac-938a-d37c7f6b33ff"]);
     }
     await db.exec(await readFile(`${dir}/${file}`, "utf8"));
@@ -65,23 +65,22 @@ beforeAll(async () => {
 afterAll(async () => { await db?.close(); });
 
 describe("real migrations and RLS", () => {
-  test("unfiled profiles require their own folder grant, separate from the default folder", async () => {
+  test("the private main folder cannot be shared, even through old direct grants", async () => {
     const legacyMember = crypto.randomUUID();
     const legacyProfile = crypto.randomUUID();
     await db.query("insert into auth.users(id, email, email_confirmed_at) values ($1, 'legacy@example.test', now())", [legacyMember]);
     await db.query("insert into public.team_members(team_id, user_id, role) values ($1, $2, 'member')", [team, legacyMember]);
-    await db.query("insert into public.browser_profiles(id, team_id, name, folder) values ($1, $2, 'Unfiled', '')", [legacyProfile, team]);
+    await db.query("insert into public.browser_profiles(id, team_id, name, folder) values ($1, $2, 'Private', '')", [legacyProfile, team]);
     try {
       expect(await asUser(legacyMember, "select id from public.browser_profiles where id = $1", [legacyProfile])).toEqual([]);
-      await asUser(owner, "select public.set_folder_access($1, 'Основная', $2, true)", [team, legacyMember]);
+      await expect(asUser(owner, "select public.set_folder_access($1, 'Основная', $2, true)", [team, legacyMember])).rejects.toThrow("личная");
+      await expect(asUser(owner, "select public.set_folder_access($1, '', $2, true)", [team, legacyMember])).rejects.toThrow("личная");
+      await asUser(owner, "select public.set_profiles_access($1, $2::uuid[], $3, true)", [team, [legacyProfile], legacyMember]);
       expect(await asUser(legacyMember, "select id from public.browser_profiles where id = $1", [legacyProfile])).toEqual([]);
-      await asUser(owner, "select public.set_folder_access($1, '', $2, true)", [team, legacyMember]);
-      expect(await asUser(legacyMember, "select id from public.browser_profiles where id = $1", [legacyProfile])).toEqual([{ id: legacyProfile }]);
-      expect((await db.query<{ allowed: boolean }>("select private.can_access_profile($1, $2) as allowed", [legacyMember, legacyProfile])).rows).toEqual([{ allowed: true }]);
+      expect((await db.query<{ allowed: boolean }>("select private.can_access_profile($1, $2) as allowed", [legacyMember, legacyProfile])).rows).toEqual([{ allowed: false }]);
       await asUser(owner, "select public.set_member_permissions($1, $2, false, true, false, false, false, false, false)", [team, legacyMember]);
-      expect(await asUser(legacyMember, "update public.browser_profiles set name = 'Updated' where id = $1 returning name", [legacyProfile])).toEqual([{ name: "Updated" }]);
-      expect((await db.query<{ folder: string }>("select folder from public.browser_profiles where id = $1", [legacyProfile])).rows[0]!.folder).toBe("");
-      await asUser(owner, "select public.set_folder_access($1, '', $2, false)", [team, legacyMember]);
+      expect(await asUser(legacyMember, "update public.browser_profiles set name = 'Updated' where id = $1 returning name", [legacyProfile])).toEqual([]);
+      await asUser(owner, "update public.browser_profiles set folder = 'Основная' where id = $1", [legacyProfile]);
       expect(await asUser(legacyMember, "select id from public.browser_profiles where id = $1", [legacyProfile])).toEqual([]);
     } finally {
       await db.query("delete from public.browser_profiles where id = $1", [legacyProfile]);
@@ -147,8 +146,9 @@ describe("real migrations and RLS", () => {
     expect(rights).toEqual([{ can_manage_proxies: true, can_manage_bookmarks: true }]);
     expect(await asUser(member, "update public.proxies set label = 'employee' where id = $1 returning id", [proxy])).toEqual([{ id: proxy }]);
     const createdFolder = await asUser<{ id: string; name: string }>(member,
-      "insert into public.profile_folders(team_id, name) values ($1, 'Employee folder') returning id, name", [team]);
+      "insert into public.profile_folders(team_id, name, created_by) values ($1, 'Employee folder', $2) returning id, name", [team, member]);
     expect(createdFolder[0]!.name).toBe("Employee folder");
+    expect((await db.query<{ folder: string }>("select folder from public.folder_access where team_id = $1 and user_id = $2", [team, member])).rows).toEqual([{ folder: "Employee folder" }]);
     await asUser(owner, "update public.browser_profiles set folder = 'Employee folder' where id = $1", [profile]);
     await asUser(owner, "select public.set_folder_access($1, 'Employee folder', $2, true)", [team, member]);
     await asUser(member, "select public.rename_team_folder($1, $2, 'Renamed folder')", [team, createdFolder[0]!.id]);
@@ -156,6 +156,7 @@ describe("real migrations and RLS", () => {
     expect((await db.query<{ folder: string }>("select folder from public.folder_access where team_id = $1 and user_id = $2", [team, member])).rows[0]!.folder).toBe("Renamed folder");
     await asUser(member, "select public.delete_team_folder($1, $2)", [team, createdFolder[0]!.id]);
     expect((await db.query<{ folder: string }>("select folder from public.browser_profiles where id = $1", [profile])).rows[0]!.folder).toBe("Основная");
+    expect(await asUser(member, "select id from public.browser_profiles where id = $1", [profile])).toEqual([]);
     expect(await asUser(member, "insert into public.profile_statuses(team_id, name, color) values ($1, 'Employee status', 'primary') returning name", [team])).toEqual([{ name: "Employee status" }]);
     expect(await asUser(member, "insert into public.profile_field_definitions(team_id, name, field_type) values ($1, 'Employee field', 'text') returning name", [team])).toEqual([{ name: "Employee field" }]);
     const saved = await asUser<{ value: { teamId: string } }>(member,
@@ -175,9 +176,13 @@ describe("real migrations and RLS", () => {
     const rows = await asUser<{ value: { bookmarks: unknown[] } }>(member, "select public.get_team_bookmark_defaults($1) as value", [team]);
     expect(rows[0]!.value.bookmarks).toHaveLength(1);
   });
-  test("members need explicit profile access, other teams never see the profile", async () => {
+  test("members see only shared folders, not legacy direct profile grants", async () => {
     expect(await asUser(member, "select id from public.browser_profiles")).toHaveLength(0);
+    await db.query("insert into public.profile_folders(team_id, name) values ($1, 'Shared')", [team]);
+    await asUser(owner, "update public.browser_profiles set folder = 'Shared' where id = $1", [profile]);
     await asUser(owner, "select public.set_profiles_access($1, $2::uuid[], $3, true)", [team, [profile], member]);
+    expect(await asUser(member, "select id from public.browser_profiles")).toEqual([]);
+    await asUser(owner, "select public.set_folder_access($1, 'Shared', $2, true)", [team, member]);
     expect(await asUser(member, "select id from public.browser_profiles")).toEqual([{ id: profile }]);
     await expect(acquire(outsider)).rejects.toThrow("No profile access");
   });
@@ -235,9 +240,11 @@ describe("real migrations and RLS", () => {
 
   test("bulk operations are atomic and reject cross-team selection", async () => {
     await expect(asUser(owner, "select public.bulk_mutate_profiles($1, $2::uuid[], 'update', $3::jsonb)", [team, [profile, otherProfile], JSON.stringify({ folder: "bad" })])).rejects.toThrow("cross-team");
-    expect((await asUser<{ folder: string }>(owner, "select folder from public.browser_profiles where id = $1", [profile]))[0]!.folder).toBe("Основная");
+    expect((await asUser<{ folder: string }>(owner, "select folder from public.browser_profiles where id = $1", [profile]))[0]!.folder).toBe("Shared");
+    await db.query("insert into public.profile_folders(team_id, name) values ($1, 'Ready')", [team]);
     await asUser(owner, "select public.bulk_mutate_profiles($1, $2::uuid[], 'update', $3::jsonb)", [team, [profile], JSON.stringify({ folder: "Ready", tags: ["a", "b"] })]);
     expect((await asUser<{ folder: string }>(owner, "select folder from public.browser_profiles where id = $1", [profile]))[0]!.folder).toBe("Ready");
+    await asUser(owner, "select public.set_folder_access($1, 'Ready', $2, true)", [team, member]);
     await expect(asUser(member, "select public.bulk_mutate_profiles($1, $2::uuid[], 'delete', '{}'::jsonb)", [team, [profile]])).rejects.toThrow("Недостаточно прав для изменения профилей");
   });
 
@@ -292,4 +299,3 @@ describe("real migrations and RLS", () => {
     expect((await db.query<{ created_by: string | null }>("select created_by from public.browser_profiles where id = $1", [shared])).rows[0]!.created_by).toBeNull();
   });
 });
-

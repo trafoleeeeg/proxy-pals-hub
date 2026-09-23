@@ -1,7 +1,7 @@
 import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { ArchiveRestore, Bot, Download, FolderOpen, Globe, LayoutGrid, ListChecks, LogOut, Monitor, PanelLeftClose, PanelLeftOpen, RefreshCw, Users } from "lucide-react";
+import { ArchiveRestore, Bot, ChevronDown, Download, Globe, LayoutGrid, ListChecks, LogOut, Monitor, PanelLeftClose, PanelLeftOpen, RefreshCw, Users } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useWorkspace, useWorkspaceSelection, WorkspaceProvider } from "@/lib/useWorkspace";
@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { FoldersNav } from "@/components/folders-nav";
 import { ProfileFolderProvider } from "@/lib/useProfileFolder";
 import { ImpersonationControl } from "@/components/impersonation-control";
+import { ProfileDndProvider } from "@/components/profile-dnd";
 
 export const Route = createFileRoute("/_authenticated/app")({
   head: () => ({ meta: [
@@ -28,13 +29,15 @@ export const Route = createFileRoute("/_authenticated/app")({
 
 const NAV = [
   { to: "/app", label: "Профили", icon: LayoutGrid, exact: true },
-  { to: "/app/folders", label: "Папки", icon: FolderOpen, exact: false },
   { to: "/app/proxies", label: "Прокси", icon: Globe, exact: false },
   { to: "/app/team", label: "Команда", icon: Users, exact: false },
-  { to: "/app/audit", label: "Журнал", icon: ListChecks, exact: false },
   { to: "/app/trash", label: "Корзина", icon: ArchiveRestore, exact: false },
-  { to: "/app/agents", label: "Агенты", icon: Bot, exact: false },
-  { to: "/app/desktop", label: "Приложение", icon: Monitor, exact: false },
+] as const;
+
+const APP_NAV = [
+  { to: "/app/desktop", label: "Обновления", icon: Download },
+  { to: "/app/agents", label: "Агенты", icon: Bot },
+  { to: "/app/audit", label: "Журнал", icon: ListChecks },
 ] as const;
 
 function UpdateBar() {
@@ -77,7 +80,7 @@ function LifecycleBar() {
 }
 
 export function AppLayout() {
-  return <WorkspaceProvider><DesktopProfileProvider><ProfileFolderProvider><AppShell /></ProfileFolderProvider></DesktopProfileProvider></WorkspaceProvider>;
+  return <WorkspaceProvider><DesktopProfileProvider><ProfileFolderProvider><ProfileDndProvider><AppShell /></ProfileDndProvider></ProfileFolderProvider></DesktopProfileProvider></WorkspaceProvider>;
 }
 
 function AppShell() {
@@ -91,6 +94,7 @@ function AppShell() {
   const qc = useQueryClient();
   const [signingOut, setSigningOut] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [appExpanded, setAppExpanded] = useState(false);
   useEffect(() => { setCollapsed(localStorage.getItem("umbra:sidebar") === "collapsed"); }, []);
   const toggleCollapsed = () => setCollapsed((value) => {
     const next = !value;
@@ -98,6 +102,7 @@ function AppShell() {
     return next;
   });
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  useEffect(() => { if (APP_NAV.some((item) => pathname.startsWith(item.to))) setAppExpanded(true); }, [pathname]);
   async function signOut() {
     if (signingOut) return;
     setSigningOut(true);
@@ -128,6 +133,20 @@ function AppShell() {
         </Link>;
       })}
         <FoldersNav collapsed={collapsed} />
+        <div className="mt-2 border-t border-sidebar-border pt-2">
+          <button type="button" aria-label="Приложение" aria-expanded={appExpanded} title="Приложение" onClick={() => setAppExpanded((value) => !value)}
+            className={"flex w-full items-center gap-3 rounded-md px-2 py-2 text-sm hover:bg-sidebar-accent/60 " + (collapsed ? "justify-center" : "") + (APP_NAV.some((item) => pathname.startsWith(item.to)) ? " bg-sidebar-accent text-sidebar-accent-foreground" : " text-muted-foreground")}>
+            <Monitor className="size-4 shrink-0" />{!collapsed && <><span>Приложение</span><ChevronDown className={"ml-auto size-4 transition-transform " + (appExpanded ? "rotate-180" : "")} /></>}
+          </button>
+          {appExpanded && <div className={"flex flex-col gap-0.5 " + (collapsed ? "" : "pl-4")}>{APP_NAV.map((item) => {
+            const Icon = item.icon;
+            const active = pathname.startsWith(item.to);
+            return <Link key={item.to} to={item.to} title={item.label} aria-label={item.label} aria-current={active ? "page" : undefined}
+              className={"flex items-center gap-3 rounded-md px-2 py-1.5 text-xs hover:bg-sidebar-accent/60 " + (collapsed ? "justify-center" : "") + (active ? " bg-sidebar-accent text-sidebar-accent-foreground" : " text-muted-foreground")}>
+              <Icon className="size-4 shrink-0" />{!collapsed && item.label}
+            </Link>;
+          })}</div>}
+        </div>
       </nav>
       <div className="border-t border-sidebar-border p-2">
         <div className={"min-w-0 space-y-2 " + (collapsed ? "hidden" : "block")}>

@@ -27,11 +27,12 @@ test("sandboxed preload loads without requiring package.json and exposes no brid
         assert.equal(module, "electron", "Sandbox cannot require local CommonJS files");
         return { contextBridge: { exposeInMainWorld: (_key, value) => { bridge = value; } }, ipcRenderer: {} };
       },
-      process: { platform: "win32", argv: ["--umbra-version=0.4.0", "--umbra-app-origin=https%3A%2F%2Fpanel.example"] },
+      process: { platform: "win32", versions: { electron: "44.4.5", chrome: "152.0.7977.130" }, argv: ["--umbra-version=0.4.0", "--umbra-app-origin=https%3A%2F%2Fpanel.example"] },
       window: { location: { origin } },
     });
     return bridge;
   };
   assert.equal(run("https://panel.example").version, "0.4.0");
+  assert.equal(run("https://panel.example").engine.chromium, "152.0.7977.130");
   assert.equal(run("https://other.example"), undefined);
 });

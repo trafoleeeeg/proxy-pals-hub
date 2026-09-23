@@ -76,7 +76,7 @@ export const inviteIdSchema = z.object({ inviteId: uuidSchema }).strict();
 export const acceptInviteSchema = z.object({ token: z.string().trim().regex(/^[a-fA-F0-9]{64}$/) }).strict();
 export const memberSchema = z.object({ teamId: uuidSchema, userId: uuidSchema }).strict();
 export const folderAccessSchema = z.object({
-  teamId: uuidSchema, folder: folder.pipe(z.string().min(1).max(200)), userId: uuidSchema, granted: z.boolean(),
+  teamId: uuidSchema, folder, userId: uuidSchema, granted: z.boolean(),
 }).strict();
 // Профили передаются только между папками: точечная передача сотруднику убрана.
 export const transferSchema = z.object({
@@ -105,3 +105,4 @@ export const updateEmployeeSchema = z.object({
   password: z.string().min(12, "Пароль должен содержать не менее 12 символов").max(72).optional(),
   displayName: text(120),
 }).strict();
+

@@ -65,7 +65,7 @@ beforeAll(async () => {
 afterAll(async () => { await db?.close(); });
 
 describe("real migrations and RLS", () => {
-  test("unfiled profiles follow default-folder access without changing their folder", async () => {
+  test("unfiled profiles require their own folder grant, separate from the default folder", async () => {
     const legacyMember = crypto.randomUUID();
     const legacyProfile = crypto.randomUUID();
     await db.query("insert into auth.users(id, email, email_confirmed_at) values ($1, 'legacy@example.test', now())", [legacyMember]);
@@ -74,12 +74,14 @@ describe("real migrations and RLS", () => {
     try {
       expect(await asUser(legacyMember, "select id from public.browser_profiles where id = $1", [legacyProfile])).toEqual([]);
       await asUser(owner, "select public.set_folder_access($1, 'Основная', $2, true)", [team, legacyMember]);
+      expect(await asUser(legacyMember, "select id from public.browser_profiles where id = $1", [legacyProfile])).toEqual([]);
+      await asUser(owner, "select public.set_folder_access($1, '', $2, true)", [team, legacyMember]);
       expect(await asUser(legacyMember, "select id from public.browser_profiles where id = $1", [legacyProfile])).toEqual([{ id: legacyProfile }]);
       expect((await db.query<{ allowed: boolean }>("select private.can_access_profile($1, $2) as allowed", [legacyMember, legacyProfile])).rows).toEqual([{ allowed: true }]);
       await asUser(owner, "select public.set_member_permissions($1, $2, false, true, false, false, false, false, false)", [team, legacyMember]);
       expect(await asUser(legacyMember, "update public.browser_profiles set name = 'Updated' where id = $1 returning name", [legacyProfile])).toEqual([{ name: "Updated" }]);
       expect((await db.query<{ folder: string }>("select folder from public.browser_profiles where id = $1", [legacyProfile])).rows[0]!.folder).toBe("");
-      await asUser(owner, "select public.set_folder_access($1, 'Основная', $2, false)", [team, legacyMember]);
+      await asUser(owner, "select public.set_folder_access($1, '', $2, false)", [team, legacyMember]);
       expect(await asUser(legacyMember, "select id from public.browser_profiles where id = $1", [legacyProfile])).toEqual([]);
     } finally {
       await db.query("delete from public.browser_profiles where id = $1", [legacyProfile]);

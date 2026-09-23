@@ -129,6 +129,10 @@ export async function requirePermission(context: ServerContext, teamId: string, 
 export async function requireFolderAccess(context: ServerContext, teamId: string, folder: string) {
   const scope = await teamScope(context, teamId);
   if (!scope) throw new Error("Нет доступа к команде");
+  const { data: existing, error: folderError } = await context.supabase.from("profile_folders")
+    .select("id").eq("team_id", teamId).eq("name", folder).maybeSingle();
+  if (folderError) throw new Error("Не удалось проверить папку: " + folderError.message);
+  if (!existing) throw new Error("Сначала создайте папку в разделе «Папки»");
   if (scope !== "member") return;
   const { data, error } = await context.supabase.from("folder_access").select("folder")
     .eq("team_id", teamId).eq("folder", folder).eq("user_id", context.userId).maybeSingle();

@@ -88,8 +88,9 @@ export function useProxyOps(teamId: string | undefined) {
         previousIp: request.previousIp!,
         probe,
         record: async (result, final, confirmed) => {
-          await record({ data: { id, teamId, ...result, rotationRequestedAt: request.requestedAt, rotationFinal: final, rotationConfirmed: confirmed } });
+          const saved = await record({ data: { id, teamId, ...result, rotationRequestedAt: request.requestedAt, rotationFinal: final, rotationConfirmed: confirmed } });
           invalidate();
+          return saved;
         },
       });
     },

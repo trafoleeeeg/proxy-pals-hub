@@ -74,7 +74,12 @@ export const listProxies = createServerFn({ method: "POST" })
       .eq("team_id", data.teamId).order("created_at", { ascending: false });
     if (error) throw new Error("Не удалось загрузить прокси");
     const rawRows = (rows ?? []) as unknown as Array<Record<string, unknown>>;
-    return rawRows.map((row) => ({
+    return rawRows.map((row) => {
+      const reconciled = row["last_check_ok"] === true && !!row["last_check_ip"] && !!row["rotation_previous_ip"]
+        && row["last_check_ip"] !== row["rotation_previous_ip"]
+        && Date.parse(String(row["last_checked_at"] ?? "")) > Date.parse(String(row["rotation_requested_at"] ?? ""))
+        && (row["rotation_status"] === "error" || (row["rotation_status"] === "changing" && rotationExpired(row["rotation_requested_at"] as string | null)));
+      return ({
       id: String(row["id"]), label: String(row["label"] ?? ""), protocol: row["protocol"] as ProxyProtocol,
       host: String(row["host"]), port: Number(row["port"]), username: (row["username"] as string | null) ?? null,
       country: (row["country"] as string | null) ?? null, city: (row["city"] as string | null) ?? null,
@@ -86,14 +91,17 @@ export const listProxies = createServerFn({ method: "POST" })
       last_check_error: row["last_check_error"] ? "Прокси не прошёл проверку подключения" : null,
       hasPassword: Boolean(row["password_enc"]),
       rotationUrlConfigured: Boolean(row["rotation_url_enc"]),
-      rotationStatus: row["rotation_status"] === "changing" && rotationExpired(row["rotation_requested_at"] as string | null)
-        ? "error" : (row["rotation_status"] as ProxyRotationStatus | null) ?? "not_configured",
+      rotationStatus: reconciled
+        ? "success" : row["rotation_status"] === "changing" && rotationExpired(row["rotation_requested_at"] as string | null)
+          ? "error" : (row["rotation_status"] as ProxyRotationStatus | null) ?? "not_configured",
       rotationPreviousIp: (row["rotation_previous_ip"] as string | null) ?? null,
-      rotationNewIp: (row["rotation_new_ip"] as string | null) ?? null,
-      rotationChangedAt: (row["rotation_changed_at"] as string | null) ?? null,
+      rotationNewIp: (row["rotation_new_ip"] as string | null) ?? (reconciled ? row["last_check_ip"] as string | null : null),
+      rotationChangedAt: (row["rotation_changed_at"] as string | null) ?? (reconciled ? row["last_checked_at"] as string | null : null),
       rotationRequestedAt: (row["rotation_requested_at"] as string | null) ?? null,
-      rotationLastError: row["rotation_last_error"] ? "Не удалось подтвердить смену IP" : null,
-    })) satisfies ProxyListRow[];
+      rotationLastError: row["rotation_last_error"] && !reconciled
+        ? "Не удалось подтвердить смену IP" : null,
+      });
+    }) satisfies ProxyListRow[];
   });
 
 export const saveProxy = createServerFn({ method: "POST" })
@@ -226,14 +234,22 @@ export const recordProxyCheck = createServerFn({ method: "POST" })
       .eq("id", data.id).eq("team_id", data.teamId).maybeSingle();
     if (currentError || !current) throw new Error("Не удалось прочитать состояние прокси");
     const now = new Date().toISOString();
-    const confirmsRotation = !!data.rotationRequestedAt && data.rotationRequestedAt === current["rotation_requested_at"] && current["rotation_status"] === "changing";
+    const sameRotation = !!data.rotationRequestedAt && data.rotationRequestedAt === current["rotation_requested_at"];
+    const confirmsRotation = sameRotation && current["rotation_status"] === "changing";
+    // A subsequent successful connectivity check is authoritative even when
+    // the provider responded slowly and the earlier rotation probe timed out.
+    const reconcilesRotation = (current["rotation_status"] === "error" || (current["rotation_status"] === "changing" && !data.rotationRequestedAt))
+      && (!data.rotationRequestedAt || sameRotation)
+      && data.ok && !!data.ip && !!current["rotation_previous_ip"]
+      && data.ip !== current["rotation_previous_ip"]
+      && !!current["rotation_requested_at"];
     // A server-function response can be retried after the first request has
     // already committed. The same rotation token is idempotent once terminal;
     // an older token from another rotation is still rejected below.
-    if (data.rotationRequestedAt && data.rotationRequestedAt === current["rotation_requested_at"] &&
+    if (!reconcilesRotation && data.rotationRequestedAt && sameRotation &&
       (current["rotation_status"] === "success" || current["rotation_status"] === "error")) return { ok: true };
-    const staleRotation = !!data.rotationRequestedAt && !confirmsRotation;
-    const outcome = confirmsRotation ? rotationOutcome(
+    const staleRotation = !!data.rotationRequestedAt && !confirmsRotation && !reconcilesRotation;
+    const outcome = reconcilesRotation ? "success" : confirmsRotation ? rotationOutcome(
       current["rotation_previous_ip"], data,
       data.rotationFinal || rotationExpired(current["rotation_requested_at"]),
       data.rotationConfirmed,
@@ -241,7 +257,7 @@ export const recordProxyCheck = createServerFn({ method: "POST" })
     // Publish the fresh exit IP as soon as it is seen, even before the second
     // confirming probe: the panel then shows the new address immediately
     // instead of sitting on "меняем IP…" with stale data.
-    const changedIp = confirmsRotation && data.ok && data.ip && data.ip !== current["rotation_previous_ip"] ? data.ip : null;
+    const changedIp = (reconcilesRotation || confirmsRotation) && data.ok && data.ip && data.ip !== current["rotation_previous_ip"] ? data.ip : null;
     const rotation = outcome ? {
       rotation_status: outcome,
       rotation_last_error: outcome === "error" ? "not_confirmed" : null,
@@ -256,7 +272,7 @@ export const recordProxyCheck = createServerFn({ method: "POST" })
       ...(data.ok && data.city ? { city: data.city } : {}),
       ...rotation,
     } as never).eq("id", data.id).eq("team_id", data.teamId);
-    if (confirmsRotation) update = update.eq("rotation_requested_at", data.rotationRequestedAt).eq("rotation_status", "changing");
+    if (confirmsRotation || reconcilesRotation) update = update.eq("rotation_requested_at", current["rotation_requested_at"]).eq("rotation_status", current["rotation_status"]);
     const { data: row, error } = await update.select("id").maybeSingle();
     if (error || !row) throw new Error("Проверка завершена, но результат не сохранён. Проверьте доступ и повторите попытку");
     return data.rotationRequestedAt ? { ok: true, staleRotation } : { ok: true };

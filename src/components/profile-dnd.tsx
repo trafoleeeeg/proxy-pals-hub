@@ -3,26 +3,31 @@ import { useServerFn } from "@tanstack/react-start";
 import { DndContext, DragOverlay, KeyboardSensor, PointerSensor, pointerWithin, useDraggable, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { GripVertical } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useState, type ComponentProps, type ReactNode } from "react";
 import { toast } from "sonner";
 import { reorderFolders, type FolderRow } from "@/lib/folders.functions";
 import { bulkUpdateProfiles } from "@/lib/profiles.functions";
 import { usePermissions } from "@/lib/usePermissions";
 import { MAIN_FOLDER } from "@/lib/useProfileFolder";
 import { useWorkspace } from "@/lib/useWorkspace";
+import { TableRow } from "@/components/ui/table";
 
 export const folderDragId = (id: string) => `folder:${id}`;
 export const folderPageDragId = (id: string) => `folder-page:${id}`;
 export const profileDragId = (id: string) => `profile:${id}`;
 
-export function ProfileDragHandle({ id, name, disabled }: { id: string; name: string; disabled: boolean }) {
+export function ProfileDragRow({ id, name, disabled, children, ...props }: { id: string; name: string; disabled: boolean } & ComponentProps<typeof TableRow>) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: profileDragId(id), disabled, data: { label: name, kind: "profile" },
   });
-  return <button ref={setNodeRef} type="button" disabled={disabled} {...attributes} {...listeners}
-    aria-label={`Перетащить профиль ${name}`} title="Зажмите и перенесите профиль в папку"
-    className={"mr-1 inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 " + (isDragging ? "opacity-40" : "")}
-    style={{ touchAction: "none" }}><GripVertical className="size-4" /></button>;
+  return <TableRow ref={setNodeRef} {...props} {...attributes} {...listeners}
+    aria-label={`Профиль ${name}. Зажмите строку и перенесите в папку`}
+    className={`${props.className ?? ""} ${disabled ? "" : "cursor-grab active:cursor-grabbing"} ${isDragging ? "opacity-35" : ""}`}
+    style={{ ...props.style, touchAction: "pan-y" }}>{children}</TableRow>;
+}
+
+export function ProfileDragHandle() {
+  return <span aria-hidden="true" className="mr-1 inline-flex size-6 shrink-0 items-center justify-center text-muted-foreground"><GripVertical className="size-4" /></span>;
 }
 
 export function ProfileDndProvider({ children }: { children: ReactNode }) {

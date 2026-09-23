@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { encryptSecret, decryptSecret } from "../src/lib/crypto.server";
 import { parseCookieImport } from "../src/lib/server-cookies";
-import { bulkCreateSchema, bulkUpdateSchema, fingerprintSchema, launchSchema, saveProfileSchema } from "../src/lib/server-validation";
+import { bulkCreateSchema, bulkUpdateSchema, fingerprintSchema, folderAccessSchema, launchSchema, saveProfileSchema } from "../src/lib/server-validation";
 import { generateFingerprint } from "../src/lib/fingerprint";
 
 const previousKey = process.env.APP_ENCRYPTION_KEY;
@@ -56,6 +56,13 @@ describe("cookie imports", () => {
 });
 
 describe("server input validation", () => {
+  test("unfiled access is a valid explicit grant, not a default-folder alias", () => {
+    const id = "10000000-0000-4000-8000-000000000001";
+    expect(folderAccessSchema.safeParse({ teamId: id, userId: id, folder: "", granted: true }).success).toBe(true);
+    expect(folderAccessSchema.safeParse({ teamId: id, userId: id, folder: "Основная", granted: true }).success).toBe(true);
+    expect(folderAccessSchema.safeParse({ teamId: id, userId: id, folder: "x".repeat(201), granted: true }).success).toBe(false);
+  });
+
   test("newly generated Windows fingerprints pass schema with a real engine version", () => {
     for (let i = 0; i < 20; i++) {
       const fingerprint = generateFingerprint("US");
@@ -81,3 +88,4 @@ describe("server input validation", () => {
     expect(saveProfileSchema.safeParse({ ...input, id }).success).toBe(false);
   });
 });
+

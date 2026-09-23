@@ -60,17 +60,17 @@ export const listFolders = createServerFn({ method: "POST" })
     if (error) throw new Error("Не удалось загрузить папки");
     // Сотрудник видит только те папки, которые ему открыл владелец.
     const rights = await memberPermissions(context, data.teamId);
-    const allowed = rights["folder.manage"] ? null : await accessibleFolders(context, data.teamId);
+    const allowed = rights.scope === "member" ? await accessibleFolders(context, data.teamId) : null;
     const list: FolderRow[] = (rows ?? [])
-      .filter((row) => allowed === null || allowed.includes(row.name))
+      .filter((row) => row.is_default ? rights.scope === "owner" : allowed === null || allowed.includes(row.name))
       .map((row) => ({ id: row.id, name: row.name, isDefault: row.is_default, virtual: false, position: (row as typeof row & { position: number }).position }));
     // Папки, заданные прямо в профилях, тоже показываем — иначе их не видно в меню.
     const { data: used } = await context.supabase
-      .from("browser_profiles").select("folder").eq("team_id", data.teamId);
+      .from("browser_profiles").select("folder").eq("team_id", data.teamId).is("deleted_at", null);
     const known = new Set(list.map((row) => row.name));
     for (const row of used ?? []) {
       const name = (row.folder ?? "").trim();
-      if (!name || known.has(name)) continue;
+      if (!name || name === DEFAULT_FOLDER || known.has(name)) continue;
       if (allowed !== null && !allowed.includes(name)) continue;
       known.add(name);
       list.push({ id: `virtual:${name}`, name, isDefault: false, virtual: true, position: 2147483647 });

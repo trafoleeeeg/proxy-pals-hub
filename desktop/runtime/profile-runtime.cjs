@@ -13,6 +13,7 @@ const { createFaviconLoader } = require("./favicons.cjs");
 // Сообщения об ошибках запуска показываются пользователю, поэтому они переводятся
 // на русский язык на границе клиента, без утечки URL и значений cookies.
 const LAUNCH_ERROR_TEXT = [
+  [/^Unable to restore imported cookies/i, "Ни один сохранённый cookie не удалось установить: проверьте срок действия и формат импорта. Облачные данные сохранены"],
   [/^Unable to (?:restore|read encrypted|decrypt) cookie/i, "Не удалось восстановить cookies профиля"],
   [/^Unable to save encrypted/i, "Не удалось сохранить cookies профиля"],
   [/^Unable to flush encrypted/i, "Не удалось сохранить cookies профиля"],
@@ -60,6 +61,7 @@ function createProfileRuntime(electron, options = {}) {
         proxy: entry.proxyRuntime ? { ...entry.proxyRuntime.diagnostics } : { mode: "blocked" },
         fingerprint: entry.fingerprintDiagnostics || null,
         cookieSource: entry.cookieSource || null,
+        cookieRestore: entry.cookieRestore || null,
         cookiePersistence: "safeStorage-encrypted-local-snapshot",
         extensions: { loaded: entry.extensionsLoaded?.size || 0, errors: entry.extensionErrors?.length || 0 },
         lastError: entry.lastError || null,
@@ -161,7 +163,9 @@ function createProfileRuntime(electron, options = {}) {
         hardware: entry.fp.hardwareConcurrency + " ядер · " + entry.fp.deviceMemory + " ГБ",
         chrome: entry.fp.chromeVersion || process.versions.chrome,
         extensions: (entry.extensionsLoaded?.size || 0) + " подключено" + (entry.extensionErrors?.length ? " · есть ошибки" : ""),
-        cookies: entry.cookiesUpdatedAt ? "Сохранены с шифрованием" : "Подготовка",
+        cookies: entry.cookieRestore
+          ? `Установлено ${entry.cookieRestore.installed} из ${entry.cookieRestore.total}` + (entry.cookieRestore.expired ? ` · истекли ${entry.cookieRestore.expired}` : "")
+          : "Подготовка",
       }),
       checkConnection: () => checkConnection(entry),
       openTab: (target) => {
@@ -174,6 +178,7 @@ function createProfileRuntime(electron, options = {}) {
         const cookies = parseCookieImport(text);
         const result = await applyImportedCookies(entry.ses, cookies);
         const saved = await snapshot(entry);
+        entry.cookieRestore = { installed: result.imported, total: cookies.length, expired: cookies.filter((cookie) => cookie.expirationDate != null && cookie.expirationDate <= Date.now() / 1000).length };
         return { ...result, cookiesUpdatedAt: saved.cookiesUpdatedAt };
       },
       onTabsChanged: () => recordTabs(entry),
@@ -660,6 +665,7 @@ function createProfileRuntime(electron, options = {}) {
         entry.cookiesUpdatedAt = initialized.cookiesUpdatedAt;
         entry.cookieSignature = initialized.signature;
         entry.cookieSource = initialized.source;
+        entry.cookieRestore = initialized.cookieRestore;
         entry.extensionsLoaded = new Map();
         if (extensionStore) {
           if (initialSettings && extensionStore.applyCloudSettings) await extensionStore.applyCloudSettings(initialSettings.extensions);

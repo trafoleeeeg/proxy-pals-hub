@@ -38,6 +38,14 @@ describe("cookie imports", () => {
     expect(cookie.expirationDate).toBeUndefined();
     expect(parseCookieImport("# Netscape HTTP Cookie File\n#HttpOnly_.example.test\tTRUE\t/\tTRUE\t0\tname\tvalue")[0]).toMatchObject({ httpOnly: true, secure: true, hostOnly: false, session: true });
   });
+  test("common expiry aliases and millisecond exports stay persistent", () => {
+    const cookies = parseCookieImport(JSON.stringify([
+      { name: "one", value: "a", domain: "example.test", expires: "2000000000", sameSite: "no-restriction" },
+      { name: "two", value: "b", domain: ".example.test", expiration: 2_000_000_000_000 },
+    ]));
+    expect(cookies[0]).toMatchObject({ expirationDate: 2_000_000_000, hostOnly: true, sameSite: "no_restriction" });
+    expect(cookies[1]).toMatchObject({ expirationDate: 2_000_000_000, hostOnly: false });
+  });
   test("empty explicit collections are accepted, malformed data is rejected without secrets", () => {
     expect(parseCookieImport("[]")).toEqual([]);
     for (const text of ["", "{}", "synthetic-private-data", '[{"name":"x","domain":"https://bad","value":"synthetic-private-data"}]']) {

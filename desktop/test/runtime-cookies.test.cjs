@@ -117,8 +117,47 @@ test("one Chromium-incompatible cookie does not block the whole profile", async 
     { ...cookie("old"), name: "obsolete" },
     { ...cookie("working"), name: "working" },
   ]);
-  assert.deepEqual(result, { restored: 1, skipped: 1 });
+  assert.deepEqual(result, { restored: 1, skipped: 1, expired: 0, installed: 1 });
   assert.equal((await ses.cookies.get({}))[0].name, "working");
+});
+
+test("failed cookie restore does not overwrite the encrypted snapshot", async () => {
+  let writes = 0;
+  const store = { read: async () => null, write: async () => { writes += 1; } };
+  const ses = session();
+  ses.cookies.set = async () => { throw new Error("Chromium rejected cookie"); };
+  await assert.rejects(initializeCookies(ses, store, {
+    profileId: ID, cookies: JSON.stringify([cookie("preserve")]), cookiesUpdatedAt: NEW,
+  }), /Unable to restore imported cookies/);
+  assert.equal(writes, 0);
+});
+
+test("a resolved set call without a retained cookie cannot erase the snapshot", async () => {
+  let writes = 0;
+  const store = { read: async () => null, write: async () => { writes += 1; } };
+  const ses = session();
+  ses.cookies.set = async () => {};
+  await assert.rejects(initializeCookies(ses, store, {
+    profileId: ID, cookies: JSON.stringify([cookie("preserve")]), cookiesUpdatedAt: NEW,
+  }), /Unable to restore imported cookies/);
+  assert.equal(writes, 0);
+});
+
+test("expired cloud cookies are reported and never silently replaced by an empty snapshot", async () => {
+  let writes = 0;
+  const store = { read: async () => null, write: async () => { writes += 1; } };
+  await assert.rejects(initializeCookies(session(), store, {
+    profileId: ID, cookies: JSON.stringify([{ ...cookie("expired"), session: false, expirationDate: 100 }]), cookiesUpdatedAt: NEW,
+  }), /Unable to restore imported cookies/);
+  assert.equal(writes, 0);
+});
+
+test("successful cloud restore reports retained cookie count", async () => {
+  const store = { read: async () => null, write: async () => {} };
+  const result = await initializeCookies(session(), store, {
+    profileId: ID, cookies: JSON.stringify([cookie("working")]), cookiesUpdatedAt: NEW,
+  });
+  assert.deepEqual(result.cookieRestore, { installed: 1, total: 1, expired: 0 });
 });
 
 test("cookie import accepts JSON exports and Netscape files", () => {

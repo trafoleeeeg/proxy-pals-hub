@@ -111,24 +111,47 @@ function canonicalCookies(cookies) {
     .sort((a, b) => `${a.domain}\0${a.path}\0${a.name}\0${JSON.stringify(a.partitionKey)}`.localeCompare(`${b.domain}\0${b.path}\0${b.name}\0${JSON.stringify(b.partitionKey)}`)));
 }
 
+function cookieDetails(cookie) {
+  const host = cookie.domain.replace(/^\./, "");
+  const details = {
+    url: `${cookie.secure ? "https" : "http"}://${host}${cookie.path || "/"}`,
+    name: cookie.name, value: cookie.value, path: cookie.path || "/",
+    secure: !!cookie.secure, httpOnly: !!cookie.httpOnly,
+  };
+  if (!cookie.hostOnly) details.domain = cookie.domain;
+  if (!cookie.session && cookie.expirationDate != null) details.expirationDate = cookie.expirationDate;
+  if (cookie.sameSite) details.sameSite = cookie.sameSite;
+  return details;
+}
+
+function retainedCount(actual, imported) {
+  const keyOf = (cookie) => JSON.stringify([
+    cookie.domain.replace(/^\./, ""), cookie.path || "/", cookie.name, cookie.value,
+  ]);
+  const remaining = new Map();
+  for (const cookie of actual) {
+    const key = keyOf(cookie);
+    remaining.set(key, (remaining.get(key) || 0) + 1);
+  }
+  let count = 0;
+  for (const cookie of imported) {
+    const key = keyOf(cookie);
+    const available = remaining.get(key) || 0;
+    if (available) { remaining.set(key, available - 1); count += 1; }
+  }
+  return count;
+}
+
 async function restoreCookies(ses, cookies) {
   // Replace, including removals; merging would revive cookies deleted elsewhere.
   await ses.clearStorageData({ storages: ["cookies"] });
   let restored = 0;
   let skipped = 0;
+  let expired = 0;
   for (const cookie of cookies) {
-    if (cookie.expirationDate != null && cookie.expirationDate <= Date.now() / 1000) continue;
-    const host = cookie.domain.replace(/^\./, "");
-    const details = {
-      url: `${cookie.secure ? "https" : "http"}://${host}${cookie.path || "/"}`,
-      name: cookie.name, value: cookie.value, path: cookie.path || "/",
-      secure: !!cookie.secure, httpOnly: !!cookie.httpOnly,
-    };
-    if (!cookie.hostOnly) details.domain = cookie.domain;
-    if (!cookie.session && cookie.expirationDate != null) details.expirationDate = cookie.expirationDate;
-    if (cookie.sameSite) details.sameSite = cookie.sameSite;
+    if (cookie.expirationDate != null && cookie.expirationDate <= Date.now() / 1000) { skipped += 1; expired += 1; continue; }
     try {
-      await ses.cookies.set(details);
+      await ses.cookies.set(cookieDetails(cookie));
       restored += 1;
     } catch {
       // Chromium occasionally rejects obsolete or origin-incompatible cookies
@@ -138,27 +161,18 @@ async function restoreCookies(ses, cookies) {
     }
   }
   await ses.cookies.flushStore();
-  return { restored, skipped };
+  return { restored, skipped, expired, installed: retainedCount(await ses.cookies.get({}), cookies) };
 }
 
 async function applyImportedCookies(ses, cookies) {
-  let imported = 0;
-  let skipped = 0;
   for (const cookie of cookies) {
-    if (cookie.expirationDate != null && cookie.expirationDate <= Date.now() / 1000) { skipped += 1; continue; }
-    const host = cookie.domain.replace(/^\./, "");
-    const details = {
-      url: `${cookie.secure ? "https" : "http"}://${host}${cookie.path || "/"}`,
-      name: cookie.name, value: cookie.value, path: cookie.path || "/",
-      secure: !!cookie.secure, httpOnly: !!cookie.httpOnly,
-    };
-    if (!cookie.hostOnly) details.domain = cookie.domain;
-    if (!cookie.session && cookie.expirationDate != null) details.expirationDate = cookie.expirationDate;
-    if (cookie.sameSite) details.sameSite = cookie.sameSite;
-    try { await ses.cookies.set(details); imported += 1; }
-    catch { skipped += 1; }
+    if (cookie.expirationDate != null && cookie.expirationDate <= Date.now() / 1000) continue;
+    try { await ses.cookies.set(cookieDetails(cookie)); }
+    catch { /* The caller receives the number that Chromium actually retained. */ }
   }
   await ses.cookies.flushStore();
+  const imported = retainedCount(await ses.cookies.get({}), cookies);
+  const skipped = cookies.length - imported;
   if (!imported) throw new Error("Не удалось импортировать ни одного cookie");
   return { imported, skipped };
 }
@@ -236,9 +250,13 @@ async function initializeCookies(ses, store, payload) {
   }
   const restoreResult = await restoreCookies(ses, selected.cookies);
   const cookies = await ses.cookies.get({});
+  // Never replace a nonempty cloud/local snapshot with an empty native jar.
+  // Rejected or expired imports must remain recoverable for another attempt.
+  if (selected.cookies.length && !restoreResult.installed) throw new Error("Unable to restore imported cookies: no cookies were accepted");
   const cookiesUpdatedAt = selected.cookiesUpdatedAt || new Date().toISOString();
   await store.write(payload.profileId, cookies, cookiesUpdatedAt);
-  return { cookiesUpdatedAt, signature: canonicalCookies(cookies), source, skippedCookies: restoreResult.skipped };
+  return { cookiesUpdatedAt, signature: canonicalCookies(cookies), source, skippedCookies: restoreResult.skipped,
+    cookieRestore: { installed: restoreResult.installed, total: selected.cookies.length, expired: restoreResult.expired } };
 }
 
 module.exports = { createCookieStore, initializeCookies, canonicalCookies, parseCookies, parseCookieImport, restoreCookies, applyImportedCookies };

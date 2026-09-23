@@ -13,6 +13,14 @@ const cookieSchema = z.object({
 }).strip();
 export type ProfileCookie = z.infer<typeof cookieSchema>;
 
+function expirationDate(item: Record<string, unknown>): number | undefined {
+  const raw = item["expirationDate"] ?? item["expiration"] ?? item["expires"];
+  if (raw == null || raw === "" || raw === 0 || raw === "0") return undefined;
+  const number = typeof raw === "number" || typeof raw === "string" ? Number(raw) : NaN;
+  if (!Number.isFinite(number)) return NaN;
+  return number > 253402300799 ? number / 1000 : number;
+}
+
 /** Normalize common browser exports; errors never include cookie values. */
 export function parseCookieImport(text: string): ProfileCookie[] {
   cookiesTextSchema.parse(text);
@@ -44,9 +52,13 @@ export function parseCookieImport(text: string): ProfileCookie[] {
   return raw.map((item, index) => {
     if (!item || typeof item !== "object") throw new Error(`Invalid cookie at position ${index + 1}`);
     const value = { ...item };
-    if (value.sameSite === "None" || value.sameSite === "none") value.sameSite = "no_restriction";
-    if (value.sameSite === "Lax") value.sameSite = "lax";
-    if (value.sameSite === "Strict") value.sameSite = "strict";
+    const expires = expirationDate(value);
+    if (expires !== undefined) value.expirationDate = expires;
+    if (value.sameSite != null && value.sameSite !== "") {
+      const normalized = String(value.sameSite).toLowerCase().replace(/[ -]/g, "_");
+      value.sameSite = normalized === "none" ? "no_restriction" : normalized;
+    } else delete value.sameSite;
+    if (value.hostOnly == null && typeof value.domain === "string") value.hostOnly = !value.domain.startsWith(".");
     const result = cookieSchema.safeParse(value);
     if (!result.success) throw new Error(`Invalid cookie at position ${index + 1}`);
     const cookie = result.data;

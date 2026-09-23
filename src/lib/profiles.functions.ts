@@ -2,8 +2,8 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import type { Fingerprint } from "./fingerprint";
 import type { Json } from "@/integrations/supabase/types";
-import { bulkCreateSchema, bulkDeleteSchema, bulkUpdateSchema, idSchema, importCookiesSchema, profileIdSchema, saveProfileSchema, teamSchema } from "./server-validation";
-import { accessibleFolders, callServerRpc, requireFolderAccess, requirePermission, requireProfile, requireTeamAccess, requireTeamProxy, writeAudit } from "./server-db";
+import { bulkCreateSchema, bulkDeleteSchema, bulkUpdateSchema, idSchema, importCookiesSchema, profileIdSchema, reorderProfilesSchema, saveProfileSchema, teamSchema } from "./server-validation";
+import { accessibleFolders, callServerRpc, requireFolderAccess, requirePermission, requireProfile, requireTeamAccess, requireTeamProxy, serverDb, writeAudit } from "./server-db";
 import { parseCookieImport } from "./server-cookies";
 
 export type ProfileRow = {
@@ -16,6 +16,7 @@ export type ProfileRow = {
   fingerprint: Fingerprint;
   created_at: string;
   updated_at: string;
+  sort_order: number;
   status_id: string | null;
   custom_fields: Record<string, string>;
   lock: { userId: string; expiresAt: string } | null;
@@ -26,11 +27,13 @@ export const listProfiles = createServerFn({ method: "POST" })
   .inputValidator(teamSchema)
   .handler(async ({ data, context }) => {
     await requireTeamAccess(context, data.teamId);
-    const { data: rows, error } = await context.supabase
+    const { data: rows, error } = await serverDb(context.supabase)
       .from("browser_profiles")
-      .select("id, name, folder, tags, notes, proxy_id, fingerprint, created_at, updated_at, status_id, custom_fields")
+      .select("id, name, folder, tags, notes, proxy_id, fingerprint, created_at, updated_at, status_id, custom_fields, sort_order")
       .eq("team_id", data.teamId)
-      .order("created_at", { ascending: false });
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: true });
     if (error) throw new Error(error.message);
 
     const ids = (rows ?? []).map((r) => r.id);
@@ -210,6 +213,18 @@ export const importProfileCookies = createServerFn({ method: "POST" })
     return { imported: cookies.length };
   });
 
+export const reorderProfiles = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(reorderProfilesSchema)
+  .handler(async ({ data, context }) => {
+    await requirePermission(context, data.teamId, "profile.edit");
+    await requireFolderAccess(context, data.teamId, data.folder);
+    await callServerRpc(context.supabase, "reorder_team_profiles", {
+      _team_id: data.teamId, _folder: data.folder, _profile_ids: data.ids,
+    });
+    return { ok: true };
+  });
+
 /** Only metadata is returned to the editor; cookie names and values stay server-side. */
 export const getProfileCookieStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth]).inputValidator(profileIdSchema)
@@ -240,3 +255,4 @@ export const exportProfileCookies = createServerFn({ method: "POST" })
     await writeAudit(context, profile.team_id, "profile.cookies_exported", profile.id);
     return { cookies: JSON.stringify(cookies) };
   });
+

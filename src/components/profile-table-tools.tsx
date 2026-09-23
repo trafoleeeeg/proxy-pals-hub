@@ -150,20 +150,22 @@ export function NotesCell({ value, disabled, onSave }: { value: string; disabled
       setPasteError(false);
     } catch { setPasteError(true); }
   }
-  return <div className="flex min-w-0 items-center gap-1">
-    <span className="block min-w-0 flex-1 truncate text-muted-foreground" title={value}>{value || "—"}</span>
-    <Popover open={open} onOpenChange={(next) => { setOpen(next); if (next) { setDraft(value); setPasteError(false); } }}>
-      <PopoverTrigger asChild><Button variant="ghost" size="icon" className="size-6 shrink-0" disabled={disabled} title="Изменить заметку" aria-label="Изменить заметку"><Pencil className="size-3.5" /></Button></PopoverTrigger>
-      <PopoverContent align="end" className="w-72 space-y-2">
-        <Textarea aria-label="Заметка профиля" rows={4} value={draft} placeholder="Заметка" onChange={(event) => setDraft(event.target.value)} />
+  return <Popover open={open} onOpenChange={(next) => { setOpen(next); if (next) { setDraft(value); setPasteError(false); } }}>
+      <PopoverTrigger asChild><button type="button" disabled={disabled} title={value || "Открыть заметку"}
+        aria-label={`Открыть заметку: ${value || "пусто"}`}
+        className="flex w-full min-w-0 items-center gap-2 rounded px-1 py-1 text-left text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-default">
+        <span className="min-w-0 flex-1 truncate">{value || "—"}</span><Pencil className="size-3.5 shrink-0" />
+      </button></PopoverTrigger>
+      <PopoverContent align="end" className="w-[min(42rem,calc(100vw-2rem))] space-y-3 p-4">
+        <p className="text-sm font-medium">Заметка профиля</p>
+        <Textarea aria-label="Заметка профиля" rows={12} value={draft} placeholder="Заметка" onChange={(event) => setDraft(event.target.value)} className="min-h-64 resize-y text-sm" />
         {pasteError && <p role="alert" className="text-xs text-destructive">Буфер обмена недоступен. Вставьте текст сочетанием клавиш.</p>}
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => void paste()}><ClipboardPaste className="size-4" />Вставить</Button>
           <Button size="sm" className="ml-auto" onClick={() => { if (draft !== value) onSave(draft); setOpen(false); }}>Сохранить</Button>
         </div>
       </PopoverContent>
-    </Popover>
-  </div>;
+    </Popover>;
 }
 
 export const statusTone: Record<string, string> = {

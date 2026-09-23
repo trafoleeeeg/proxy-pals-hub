@@ -321,4 +321,3 @@ describe("real migrations and RLS", () => {
     expect((await db.query<{ created_by: string | null }>("select created_by from public.browser_profiles where id = $1", [shared])).rows[0]!.created_by).toBeNull();
   });
 });
-

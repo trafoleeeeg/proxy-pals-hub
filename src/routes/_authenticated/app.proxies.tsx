@@ -5,6 +5,7 @@ import { useRef, useState } from "react";
 import { Activity, CheckCheck, ClipboardPaste, Clock3, Link2, Loader2, Pencil, Plus, RotateCw, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "@/lib/useWorkspace";
+import { usePermissions } from "@/lib/usePermissions";
 import { listProxies, saveProxy, deleteProxy, importProxies, checkProxy, proxyForCheck, recordProxyCheck, rotateProxyIp } from "@/lib/proxies.functions";
 import {
   PROXY_LIMITS, ProxyCheckQueue, parseProxyPort, performDesktopProxyCheck,
@@ -57,7 +58,8 @@ export function ProxiesPage() {
   const [checking, setChecking] = useState<Set<string>>(new Set());
   const [checkErrors, setCheckErrors] = useState<Record<string, string>>({});
   const queue = useRef(new ProxyCheckQueue(3));
-  const owner = ws?.role === "owner";
+  const { can, isError: permissionsError } = usePermissions(ws?.teamId);
+  const canManageProxies = can("proxy.manage");
 
   const proxies = useQuery({
     queryKey: ["proxies", ws?.teamId],
@@ -211,7 +213,7 @@ export function ProxiesPage() {
     <div>
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-2xl font-semibold">Прокси</h1>
-        {owner && <div className="ml-auto flex flex-wrap gap-2">
+        {canManageProxies && <div className="ml-auto flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => checkMut.mutate((proxies.data ?? []).map((p) => p.id))}
             disabled={checkMut.isPending || rotateMut.isPending || !proxies.data?.length}>
             {checkMut.isPending ? <Loader2 className="size-4 animate-spin" /> : <CheckCheck className="size-4" />}
@@ -223,6 +225,7 @@ export function ProxiesPage() {
           <Button onClick={() => edit()}><Plus className="size-4" />Добавить прокси</Button>
         </div>}
       </div>
+      {permissionsError && <p role="alert" className="mt-3 text-sm text-destructive">Не удалось загрузить ваши права. Обновите страницу и повторите попытку.</p>}
 
       <Dialog open={importOpen} onOpenChange={(value) => {
         if (importMut.isPending) return;
@@ -373,7 +376,7 @@ export function ProxiesPage() {
                 </> : <span className="text-xs text-muted-foreground">не настроена</span>}
               </TableCell>
               <TableCell className="text-right">
-                {owner && <div className="flex justify-end gap-1">
+                {canManageProxies && <div className="flex justify-end gap-1">
                   {proxy.rotationUrlConfigured && <Button variant="ghost" size="icon" title="Сменить IP мобильного прокси" aria-label="Сменить IP мобильного прокси"
                     disabled={!desktop()?.checkProxy || rotateMut.isPending || checkMut.isPending || removeMut.isPending || proxy.rotationStatus === "changing"} onClick={() => rotateMut.mutate(proxy.id)}>
                     {rotateMut.isPending && rotateMut.variables === proxy.id ? <Loader2 className="size-4 animate-spin" /> : <RotateCw className="size-4" />}

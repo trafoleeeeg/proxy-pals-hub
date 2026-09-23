@@ -62,7 +62,7 @@ function ProfilesWorkspace() {
   const workspace = useWorkspace();
   const ws = workspace.data;
   const owner = ws?.role === "owner";
-  const { can } = usePermissions(ws?.teamId);
+  const { can, isError: permissionsError } = usePermissions(ws?.teamId);
   const canEdit = can("profile.edit");
   const canCreate = can("profile.create");
   const canDelete = can("profile.delete");
@@ -218,6 +218,8 @@ function ProfilesWorkspace() {
       <Button variant="outline" size="icon" title="Удалить выбранные профили" aria-label="Удалить выбранные профили" disabled={!!busy} onClick={() => setAction({ mode: "delete", ids: [...selected] })}><Trash2 className="size-4 text-destructive" /></Button>
     </div>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+    {permissionsError && <p role="alert" className="text-sm text-destructive">Не удалось загрузить ваши права. Обновите страницу и повторите попытку.</p>}
+    {ws?.scope === "member" && folderList.isSuccess && !folderList.data.length && <p role="status" className="text-sm text-warning">Вам пока не открыта ни одна папка с профилями. Владелец может выдать доступ в разделе «Команда» → «Папки».</p>}
     {profiles.isError && <p role="alert" className="text-sm text-destructive">Не удалось обновить профили. <Button size="sm" variant="outline" onClick={() => profiles.refetch()}>Повторить</Button></p>}
     {proxies.isError && <p role="alert" className="text-sm text-warning">Прокси недоступны. <Button size="sm" variant="outline" onClick={() => proxies.refetch()}>Повторить</Button></p>}
     <div className="min-h-[480px] overflow-hidden border-y border-border">

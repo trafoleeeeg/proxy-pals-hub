@@ -18,7 +18,7 @@ import {
   revokeEmployeeAccess,
   deleteEmployeeAccount,
 } from "@/lib/team.functions";
-import { PERMISSION_LABELS, PERMISSION_ORDER, EMPTY_PERMISSIONS, usePermissions, type PermissionKey } from "@/lib/usePermissions";
+import { PERMISSION_LABELS, PERMISSION_ORDER, usePermissions, type PermissionKey } from "@/lib/usePermissions";
 import { listPresence } from "@/lib/presence.functions";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -54,6 +54,7 @@ export function TeamPage() {
   const [removing, setRemoving] = useState<{ userId: string; email: string } | null>(null);
   const [editing, setEditing] = useState<{ userId: string; email: string; displayName: string; password: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [bulkRightsBusy, setBulkRightsBusy] = useState(false);
   useEffect(() => { setRemoving(null); }, [ws?.teamId]);
 
   const isOwner = ws?.role === "owner";
@@ -143,6 +144,22 @@ export function TeamPage() {
     onSuccess: refresh,
     onError: () => toast.error("Не удалось изменить права сотрудника. Обновите страницу и повторите попытку."),
   });
+
+  async function setAllRights(enabled: boolean) {
+    if (!ws || bulkRightsBusy || rights.isError) return;
+    setBulkRightsBusy(true);
+    try {
+      const permissions = Object.fromEntries(PERMISSION_ORDER.map((key) => [key, enabled])) as Record<PermissionKey, boolean>;
+      for (const member of staff) {
+        if (member.scope !== "manager") await permissionsSaveFn({ data: { teamId: ws.teamId, userId: member.userId, permissions } });
+      }
+      await refresh();
+      toast.success(enabled ? "Все права выданы сотрудникам" : "Все права сотрудников сняты");
+    } catch {
+      await refresh();
+      toast.error("Не удалось обновить права всех сотрудников. Проверьте права каждого сотрудника.");
+    } finally { setBulkRightsBusy(false); }
+  }
 
   async function removeSelectedMember() {
     if (!removing || !ws || busy) return;
@@ -292,52 +309,29 @@ export function TeamPage() {
           <p className="mb-3 text-sm text-muted-foreground">Сотрудник работает только с профилями в открытых ему папках. Здесь вы решаете, что именно он может делать: по умолчанию — ничего, кроме запуска профилей.</p>
           {rights.isPending && <p role="status" className="py-3 text-sm">Загрузка прав…</p>}
           {rights.isError && <p role="alert" className="py-3 text-sm text-destructive">Не удалось загрузить права. <Button variant="outline" onClick={() => rights.refetch()}>Повторить</Button></p>}
-          <div className="overflow-x-auto rounded-lg border border-border bg-card">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Сотрудник</TableHead>
-                  {PERMISSION_ORDER.map((key) => (
-                    <TableHead key={key} className="text-center text-xs">{PERMISSION_LABELS[key]}</TableHead>
-                  ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {staff.map((m) => {
-                  const current = rightsOf(m.userId);
-                  const admin = m.scope === "manager";
-                  return (
-                    <TableRow key={m.userId}>
-                      <TableCell className="font-medium">
-                        {m.email}
-                        {admin && <Badge variant="outline" className="ml-2">администратор</Badge>}
-                      </TableCell>
-                      {PERMISSION_ORDER.map((key) => (
-                        <TableCell key={key} className="text-center">
-                          <Checkbox
-                            aria-label={`${PERMISSION_LABELS[key]} — ${m.email}`}
-                            disabled={admin || rightsMut.isPending || rights.isError}
-                            checked={admin || current[key]}
-                            onCheckedChange={(v) => rightsMut.mutate({ userId: m.userId, permissions: { ...current, [key]: v === true } })}
-                          />
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  );
-                })}
-                {!staff.length && (
-                  <TableRow><TableCell className="py-8 text-sm text-muted-foreground">Сначала создайте учётные записи сотрудников</TableCell></TableRow>
-                )}
-              </TableBody>
-            </Table>
+          <div className="grid gap-3 lg:grid-cols-2">
+            {staff.map((member) => {
+              const current = rightsOf(member.userId);
+              const admin = member.scope === "manager";
+              return <div key={member.userId} className="min-w-0 rounded-lg border border-border bg-card p-4">
+                <div className="mb-3 flex flex-wrap items-center gap-2"><h3 className="min-w-0 break-all font-medium">{member.email}</h3>{admin && <Badge variant="outline">администратор</Badge>}</div>
+                {admin ? <p className="text-sm text-muted-foreground">Администратору доступны все функции.</p> : <div className="grid gap-2 sm:grid-cols-2">
+                  {PERMISSION_ORDER.map((key) => <div key={key} className="flex min-h-10 items-start gap-2 rounded-md border border-border/70 p-2 text-sm">
+                    <Checkbox aria-label={`${PERMISSION_LABELS[key]} — ${member.email}`}
+                      disabled={rightsMut.isPending || bulkRightsBusy || rights.isError}
+                      checked={current[key]}
+                      onCheckedChange={(value) => rightsMut.mutate({ userId: member.userId, permissions: { ...current, [key]: value === true } })} />
+                    <span className="leading-4">{PERMISSION_LABELS[key]}</span>
+                  </div>)}
+                </div>}
+              </div>;
+            })}
+            {!staff.length && <p className="rounded-lg border border-border p-4 text-sm text-muted-foreground">Сначала создайте учётные записи сотрудников</p>}
           </div>
-          {!!staff.length && (
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button variant="outline" size="sm" disabled={rightsMut.isPending} onClick={() => staff.forEach((m) => { if (m.scope !== "manager") rightsMut.mutate({ userId: m.userId, permissions: { ...EMPTY_PERMISSIONS } }); })}>
-                Снять все права
-              </Button>
-            </div>
-          )}
+          {!!staff.some((member) => member.scope !== "manager") && <div className="mt-3 flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" disabled={rightsMut.isPending || bulkRightsBusy || rights.isError} onClick={() => void setAllRights(true)}>Дать все права доступа</Button>
+            <Button variant="outline" size="sm" disabled={rightsMut.isPending || bulkRightsBusy || rights.isError} onClick={() => void setAllRights(false)}>Снять все права доступа</Button>
+          </div>}
         </section>
 
 

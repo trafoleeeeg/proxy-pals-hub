@@ -11,7 +11,7 @@ import {
   PROXY_LIMITS, ProxyCheckQueue, parseProxyPort, performDesktopProxyCheck,
   proxyAddress, validateProxyInput, normalizeProxyCheck, parseProxyBundle,
 } from "@/lib/proxy-input";
-import { countryFlag } from "@/lib/country-flag";
+import { IpCountryFlag } from "@/components/ip-country-flag";
 import { confirmRotation } from "@/lib/proxy-rotation";
 import type { PasswordAction, ProxyImportIssue, ProxyProtocol, RotationAction } from "@/lib/proxy-input";
 import { desktop } from "@/lib/desktop";
@@ -407,7 +407,7 @@ export function ProxiesPage() {
                 </span> : proxy.last_check_ok === true ? <Badge className="bg-primary/15 text-primary">работает</Badge>
                   : proxy.last_check_ok === false ? <Badge variant="destructive">ошибка</Badge>
                   : <span className="text-xs text-muted-foreground">не проверялся</span>}
-                {proxy.last_check_ip && <div className="mono mt-1 break-all text-xs">{countryFlag(proxy.country) && <span title={`Страна выхода: ${proxy.country}`} className="mr-1.5 font-sans text-base" aria-label={`Страна выхода: ${proxy.country}`}>{countryFlag(proxy.country)}</span>}{proxy.last_check_ip}
+                {proxy.last_check_ip && <div className="mono mt-1 break-all text-xs"><IpCountryFlag ip={proxy.last_check_ip} country={proxy.country} className="mr-1.5 font-sans text-base" />{proxy.last_check_ip}
                   {proxy.last_check_latency_ms != null ? ` · ${proxy.last_check_latency_ms} мс` : ""}</div>}
                 {(checkErrors[proxy.id] || proxy.last_check_error) && <p role="status" className="mt-1 break-words text-xs text-destructive">
                   {checkErrors[proxy.id] || proxy.last_check_error}
@@ -458,3 +458,4 @@ export function ProxiesPage() {
     </div>
   );
 }
+

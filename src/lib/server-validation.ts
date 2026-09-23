@@ -112,4 +112,3 @@ export const updateEmployeeSchema = z.object({
   password: z.string().min(12, "Пароль должен содержать не менее 12 символов").max(72).optional(),
   displayName: text(120),
 }).strict();
-

@@ -125,12 +125,19 @@ function cookieDetails(cookie) {
 }
 
 function retainedCount(actual, imported) {
-  const remaining = [...actual];
+  const keyOf = (cookie) => JSON.stringify([
+    cookie.domain.replace(/^\./, ""), cookie.path || "/", cookie.name, cookie.value,
+  ]);
+  const remaining = new Map();
+  for (const cookie of actual) {
+    const key = keyOf(cookie);
+    remaining.set(key, (remaining.get(key) || 0) + 1);
+  }
   let count = 0;
   for (const cookie of imported) {
-    const index = remaining.findIndex((saved) => saved.name === cookie.name && saved.value === cookie.value &&
-      saved.domain.replace(/^\./, "") === cookie.domain.replace(/^\./, "") && saved.path === (cookie.path || "/"));
-    if (index >= 0) { remaining.splice(index, 1); count += 1; }
+    const key = keyOf(cookie);
+    const available = remaining.get(key) || 0;
+    if (available) { remaining.set(key, available - 1); count += 1; }
   }
   return count;
 }

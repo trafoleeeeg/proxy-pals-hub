@@ -132,6 +132,17 @@ test("failed cookie restore does not overwrite the encrypted snapshot", async ()
   assert.equal(writes, 0);
 });
 
+test("a resolved set call without a retained cookie cannot erase the snapshot", async () => {
+  let writes = 0;
+  const store = { read: async () => null, write: async () => { writes += 1; } };
+  const ses = session();
+  ses.cookies.set = async () => {};
+  await assert.rejects(initializeCookies(ses, store, {
+    profileId: ID, cookies: JSON.stringify([cookie("preserve")]), cookiesUpdatedAt: NEW,
+  }), /Unable to restore imported cookies/);
+  assert.equal(writes, 0);
+});
+
 test("expired cloud cookies are reported and never silently replaced by an empty snapshot", async () => {
   let writes = 0;
   const store = { read: async () => null, write: async () => { writes += 1; } };

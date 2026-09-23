@@ -344,7 +344,7 @@ if (process.versions.electron) {
     assert.equal(privacyUI.visible, true);
     assert.equal(privacyUI.allowed, false);
     assert.equal(privacyUI.origin, `http://127.0.0.1:${plain.port}`);
-    assert.match(privacyUI.warning, /реальную видеокарту/);
+    assert.match(privacyUI.warning, /раскрыть видеокарту/);
     await shell.webContents.executeJavaScript("document.getElementById('privacy-button').click()");
     await navigateFromToolbar("file:///C:/Windows/win.ini");
     await waitUntil(() => !fresh.webContents.isLoading());

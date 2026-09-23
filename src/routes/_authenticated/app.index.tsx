@@ -21,6 +21,7 @@ import { generateFingerprint, describeFingerprint, type Fingerprint } from "@/li
 import { ProfileFingerprint } from "@/components/profile-fingerprint";
 import { ProfileCookies } from "@/components/profile-cookies";
 import { ProfileDragHandle, ProfileDragRow } from "@/components/profile-dnd";
+import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { ProfileBulkDialog, type BulkAction } from "@/components/profile-bulk";
 import { ProfileProxyCell, useProxyOps } from "@/components/profile-proxy";
 import { ColumnSettings, InlineText, MetadataManager, NotesCell, ResizableHead, StatusCell, useColumnWidths, type FixedColumn } from "@/components/profile-table-tools";
@@ -238,12 +239,13 @@ function ProfilesWorkspace() {
         <TableHead className="w-12">Запуск</TableHead>{manage && <TableHead className="w-10"><span className="sr-only">Действия</span></TableHead>}<ResizableHead columnKey="name" widths={widths} setWidth={setWidth} className="min-w-28">Название</ResizableHead>{shown("folder") && <ResizableHead columnKey="folder" widths={widths} setWidth={setWidth} className="min-w-24">Папка</ResizableHead>}{shown("status") && <ResizableHead columnKey="status" widths={widths} setWidth={setWidth} className="min-w-24">Статус</ResizableHead>}{shown("proxy") && <ResizableHead columnKey="proxy" widths={widths} setWidth={setWidth} className="min-w-56">Прокси</ResizableHead>}{shown("notes") && <ResizableHead columnKey="notes" widths={widths} setWidth={setWidth} className="min-w-32">Заметки</ResizableHead>}{shownFields.map((field) => <ResizableHead columnKey={"field-" + field.id} widths={widths} setWidth={setWidth} className="min-w-24" key={field.id}>{field.name}</ResizableHead>)}{shown("fingerprint") && <ResizableHead columnKey="fingerprint" widths={widths} setWidth={setWidth} className="min-w-32">Отпечаток</ResizableHead>}{shown("updated") && <ResizableHead columnKey="updated" widths={widths} setWidth={setWidth} className="min-w-28">Изменён</ResizableHead>}{shown("created") && <ResizableHead columnKey="created" widths={widths} setWidth={setWidth} className="min-w-28">Создан</ResizableHead>}
       </TableRow></TableHeader><TableBody>
         {profiles.isPending && <TableRow><TableCell colSpan={columnCount} className="py-8 text-center" role="status">Загрузка профилей…</TableCell></TableRow>}
+        <SortableContext items={rows.map((profile) => `profile:${profile.id}`)} strategy={verticalListSortingStrategy}>
         {rows.map((profile) => {
           const active = running.has(profile.id);
           const processing = runtime.busy.includes(profile.id);
           const proxy = proxies.data?.find((p) => p.id === profile.proxy_id);
           const busyBy = !active && profile.lock ? (profile.lock.name || profile.lock.email || "другой сотрудник") : null;
-          return <ContextMenu key={profile.id}><ContextMenuTrigger asChild><ProfileDragRow id={profile.id} name={profile.name} disabled={!canEdit || !!busy || locked(profile.id)} data-state={selected.includes(profile.id) ? "selected" : undefined}>
+          return <ContextMenu key={profile.id}><ContextMenuTrigger asChild><ProfileDragRow id={profile.id} name={profile.name} disabled={!canEdit || !!busy} data-state={selected.includes(profile.id) ? "selected" : undefined}>
             {manage && <TableCell><Checkbox aria-label={"Выбрать " + profile.name} checked={selected.includes(profile.id)} onCheckedChange={(v) => setSelected((current) => toggleVisibleSelection(current, [profile.id], v === true))} /></TableCell>}
             <TableCell><Button variant={active ? "outline" : "default"} size="icon" title={active ? "Закрыть профиль" : busyBy ? `Профиль занят: ${busyBy}` : runtime.available ? "Запустить профиль" : "Запуск в приложении Windows"} aria-label={busyBy ? `Профиль ${profile.name} занят: ${busyBy}` : (active ? "Закрыть " : "Запустить ") + profile.name} disabled={!runtime.available || !runtime.ready || runtime.restoring || processing || (!active && locked(profile.id))} onClick={() => { void (active ? runtime.stop(profile.id) : runtime.start(profile.id)).catch((e: Error) => toast.error(e.message)); }}>{processing ? <RefreshCw className="size-4 animate-spin" /> : active ? <Square className="size-4" /> : busyBy ? <LockKeyhole className="size-4" /> : <Play className="size-4" />}</Button></TableCell>
             {manage && <TableCell><DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="size-7" title="Действия с профилем" aria-label={"Действия " + profile.name}><MoreVertical className="size-4" /></Button></DropdownMenuTrigger><DropdownMenuContent align="start" className="w-44">
@@ -269,6 +271,7 @@ function ProfilesWorkspace() {
             <ContextMenuItem disabled={!canDelete || !!busy || locked(profile.id)} onSelect={() => setAction({ mode: "delete", ids: [profile.id] })}><Trash2 className="size-4" />В корзину</ContextMenuItem>
           </ContextMenuContent></ContextMenu>;
         })}
+        </SortableContext>
         {!profiles.isPending && !profiles.isError && !rows.length && <TableRow><TableCell colSpan={columnCount} className="py-10 text-center text-sm text-muted-foreground">{search ? "По выбранным фильтрам профилей нет" : "В этой папке пока нет профилей"}</TableCell></TableRow>}
       </TableBody></Table>
       </div>
@@ -323,3 +326,4 @@ function ProfilesWorkspace() {
     </DialogContent></Dialog>
   </div>;
 }
+

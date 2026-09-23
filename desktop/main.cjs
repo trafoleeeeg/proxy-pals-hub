@@ -10,6 +10,7 @@ const { checkProxy } = require("./proxy-check.cjs");
 const { isTrustedSender, isWebUrl } = require("./ipc-policy.cjs");
 const { createUpdateController } = require("./update-controller.cjs");
 const { createSessionOutbox } = require("./session-outbox.cjs");
+const { checkEngineVersions } = require("./runtime/engine-status.cjs");
 
 const DEFAULT_APP_URL = "https://proxy-pals-hub.lovable.app/app";
 // A packaged client must never let a local environment variable replace the
@@ -162,6 +163,7 @@ handle("umbra:open-external", async (url) => {
   return { ok: true };
 });
 handle("umbra:app-version", () => app.getVersion());
+handle("umbra:check-engine-versions", async () => ({ ok: true, ...(await checkEngineVersions()) }));
 handle("umbra:update-state", () => updates?.getState() || { state: "none" });
 handle("umbra:check-update", () => updates.check());
 handle("umbra:download-update", () => updates.download());

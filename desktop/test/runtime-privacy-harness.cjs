@@ -31,7 +31,7 @@ async function probe() {
     platform: navigator.platform, memory: navigator.deviceMemory, language: navigator.language,
     prototypeMemory: Object.getOwnPropertyDescriptor(prototype, "deviceMemory").get.call(navigator),
     gpuBlocked: gpuCanvas.getContext("webgl") === null, webgpuBlocked: navigator.gpu === undefined, canvasBlocked,
-    sharedBlocked: typeof SharedWorker === "undefined", serviceBlocked: navigator.serviceWorker === undefined,
+    audioBlocked: typeof AudioContext === "undefined", sharedBlocked: typeof SharedWorker === "undefined", serviceBlocked: navigator.serviceWorker === undefined,
     dpr: globalThis.devicePixelRatio, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     headers: await fetch("/headers").then((response) => response.json()),
   };
@@ -50,8 +50,8 @@ app.whenReady().then(async () => {
   const port = server.address().port;
   const origin = `http://127.0.0.1:${port}`;
   const fp = normalizeFingerprint({ os: "macos", osVersion: "15.0.0", userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/152.0.0.0", deviceMemory: 2, hardwareConcurrency: 10, languages: ["de-DE", "de"], timezone: "Asia/Tokyo", webrtc: "disabled" });
-  async function open(origins = []) {
-    const identity = { ...fp, hardwareOrigins: origins };
+  async function open(origins = [], permissions = null) {
+    const identity = { ...fp, hardwareOrigins: origins, ...(permissions ? { hardwarePermissions: permissions } : {}) };
     const ses = session.fromPartition("privacy-fixture-" + randomUUID());
     ses.webRequest.onBeforeRequest((details, callback) => {
       const url = new URL(details.url);
@@ -74,7 +74,7 @@ app.whenReady().then(async () => {
     assert.equal(result.platform, "MacIntel"); assert.equal(result.memory, 2); assert.equal(result.prototypeMemory, 2);
     assert.equal(result.language, "de-DE"); assert.equal(result.timezone, "Asia/Tokyo");
     assert.equal(result.gpuBlocked, true); assert.equal(result.webgpuBlocked, true); assert.equal(result.canvasBlocked, true);
-    assert.equal(result.sharedBlocked, true); assert.equal(result.serviceBlocked, true);
+    assert.equal(result.audioBlocked, true); assert.equal(result.sharedBlocked, true); assert.equal(result.serviceBlocked, true);
     assert.equal(result.headers.ua, fp.userAgent); assert.match(result.headers.language, /^de-DE/);
     if (frame) assert.equal(result.dpr, 2);
   };
@@ -85,6 +85,11 @@ app.whenReady().then(async () => {
   }
   check(await crossFrame(strict), true);
   assert.ok(strict.mainFrame.frames.some((frame) => frame.processId !== strict.mainFrame.processId), "fixture must exercise an OOPIF");
+  const workersOnly = await open([], { [origin]: ["workers"] });
+  const narrow = await workersOnly.executeJavaScript(probeSource);
+  assert.equal(narrow.gpuBlocked, true); assert.equal(narrow.canvasBlocked, true); assert.equal(narrow.audioBlocked, true);
+  assert.equal(narrow.sharedBlocked, false); assert.equal(narrow.serviceBlocked, false);
+  assert.equal(await workersOnly.executeJavaScript("navigator.serviceWorker.register('/sw.js').then(()=>navigator.serviceWorker.ready).then(()=>true)"), true);
   const compatible = await open([origin]);
   const relaxed = await compatible.executeJavaScript(probeSource);
   assert.equal(relaxed.canvasBlocked, false);
@@ -99,4 +104,4 @@ app.whenReady().then(async () => {
   assert.equal(failures, 0);
   console.log("UMBRA_PRIVACY_NATIVE_OK: strict page + worker + OOPIF; exact-origin exceptions; isolated storage");
   finish(0);
-}).catch(() => { console.error("UMBRA_PRIVACY_NATIVE_FAILED"); finish(1); });
+}).catch((error) => { console.error("UMBRA_PRIVACY_NATIVE_FAILED", error?.message || "unknown"); finish(1); });

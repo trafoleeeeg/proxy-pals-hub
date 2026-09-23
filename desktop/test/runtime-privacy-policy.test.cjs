@@ -16,6 +16,10 @@ test("privacy exceptions persist locally, bind to profile and default to deny on
   assert.deepEqual(await store.read(ID), []);
   await store.write(ID, ["https://site.test"]);
   assert.deepEqual(await createPrivacyStore({ userData, safeStorage }).read(ID), ["https://site.test"]);
+  assert.deepEqual(await store.readPermissions(ID), { "https://site.test": ["gpu", "canvas", "audio", "fonts", "workers"] });
+  await store.writePermissions(ID, { "https://site.test": ["workers"] });
+  assert.deepEqual({ ...await createPrivacyStore({ userData, safeStorage }).readPermissions(ID) }, { "https://site.test": ["workers"] });
+  assert.deepEqual(await store.read(ID), [], "a narrow permission must not become a legacy all-access exception");
   assert.deepEqual(await store.read(OTHER), []);
   const target = path.join(userData, "profile-privacy", ID + ".bin");
   const data = await fs.readFile(target);
@@ -25,6 +29,8 @@ test("privacy exceptions persist locally, bind to profile and default to deny on
   await fs.writeFile(target, "corrupt fixture");
   assert.deepEqual(await store.read(ID), []);
   await assert.rejects(store.write(ID, ["https://site.test/path"]), /Некорректное/);
+  await assert.rejects(store.writePermissions(ID, { "https://site.test": ["workers", "workers"] }), /Некорректное/);
+  await assert.rejects(store.writePermissions(ID, { "https://site.test": ["unknown"] }), /Некорректное/);
   await assert.rejects(createPrivacyStore({ userData, safeStorage: { ...safeStorage, getSelectedStorageBackend: () => "basic_text" } }).write(ID, []), /зашифровать/);
 });
 
@@ -49,4 +55,8 @@ test("session header guard removes host hints and rejects unapproved service wor
   assert.equal(allowed.requestHeaders["sec-ch-ua-unknown"], undefined);
   assert.match(allowed.requestHeaders["Accept-Language"], /^de-DE/);
   assert.deepEqual(request("https://sub.allowed.test/sw.js", { "service-worker": "script" }), { cancel: true });
+  fp.hardwarePermissions = { "https://allowed.test": ["gpu"] };
+  assert.deepEqual(request("https://allowed.test/sw.js", { "Service-Worker": "script" }), { cancel: true }, "GPU access must not permit workers");
+  fp.hardwarePermissions = { "https://allowed.test": ["workers"] };
+  assert.ok(request("https://allowed.test/sw.js", { "Service-Worker": "script" }).requestHeaders);
 });

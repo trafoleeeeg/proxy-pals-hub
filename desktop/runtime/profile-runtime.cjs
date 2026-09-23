@@ -199,13 +199,15 @@ function createProfileRuntime(electron, options = {}) {
       getZoomLevel: () => entry.zoomLevel || 0,
       getPrivacy: (url) => {
         const origin = privacyOrigin(url);
-        return { origin, allowed: !!origin && entry.fp.hardwareOrigins?.includes(origin) === true };
+        const permissions = origin ? entry.fp.hardwarePermissions?.[origin] || [] : [];
+        return { origin, allowed: permissions.length > 0, permissions };
       },
-      setPrivacy: async (origin, allowed) => {
+      setPrivacy: async (origin, permissions) => {
         if (!origin || privacyOrigin(origin) !== origin) throw new Error("Откройте сайт для настройки защиты");
-        const origins = new Set(entry.fp.hardwareOrigins || []);
-        if (allowed) origins.add(origin); else origins.delete(origin);
-        await privacyStore().write(entry.profileId, [...origins]);
+        const rules = { ...entry.fp.hardwarePermissions };
+        if (permissions.length) rules[origin] = permissions;
+        else delete rules[origin];
+        await privacyStore().writePermissions(entry.profileId, rules);
         // Restart the entire profile: reload alone cannot revoke capabilities
         // already captured by shared workers, frames or another open tab.
         await closeProfileWindow(entry.profileId);
@@ -653,7 +655,7 @@ function createProfileRuntime(electron, options = {}) {
         for (const extension of extensionApi.getAllExtensions?.() || []) extensionApi.removeExtension(extension.id);
         const defaultUA = entry.ses.getUserAgent().replace(/\s(?:Electron|Umbra)\/[^ ]+/g, "");
         entry.fp = normalizeFingerprint(payload.fingerprint || {}, defaultUA);
-        entry.fp.hardwareOrigins = await privacyStore().read(id);
+        entry.fp.hardwarePermissions = await privacyStore().readPermissions(id);
         // Remove only background worker registrations before opening the network
         // gate. Old workers must not execute with a revoked/missing exception.
         // Cookies, localStorage, IndexedDB and cache storage remain intact.

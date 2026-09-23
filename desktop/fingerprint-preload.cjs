@@ -15,12 +15,11 @@ function applyDocumentFingerprint(fp) {
   // Never inherit an exception from the top frame or a wildcard. Opaque
   // documents (data:, sandboxed frames) stay restricted.
   const origin = globalThis.origin || globalThis.location?.origin;
-  const compatible = origin && origin !== "null" && fp.hardwareOrigins?.includes(origin) === true;
-  if (!compatible) {
+  const legacyAllowed = origin && origin !== "null" && !fp.hardwarePermissions && fp.hardwareOrigins?.includes(origin) === true;
+  const grants = origin && origin !== "null" ? fp.hardwarePermissions?.[origin] : null;
+  const allowed = (capability) => legacyAllowed || (Array.isArray(grants) && grants.includes(capability));
+  if (!allowed("gpu")) {
     define(nav, "gpu", undefined);
-    define(nav, "serviceWorker", undefined);
-    for (const name of ["SharedWorker", "AudioContext", "webkitAudioContext", "OfflineAudioContext", "webkitOfflineAudioContext", "queryLocalFonts"]) define(globalThis, name, undefined);
-    const denied = () => { throw new DOMException("Hardware readback blocked by profile privacy settings", "SecurityError"); };
     for (const ctor of [globalThis.HTMLCanvasElement, globalThis.OffscreenCanvas]) {
       if (!ctor) continue;
       const original = ctor.prototype.getContext;
@@ -28,6 +27,18 @@ function applyDocumentFingerprint(fp) {
         if (["webgl", "experimental-webgl", "webgl2", "webgpu"].includes(String(type).toLowerCase())) return null;
         return original.call(this, type, ...args);
       };
+    }
+  }
+  if (!allowed("workers")) {
+    define(nav, "serviceWorker", undefined);
+    define(globalThis, "SharedWorker", undefined);
+  }
+  if (!allowed("audio")) for (const name of ["AudioContext", "webkitAudioContext", "OfflineAudioContext", "webkitOfflineAudioContext"]) define(globalThis, name, undefined);
+  if (!allowed("fonts")) define(globalThis, "queryLocalFonts", undefined);
+  if (!allowed("canvas")) {
+    const denied = () => { throw new DOMException("Hardware readback blocked by profile privacy settings", "SecurityError"); };
+    for (const ctor of [globalThis.HTMLCanvasElement, globalThis.OffscreenCanvas]) {
+      if (!ctor) continue;
       for (const method of ["toDataURL", "toBlob", "convertToBlob"]) if (typeof ctor.prototype[method] === "function") ctor.prototype[method] = denied;
     }
     for (const ctor of [globalThis.CanvasRenderingContext2D, globalThis.OffscreenCanvasRenderingContext2D]) {
@@ -58,7 +69,7 @@ function applyDocumentFingerprint(fp) {
     value = Math.imul(value ^ (value >>> 16), 0x45d9f3b) >>> 0;
     return (value & 1) ? 1 : -1;
   };
-  if (compatible && fp.canvasNoise && globalThis.CanvasRenderingContext2D) {
+  if (allowed("canvas") && fp.canvasNoise && globalThis.CanvasRenderingContext2D) {
     const originalGet = CanvasRenderingContext2D.prototype.getImageData;
     const perturb = (data, width, height) => {
       // Fingerprint probes use small synthetic canvases. Never rewrite large
@@ -92,7 +103,7 @@ function applyDocumentFingerprint(fp) {
       HTMLCanvasElement.prototype[method] = function (...args) { return original.apply(copy(this), args); };
     }
   }
-  if (compatible && fp.audioNoise) {
+  if (allowed("audio") && fp.audioNoise) {
     const perturb = (data) => {
       for (let index = 0; index < data.length; index += 97) if (Number.isFinite(data[index])) data[index] += delta(fp.audioNoise, index) * 1e-7;
     };

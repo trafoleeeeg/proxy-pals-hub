@@ -86,15 +86,16 @@ function harness() {
 test("privacy consent is bound to the actual selected tab and origin", async () => {
   const calls = [];
   const h = await harness().start({ privacy: {
-    getPrivacy: (url) => ({ origin: url.startsWith("https:") ? new URL(url).origin : "", allowed: false }),
+    getPrivacy: (url) => ({ origin: url.startsWith("https:") ? new URL(url).origin : "", allowed: false, permissions: [] }),
     setPrivacy: async (...args) => { calls.push(args); },
   } });
   const state = h.stateEvents.at(-1);
-  assert.ok((await h.command({ action: "set-site-privacy", origin: "https://other.test", tabId: state.activeId, allowed: true })).error);
-  assert.ok((await h.command({ action: "set-site-privacy", origin: "https://two.example", tabId: "stale-tab", allowed: true })).error);
+  assert.ok((await h.command({ action: "set-site-privacy", origin: "https://other.test", tabId: state.activeId, permissions: ["workers"] })).error);
+  assert.ok((await h.command({ action: "set-site-privacy", origin: "https://two.example", tabId: "stale-tab", permissions: ["workers"] })).error);
+  assert.ok((await h.command({ action: "set-site-privacy", origin: "https://two.example", tabId: state.activeId, permissions: ["gpu", "gpu"] })).error);
   assert.equal(calls.length, 0);
-  await h.command({ action: "set-site-privacy", origin: "https://two.example", tabId: state.activeId, allowed: true });
-  assert.deepEqual(calls, [["https://two.example", true]]);
+  await h.command({ action: "set-site-privacy", origin: "https://two.example", tabId: state.activeId, permissions: ["workers"] });
+  assert.deepEqual(calls, [["https://two.example", ["workers"]]]);
   h.browser.destroy();
 });
 

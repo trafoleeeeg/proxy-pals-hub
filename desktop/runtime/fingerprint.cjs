@@ -3,6 +3,12 @@ const path = require("node:path");
 const DOCUMENT_SOURCE = fs.readFileSync(path.join(__dirname, "..", "fingerprint-preload.cjs"), "utf8");
 const WEBRTC_POLICY = "disable_non_proxied_udp";
 
+function hasCapability(fp, origin, capability) {
+  if (!origin || origin === "null") return false;
+  if (fp.hardwarePermissions) return fp.hardwarePermissions[origin]?.includes(capability) === true;
+  return fp.hardwareOrigins?.includes(origin) === true; // Legacy local policy.
+}
+
 function installSessionPrivacy(ses, fp) {
   const identity = userAgentOverride(fp);
   const meta = identity.userAgentMetadata;
@@ -21,7 +27,7 @@ function installSessionPrivacy(ses, fp) {
       const lower = key.toLowerCase();
       if (lower === "service-worker") {
         let origin; try { origin = new URL(details.url).origin; } catch { /* deny below */ }
-        if (!fp.hardwareOrigins?.includes(origin)) { callback({ cancel: true }); return; }
+        if (!hasCapability(fp, origin, "workers")) { callback({ cancel: true }); return; }
       }
       if (lower.startsWith("sec-ch-ua")) { offeredHints.push(lower); delete headers[key]; }
       if (["user-agent", "accept-language"].includes(lower)) delete headers[key];
@@ -197,4 +203,4 @@ async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
   };
 }
 
-module.exports = { normalizeFingerprint, applyFingerprint, userAgentOverride, installSessionPrivacy };
+module.exports = { normalizeFingerprint, applyFingerprint, userAgentOverride, installSessionPrivacy, hasCapability };

@@ -340,11 +340,11 @@ if (process.versions.electron) {
     await shell.webContents.executeJavaScript("document.getElementById('extensions').click()");
     assert.match(await shell.webContents.executeJavaScript("document.getElementById('extensions-list').textContent"), /Fixture/);
     await shell.webContents.executeJavaScript("document.getElementById('privacy-button').click()");
-    const privacyUI = await shell.webContents.executeJavaScript("({visible:!document.getElementById('privacy-popover').hidden,allowed:document.getElementById('privacy-allow').checked,origin:document.getElementById('privacy-origin').textContent,warning:document.getElementById('privacy-popover').textContent})");
+    const privacyUI = await shell.webContents.executeJavaScript("({visible:!document.getElementById('privacy-popover').hidden,allowed:document.getElementById('privacy-gpu').checked,origin:document.getElementById('privacy-origin').textContent,warning:document.getElementById('privacy-popover').textContent})");
     assert.equal(privacyUI.visible, true);
     assert.equal(privacyUI.allowed, false);
     assert.equal(privacyUI.origin, `http://127.0.0.1:${plain.port}`);
-    assert.match(privacyUI.warning, /реальную видеокарту/);
+    assert.match(privacyUI.warning, /раскрыть видеокарту/);
     await shell.webContents.executeJavaScript("document.getElementById('privacy-button').click()");
     await navigateFromToolbar("file:///C:/Windows/win.ini");
     await waitUntil(() => !fresh.webContents.isLoading());

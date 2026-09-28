@@ -1,5 +1,5 @@
 diff --git a/shell/browser/api/electron_api_session.cc b/shell/browser/api/electron_api_session.cc
-index 84ad350..f6459a7 100644
+index 84ad350..c7afa87 100644
 --- a/shell/browser/api/electron_api_session.cc
 +++ b/shell/browser/api/electron_api_session.cc
 @@ -1038,6 +1038,38 @@ std::string Session::GetUserAgent() {
@@ -7,7 +7,7 @@ index 84ad350..f6459a7 100644
  }
  
 +void Session::SetUmbraScreenMetrics(gin_helper::ErrorThrower thrower,
-+                                  const base::DictValue& options) {
++                                    const base::DictValue& options) {
 +  const auto width = options.FindInt("width");
 +  const auto height = options.FindInt("height");
 +  const auto available_width = options.FindInt("availableWidth");
@@ -30,9 +30,9 @@ index 84ad350..f6459a7 100644
 +    return;
 +  }
 +  auto* preferences = SessionPreferences::FromBrowserContext(browser_context_);
-+  if (!preferences ||
-+      !preferences->SetScreenMetrics({*width, *height, *available_width,
-+                                     *available_height, *color_depth, scale})) {
++  if (!preferences || !preferences->SetScreenMetrics(
++                          {*width, *height, *available_width, *available_height,
++                           *color_depth, scale})) {
 +    thrower.ThrowError(
 +        "Screen metrics must be configured before creating session pages");
 +  }
@@ -50,7 +50,7 @@ index 84ad350..f6459a7 100644
        .SetMethod("setSSLConfig", &Session::SetSSLConfig)
        .SetMethod("getBlobData", &Session::GetBlobData)
 diff --git a/shell/browser/api/electron_api_session.h b/shell/browser/api/electron_api_session.h
-index 8bd1071..87ce60d 100644
+index 8bd1071..c68cd2a 100644
 --- a/shell/browser/api/electron_api_session.h
 +++ b/shell/browser/api/electron_api_session.h
 @@ -141,6 +141,8 @@ class Session final : public gin::Wrappable<Session>,
@@ -58,7 +58,7 @@ index 8bd1071..87ce60d 100644
    void SetUserAgent(const std::string& user_agent, gin::Arguments* args);
    std::string GetUserAgent();
 +  void SetUmbraScreenMetrics(gin_helper::ErrorThrower thrower,
-+                            const base::DictValue& options);
++                             const base::DictValue& options);
    void SetSSLConfig(network::mojom::SSLConfigPtr config);
    bool IsPersistent();
    v8::Local<v8::Promise> GetBlobData(v8::Isolate* isolate,

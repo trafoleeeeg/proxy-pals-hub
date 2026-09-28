@@ -11,6 +11,11 @@
     "tag": "152.0.7977.130",
     "commit": "2c592105bbcd9490a9894df48d0fe59b2c512651"
   },
+  "node": {
+    "repository": "https://github.com/nodejs/node.git",
+    "tag": "v24.21.0",
+    "commit": "955266bfdd854cd280dffd47548673914484e4c0"
+  },
   "nativeScreenApi": "session.setUmbraScreenMetrics",
   "appIntegrationEnabled": false
 }

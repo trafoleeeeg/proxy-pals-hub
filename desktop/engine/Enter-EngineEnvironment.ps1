@@ -22,7 +22,7 @@ $env:vs2026_install = Join-Path $engineDirectory 'toolchain\BuildTools'
 $env:PATH = (Join-Path $engineDirectory 'depot_tools') + ';' + $env:PATH
 
 # Scoped to Git processes launched from this shell. Keep TLS verification on.
-$env:GIT_CONFIG_COUNT = '7'
+$env:GIT_CONFIG_COUNT = '8'
 $env:GIT_CONFIG_KEY_0 = 'http.sslBackend'; $env:GIT_CONFIG_VALUE_0 = 'openssl'
 $env:GIT_CONFIG_KEY_1 = 'core.longpaths'; $env:GIT_CONFIG_VALUE_1 = 'true'
 $env:GIT_CONFIG_KEY_2 = 'core.autocrlf'; $env:GIT_CONFIG_VALUE_2 = 'false'
@@ -30,3 +30,5 @@ $env:GIT_CONFIG_KEY_3 = 'core.filemode'; $env:GIT_CONFIG_VALUE_3 = 'false'
 $env:GIT_CONFIG_KEY_4 = 'depot-tools.allowGlobalGitConfig'; $env:GIT_CONFIG_VALUE_4 = 'false'
 $env:GIT_CONFIG_KEY_5 = 'http.lowSpeedLimit'; $env:GIT_CONFIG_VALUE_5 = '1024'
 $env:GIT_CONFIG_KEY_6 = 'http.lowSpeedTime'; $env:GIT_CONFIG_VALUE_6 = '120'
+# Avoid HTTP/2 multiplexing resets during large transfers through the VPN.
+$env:GIT_CONFIG_KEY_7 = 'http.version'; $env:GIT_CONFIG_VALUE_7 = 'HTTP/1.1'

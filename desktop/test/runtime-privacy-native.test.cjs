@@ -24,4 +24,7 @@ test("sandboxed Electron strict and normal modes plus exact-origin compatibility
   });
   assert.equal(result.code, 0, result.output);
   assert.match(result.output, /UMBRA_PRIVACY_NATIVE_OK/);
+  const audit = result.output.match(/UMBRA_WORKER_IDENTITY_AUDIT: shared=(?:true|false) service=(?:true|false)/);
+  assert.ok(audit, "worker identity audit must complete without exposing native values");
+  console.log(audit[0]);
 });

@@ -27,19 +27,24 @@ async function probe() {
   let canvasBlocked = false;
   try { canvas.getContext("2d").getImageData(0, 0, 1, 1); } catch (error) { canvasBlocked = error.name === "SecurityError"; }
   const gpuCanvas = globalThis.document ? document.createElement("canvas") : new OffscreenCanvas(20, 20);
+  const hints = navigator.userAgentData ? await navigator.userAgentData.getHighEntropyValues(["architecture", "bitness", "platformVersion", "uaFullVersion"]) : null;
   return {
     platform: navigator.platform, memory: navigator.deviceMemory, language: navigator.language,
+    languages: [...navigator.languages], userAgent: navigator.userAgent,
+    hardwareConcurrency: navigator.hardwareConcurrency, doNotTrack: navigator.doNotTrack,
+    hints: hints && { brands: hints.brands, platform: hints.platform, architecture: hints.architecture, bitness: hints.bitness, platformVersion: hints.platformVersion, uaFullVersion: hints.uaFullVersion },
     prototypeMemory: Object.getOwnPropertyDescriptor(prototype, "deviceMemory").get.call(navigator),
     gpuBlocked: gpuCanvas.getContext("webgl") === null, webgpuBlocked: navigator.gpu === undefined, canvasBlocked,
     audioBlocked: typeof AudioContext === "undefined", sharedBlocked: typeof SharedWorker === "undefined", serviceBlocked: navigator.serviceWorker === undefined,
     dpr: globalThis.devicePixelRatio, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    screen: globalThis.screen && { width: screen.width, height: screen.height },
     headers: await fetch("/headers").then((response) => response.json()),
   };
 }
 const probeSource = `(${probe.toString()})()`;
 app.whenReady().then(async () => {
   server = http.createServer((req, res) => {
-    if (req.url === "/headers") { res.setHeader("Content-Type", "application/json"); return res.end(JSON.stringify({ ua: req.headers["user-agent"], language: req.headers["accept-language"] })); }
+    if (req.url === "/headers") { res.setHeader("Content-Type", "application/json"); return res.end(JSON.stringify({ ua: req.headers["user-agent"], language: req.headers["accept-language"], dnt: req.headers.dnt || null })); }
     if (req.url === "/worker.js") { res.setHeader("Content-Type", "text/javascript"); return res.end(`${probeSource}.then(result => postMessage(result));`); }
     if (req.url === "/shared.js") { res.setHeader("Content-Type", "text/javascript"); return res.end("onconnect=e=>e.ports[0].postMessage('ready');"); }
     if (req.url === "/sw.js") { res.setHeader("Content-Type", "text/javascript"); return res.end("self.addEventListener('install',()=>self.skipWaiting()); self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));"); }
@@ -50,8 +55,8 @@ app.whenReady().then(async () => {
   const port = server.address().port;
   const origin = `http://127.0.0.1:${port}`;
   const fp = normalizeFingerprint({ os: "macos", osVersion: "15.0.0", userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/152.0.0.0", deviceMemory: 2, hardwareConcurrency: 10, languages: ["de-DE", "de"], timezone: "Asia/Tokyo", webrtc: "disabled" });
-  async function open(origins = [], permissions = null, aggressivePrivacyMode = undefined) {
-    const identity = { ...fp, hardwareOrigins: origins, ...(permissions ? { hardwarePermissions: permissions } : {}), ...(aggressivePrivacyMode === undefined ? {} : { aggressivePrivacyMode }) };
+  async function open(origins = [], permissions = null, aggressivePrivacyMode = undefined, baseFingerprint = fp) {
+    const identity = { ...baseFingerprint, hardwareOrigins: origins, ...(permissions ? { hardwarePermissions: permissions } : {}), ...(aggressivePrivacyMode === undefined ? {} : { aggressivePrivacyMode }) };
     const ses = session.fromPartition("privacy-fixture-" + randomUUID());
     ses.webRequest.onBeforeRequest((details, callback) => {
       const url = new URL(details.url);
@@ -59,7 +64,7 @@ app.whenReady().then(async () => {
     });
     ses.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
     ses.setPermissionCheckHandler(() => false);
-    ses.setUserAgent(fp.userAgent, fp.languages.join(","));
+    ses.setUserAgent(identity.userAgent, identity.languages.join(","));
     installSessionPrivacy(ses, identity);
     const win = new BrowserWindow({ show: false, webPreferences: { session: ses, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true } });
     windows.push(win);
@@ -112,9 +117,46 @@ app.whenReady().then(async () => {
   assert.equal(ordinaryFrame.audioBlocked, false);
   assert.equal(ordinaryFrame.sharedBlocked, false);
   assert.equal(ordinaryFrame.serviceBlocked, false);
+  const windowsFp = normalizeFingerprint({
+    os: "windows", osVersion: "11.0.0", architecture: "x86",
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
+    languages: ["fr-CA", "fr"], timezone: "America/Toronto", hardwareConcurrency: 6,
+    deviceMemory: 4, screen: { width: 1600, height: 900 }, doNotTrack: true,
+  });
+  const windowsProfile = await open([], null, false, windowsFp);
+  const windowsMain = await windowsProfile.executeJavaScript(probeSource);
+  const checkWindows = (result) => {
+    assert.equal(result.platform, "Win32");
+    assert.equal(result.memory, 4);
+    assert.equal(result.hardwareConcurrency, 6);
+    assert.equal(result.language, "fr-CA");
+    assert.deepEqual(result.languages, ["fr-CA", "fr"]);
+    assert.equal(result.timezone, "America/Toronto");
+    assert.equal(result.userAgent, windowsFp.userAgent);
+    assert.equal(result.doNotTrack, "1");
+    assert.equal(result.headers.ua, windowsFp.userAgent);
+    assert.match(result.headers.language, /^fr-CA/);
+    assert.equal(result.headers.dnt, "1");
+    if (result.hints) {
+      assert.equal(result.hints.platform, "Windows");
+      assert.equal(result.hints.platformVersion, "13.0.0");
+      assert.equal(result.hints.architecture, "x86");
+      assert.equal(result.hints.bitness, "64");
+      assert.equal(result.hints.uaFullVersion, windowsFp.chromeVersion);
+    }
+  };
+  checkWindows(windowsMain);
+  assert.deepEqual(windowsMain.screen, { width: 1600, height: 900 });
+  const windowsWorker = await windowsProfile.executeJavaScript("new Promise((resolve,reject)=>{const w=new Worker('/worker.js');w.onmessage=e=>{resolve(e.data);w.terminate();};w.onerror=reject;})");
+  checkWindows(windowsWorker);
+  assert.deepEqual(windowsWorker.hints, windowsMain.hints, "worker Client Hints must agree with the page");
+  const windowsFrame = await crossFrame(windowsProfile);
+  checkWindows(windowsFrame);
+  assert.deepEqual(windowsFrame.screen, windowsMain.screen, "cross-origin iframe screen must agree with the page");
+  assert.deepEqual(windowsFrame.hints, windowsMain.hints, "cross-origin iframe Client Hints must agree with the page");
   await compatible.executeJavaScript("document.cookie='synthetic=fixture; path=/'; localStorage.setItem('fixture','only-compatible'); true");
   assert.equal(await strict.executeJavaScript("document.cookie === '' && localStorage.getItem('fixture') === null"), true);
   assert.equal(failures, 0);
-  console.log("UMBRA_PRIVACY_NATIVE_OK: strict page + worker + OOPIF; normal mode; exact-origin exceptions; isolated storage");
+  console.log("UMBRA_PRIVACY_NATIVE_OK: strict page + worker + OOPIF; Windows identity matrix; normal mode; exact-origin exceptions; isolated storage");
   finish(0);
 }).catch((error) => { console.error("UMBRA_PRIVACY_NATIVE_FAILED", error?.message || "unknown"); finish(1); });

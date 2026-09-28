@@ -61,6 +61,23 @@ test("session header guard removes host hints and rejects unapproved service wor
   assert.ok(request("https://allowed.test/sw.js", { "Service-Worker": "script" }).requestHeaders);
 });
 
+test("Do Not Track agrees between navigator and outgoing requests", () => {
+  let listener;
+  const ses = { webRequest: { onBeforeSendHeaders: (handler) => { listener = handler; } } };
+  const fp = normalizeFingerprint({ doNotTrack: true, userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/152.0.0.0" });
+  installSessionPrivacy(ses, fp);
+  const request = (headers) => {
+    let result;
+    listener({ url: "https://example.test/", requestHeaders: headers }, (value) => { result = value; });
+    return result.requestHeaders;
+  };
+  assert.equal(request({ dnt: "0" }).DNT, "1");
+  fp.doNotTrack = false;
+  const withoutDnt = request({ DNT: "1" });
+  assert.equal(withoutDnt.DNT, undefined);
+  assert.equal(withoutDnt.dnt, undefined);
+});
+
 test("normal mode permits service workers without a per-origin exception while still rewriting host headers", () => {
   let listener;
   const ses = { webRequest: { onBeforeSendHeaders: (handler) => { listener = handler; } } };

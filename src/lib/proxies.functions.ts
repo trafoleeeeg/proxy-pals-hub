@@ -13,6 +13,8 @@ import { rotationExpired, rotationOutcome } from "./proxy-rotation";
 export type { ProxyInput } from "./proxy-input";
 type Context = { supabase: SupabaseClient<Database>; userId: string };
 type Target = { id: string; teamId: string };
+const missingGeoTimezone = (error: { code?: string; message?: string } | null) =>
+  !!error && ["42703", "PGRST204"].includes(error.code ?? "") && /geo_timezone/.test(error.message ?? "");
 
 export type ProxyListRow = {
   id: string;
@@ -23,6 +25,7 @@ export type ProxyListRow = {
   username: string | null;
   country: string | null;
   city: string | null;
+  geoTimezone: string | null;
   last_checked_at: string | null;
   last_check_ok: boolean | null;
   last_check_ip: string | null;
@@ -69,9 +72,16 @@ export const listProxies = createServerFn({ method: "POST" })
     // Generated Supabase types lag behind the rotation columns in migrations.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const db = context.supabase as any;
-    const { data: rows, error } = await db.from("proxies")
-      .select("id, label, protocol, host, port, username, country, city, last_checked_at, last_check_ok, last_check_ip, last_check_latency_ms, last_check_error, password_enc, rotation_url_enc, rotation_status, rotation_previous_ip, rotation_new_ip, rotation_changed_at, rotation_requested_at, rotation_last_error")
+    let { data: rows, error } = await db.from("proxies")
+      .select("id, label, protocol, host, port, username, country, city, geo_timezone, last_checked_at, last_check_ok, last_check_ip, last_check_latency_ms, last_check_error, password_enc, rotation_url_enc, rotation_status, rotation_previous_ip, rotation_new_ip, rotation_changed_at, rotation_requested_at, rotation_last_error")
       .eq("team_id", data.teamId).order("created_at", { ascending: false });
+    // The panel can be deployed before the additive migration is applied.
+    // Keep existing proxy management available throughout that rollout.
+    if (missingGeoTimezone(error)) {
+      ({ data: rows, error } = await db.from("proxies")
+        .select("id, label, protocol, host, port, username, country, city, last_checked_at, last_check_ok, last_check_ip, last_check_latency_ms, last_check_error, password_enc, rotation_url_enc, rotation_status, rotation_previous_ip, rotation_new_ip, rotation_changed_at, rotation_requested_at, rotation_last_error")
+        .eq("team_id", data.teamId).order("created_at", { ascending: false }));
+    }
     if (error) throw new Error("Не удалось загрузить прокси");
     const rawRows = (rows ?? []) as unknown as Array<Record<string, unknown>>;
     return rawRows.map((row) => {
@@ -84,6 +94,7 @@ export const listProxies = createServerFn({ method: "POST" })
       host: String(row["host"]), port: Number(row["port"]), username: (row["username"] as string | null) ?? null,
       country: (row["country"] as string | null) ?? null,
       city: (row["city"] as string | null) ?? null,
+      geoTimezone: (row["geo_timezone"] as string | null) ?? null,
       last_checked_at: (row["last_checked_at"] as string | null) ?? null,
       last_check_ok: (row["last_check_ok"] as boolean | null) ?? null,
       last_check_ip: (row["last_check_ip"] as string | null) ?? null,
@@ -266,16 +277,26 @@ export const recordProxyCheck = createServerFn({ method: "POST" })
       ...(changedIp ? { rotation_new_ip: changedIp } : {}),
       ...(outcome === "success" ? { rotation_changed_at: now } : {}),
     } : {};
-    let update = db.from("proxies").update({
+    const payload = {
       last_checked_at: now, last_check_ok: data.ok,
       last_check_ip: data.ip ?? null, last_check_latency_ms: data.latency ?? null,
       last_check_error: data.ok ? null : data.error ?? null,
       ...(data.ok && data.country ? { country: data.country } : exitIpChanged ? { country: null } : {}),
       ...(data.ok && data.city ? { city: data.city } : exitIpChanged ? { city: null } : {}),
+      ...(data.ok && data.timezone ? { geo_timezone: data.timezone } : exitIpChanged ? { geo_timezone: null } : {}),
       ...rotation,
-    } as never).eq("id", data.id).eq("team_id", data.teamId);
-    if (confirmsRotation || reconcilesRotation) update = update.eq("rotation_requested_at", current["rotation_requested_at"]).eq("rotation_status", current["rotation_status"]);
-    const { data: row, error } = await update.select("id").maybeSingle();
+    };
+    const save = async (value: Record<string, unknown>) => {
+      let update = db.from("proxies").update(value).eq("id", data.id).eq("team_id", data.teamId);
+      if (confirmsRotation || reconcilesRotation) update = update.eq("rotation_requested_at", current["rotation_requested_at"]).eq("rotation_status", current["rotation_status"]);
+      return update.select("id").maybeSingle();
+    };
+    let { data: row, error } = await save(payload);
+    if (missingGeoTimezone(error)) {
+      const legacyPayload: Record<string, unknown> = { ...payload };
+      delete legacyPayload["geo_timezone"];
+      ({ data: row, error } = await save(legacyPayload));
+    }
     if (error || !row) throw new Error("Проверка завершена, но результат не сохранён. Проверьте доступ и повторите попытку");
     return data.rotationRequestedAt ? { ok: true, staleRotation } : { ok: true };
   });

@@ -8,8 +8,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { fingerprintError } from "./profile-model";
 
-export function ProfileFingerprint({ value, onChange, disabled = false, country }: {
+export function ProfileFingerprint({ value, onChange, disabled = false, country, proxyTimezone, proxyIp }: {
   value: Fingerprint; onChange: (fp: Fingerprint) => void; disabled?: boolean; country?: string | null | undefined;
+  proxyTimezone?: string | null | undefined; proxyIp?: string | null | undefined;
 }) {
   const error = fingerprintError(value);
   const privacyModeId = useId();
@@ -23,11 +24,16 @@ export function ProfileFingerprint({ value, onChange, disabled = false, country 
   return <fieldset disabled={disabled} className="min-w-0 space-y-3 border-t border-border pt-4">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <h3 className="text-sm font-medium">Отпечаток {value.os === "macos" ? "macOS" : "Windows"}</h3>
-      <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => onChange({ ...generateFingerprint(country, value.os), ...(value.startUrl ? { startUrl: value.startUrl } : {}), webrtc: value.webrtc, aggressivePrivacyMode })}>
+      <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => onChange({ ...generateFingerprint(country, value.os), ...(proxyTimezone ? { timezone: proxyTimezone } : {}), ...(value.startUrl ? { startUrl: value.startUrl } : {}), webrtc: value.webrtc, aggressivePrivacyMode })}>
         <RefreshCw className="size-4" /> Новый отпечаток
       </Button>
     </div>
     <p className="text-xs text-muted-foreground">User-Agent и Client Hints согласуются с ОС профиля и установленным Chromium. Подмена шрифтов и шум WebGL не поддерживаются; Web Workers и отдельные фреймы могут отличаться. Отпечаток macOS на Windows не эмулирует настоящее устройство Mac и не гарантирует нераспознаваемость.</p>
+    {country && !proxyTimezone && <p className="text-xs text-muted-foreground">Часовой пояс IP пока не подтверждён свежей проверкой прокси. Проверьте прокси перед созданием профиля; пояс можно указать вручную.</p>}
+    {proxyTimezone && value.timezone !== proxyTimezone && <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-warning/50 p-3 text-xs text-warning">
+      <span>Часовой пояс профиля {value.timezone} отличается от геолокации проверенного IP{proxyIp ? ` ${proxyIp}` : ""}: {proxyTimezone}. Геолокация может быть неточной; смена пояса у действующего профиля может повлиять на сессии.</span>
+      <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => onChange({ ...value, timezone: proxyTimezone })}>Применить {proxyTimezone}</Button>
+    </div>}
     <div className="space-y-2 rounded-md border border-border p-3">
       <div className="flex items-center justify-between gap-3">
         <Label htmlFor={privacyModeId}>Агрессивная блокировка API</Label>

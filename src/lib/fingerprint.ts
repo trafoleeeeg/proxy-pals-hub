@@ -90,6 +90,21 @@ export const COUNTRY_LOCALES: Record<string, { language: string; timezone: strin
   IN: { language: "en-IN", timezone: "Asia/Kolkata", label: "Индия" },
 };
 
+/** Never offer an old mobile-proxy location as a current fingerprint setting. */
+export function verifiedProxyTimezone(proxy: {
+  last_check_ok: boolean | null;
+  last_checked_at: string | null;
+  last_check_ip: string | null;
+  geoTimezone: string | null;
+} | null | undefined, now = Date.now()): string | null {
+  if (!proxy?.last_check_ok || !proxy.last_check_ip || !proxy.geoTimezone) return null;
+  const checked = Date.parse(proxy.last_checked_at ?? "");
+  if (!Number.isFinite(checked) || checked > now + 5 * 60_000 || now - checked > 15 * 60_000) return null;
+  try { new Intl.DateTimeFormat("en", { timeZone: proxy.geoTimezone }); }
+  catch { return null; }
+  return proxy.geoTimezone;
+}
+
 function pick<T>(arr: readonly T[]): T {
   return arr[Math.floor(Math.random() * arr.length)] as T;
 }

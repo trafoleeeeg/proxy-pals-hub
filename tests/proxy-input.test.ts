@@ -157,20 +157,21 @@ describe("proxy identity and password actions", () => {
 
 describe("desktop proxy results", () => {
   test("requires a real IP on success and bounds latency and locale", () => {
-    expect(normalizeProxyCheck({ ok: true, ip: "2001:db8::1", latency: 0, country: "de", city: "Berlin" }))
-      .toEqual({ ok: true, ip: "2001:db8::1", latency: 0, country: "DE", city: "Berlin" });
+    expect(normalizeProxyCheck({ ok: true, ip: "2001:db8::1", latency: 0, country: "de", city: "Berlin", timezone: "Europe/Berlin" }))
+      .toEqual({ ok: true, ip: "2001:db8::1", latency: 0, country: "DE", city: "Berlin", timezone: "Europe/Berlin" });
     for (const value of [
       { ok: "true" }, { ok: true }, { ok: true, ip: "example.com" },
       { ok: true, ip: "1.2.3.4", latency: -1 }, { ok: false, latency: 120001 },
       { ok: false, latency: 1.5 }, { ok: false, latency: NaN },
       { ok: true, ip: "1.2.3.4", country: "USA" }, { ok: true, ip: "1.2.3.4", city: "x".repeat(121) },
+      { ok: true, ip: "1.2.3.4", timezone: "not/a_zone" }, { ok: true, ip: "1.2.3.4", timezone: "x".repeat(101) },
     ]) expect(() => normalizeProxyCheck(value)).toThrow();
     expect(normalizeProxyCheck({ ok: true, ip: "1.2.3.4", country: undefined, city: undefined }))
       .toEqual({ ok: true, ip: "1.2.3.4" });
   });
 
   test("discards raw errors and stale IP/locale from failed checks", () => {
-    const result = normalizeProxyCheck({ ok: false, ip: "1.2.3.4", country: "DE", city: "Berlin", error: "http://u:secret@host:80", latency: 25 });
+    const result = normalizeProxyCheck({ ok: false, ip: "1.2.3.4", country: "DE", city: "Berlin", timezone: "Europe/Berlin", error: "http://u:secret@host:80", latency: 25 });
     expect(result).toEqual({ ok: false, error: expect.any(String), latency: 25 });
     expect(result.error).not.toContain("secret");
   });

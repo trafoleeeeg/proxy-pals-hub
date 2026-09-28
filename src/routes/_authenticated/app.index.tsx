@@ -17,7 +17,7 @@ import { listProxies } from "@/lib/proxies.functions";
 import { listFolders } from "@/lib/folders.functions";
 import { usePermissions } from "@/lib/usePermissions";
 import { useDesktopProfileLifecycle } from "@/hooks/useDesktopProfileLifecycle";
-import { generateFingerprint, describeFingerprint, type Fingerprint, type FingerprintOS } from "@/lib/fingerprint";
+import { generateFingerprint, describeFingerprint, verifiedProxyTimezone, type Fingerprint, type FingerprintOS } from "@/lib/fingerprint";
 import { ProfileFingerprint } from "@/components/profile-fingerprint";
 import { ProfileCookies } from "@/components/profile-cookies";
 import { ProfileDragHandle, ProfileDragRow } from "@/components/profile-dnd";
@@ -286,7 +286,12 @@ function ProfilesWorkspace() {
       {editing && <fieldset disabled={!!busy} className="space-y-3">
         <Label className="grid gap-2">Название<Input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></Label>
         <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label>Папка</Label><Select value={editing.folder || MAIN_FOLDER} disabled={folderList.isPending} onValueChange={(value) => setEditing({ ...editing, folder: value })}><SelectTrigger aria-label="Папка профиля"><SelectValue placeholder="Выберите папку" /></SelectTrigger><SelectContent>{folderNames.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent></Select></div><Label className="grid gap-2">Метки через запятую<Input value={editing.tags} onChange={(e) => setEditing({ ...editing, tags: e.target.value })} /></Label></div>
-        <div className="space-y-2"><Label>Прокси</Label><Select disabled={!!busy || proxies.isPending || proxies.isError} value={editing.proxyId} onValueChange={(proxyId) => setEditing({ ...editing, proxyId })}><SelectTrigger aria-label="Прокси профиля"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">Без прокси</SelectItem>{(proxies.data ?? []).map((proxy) => <SelectItem key={proxy.id} value={proxy.id}>{proxy.label} · {proxy.host}:{proxy.port}</SelectItem>)}</SelectContent></Select></div>
+        <div className="space-y-2"><Label>Прокси</Label><Select disabled={!!busy || proxies.isPending || proxies.isError} value={editing.proxyId} onValueChange={(proxyId) => {
+          const selected = proxies.data?.find((proxy) => proxy.id === proxyId);
+          const timezone = verifiedProxyTimezone(selected);
+          setEditing({ ...editing, proxyId, fingerprint: !editing.id && timezone
+            ? { ...editing.fingerprint, timezone } : editing.fingerprint });
+        }}><SelectTrigger aria-label="Прокси профиля"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">Без прокси</SelectItem>{(proxies.data ?? []).map((proxy) => <SelectItem key={proxy.id} value={proxy.id}>{proxy.label} · {proxy.host}:{proxy.port}</SelectItem>)}</SelectContent></Select></div>
         <Label className="grid gap-2">Заметки<Textarea rows={5} value={editing.notes} onChange={(e) => setEditing({ ...editing, notes: e.target.value })} /></Label>
         {editing.id && owner && <div className="rounded-md border border-border bg-secondary/30 p-3 text-sm">
           <p className="font-medium">Cookies профиля</p>
@@ -315,7 +320,10 @@ function ProfilesWorkspace() {
           {cookiePreview?.error && <p role="alert" className="text-xs text-destructive">Формат cookies не распознан. Нужен JSON-массив, объект с полем cookies или файл Netscape.</p>}
           {cookiePreview && !cookiePreview.error && <p role="status" className="text-xs text-muted-foreground">Распознано: {cookiePreview.count} · истекли: {cookiePreview.expired} · пригодны для установки: {cookiePreview.count - cookiePreview.expired}{cookiePreview.count === cookiePreview.expired ? ". Нужны действующие cookies." : ""}</p>}
         </div>}
-        <ProfileFingerprint value={editing.fingerprint} onChange={(fingerprint) => setEditing({ ...editing, fingerprint })} disabled={!!busy} country={proxies.data?.find((p) => p.id === editing.proxyId)?.country} />
+        <ProfileFingerprint value={editing.fingerprint} onChange={(fingerprint) => setEditing({ ...editing, fingerprint })} disabled={!!busy}
+          country={proxies.data?.find((p) => p.id === editing.proxyId)?.country}
+          proxyTimezone={verifiedProxyTimezone(proxies.data?.find((p) => p.id === editing.proxyId))}
+          proxyIp={proxies.data?.find((p) => p.id === editing.proxyId)?.last_check_ip} />
       </fieldset>}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       <DialogFooter><Button variant="outline" disabled={!!busy} onClick={() => setEditing(null)}>Отмена</Button><Button disabled={!(editing?.id ? canEdit : canCreate) || !!busy || !editing?.name.trim() || editingCookiesBytes > MAX_COOKIE_IMPORT_BYTES || !!cookiePreview?.error || !!(cookiePreview && cookiePreview.count === cookiePreview.expired) || !!(editing && fingerprintError(editing.fingerprint)) || !!(editing?.id && locked(editing.id))} onClick={save}>{busy === "save" ? "Сохранение…" : "Сохранить"}</Button></DialogFooter>

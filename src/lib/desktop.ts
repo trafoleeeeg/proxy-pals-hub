@@ -71,6 +71,7 @@ export type UmbraBridge = {
       ip?: string;
       country?: string;
       city?: string;
+      timezone?: string;
       latency?: number;
       error?: string;
     };

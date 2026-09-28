@@ -57,7 +57,7 @@ function fixture() {
     team_members: [{ team_id: teamId, user_id: userId, role: "owner" }],
     proxies: [{
       id, team_id: teamId, label: "Proxy", protocol: "http", host: "proxy.example", port: 8080,
-      username: "u", password_enc: "existing-ciphertext", country: "DE", city: "Berlin",
+      username: "u", password_enc: "existing-ciphertext", country: "DE", city: "Berlin", geo_timezone: "Europe/Berlin",
       last_checked_at: "2026-09-14T00:00:00Z", last_check_ok: true, last_check_ip: "1.2.3.4",
       last_check_latency_ms: 15, last_check_error: null,
     }],
@@ -66,7 +66,7 @@ function fixture() {
   const calls: Query[] = [];
   const state = {
     tables, calls,
-    error: undefined as { table: string; action: string; code: string } | undefined,
+    error: undefined as { table: string; action: string; code: string; message?: string; columnsInclude?: string; payloadKey?: string; once?: boolean } | undefined,
     missingMutation: false,
     context: { userId, supabase: { from } },
   };
@@ -87,8 +87,12 @@ function fixture() {
     };
     function execute(single: boolean) {
       calls.push(structuredClone(query));
-      if (state.error?.table === table && state.error.action === query.action) {
-        return { data: null, error: { code: state.error.code, message: "private-database-details" } };
+      if (state.error?.table === table && state.error.action === query.action &&
+          (!state.error.columnsInclude || query.columns.includes(state.error.columnsInclude)) &&
+          (!state.error.payloadKey || Object.hasOwn(query.payload ?? {}, state.error.payloadKey))) {
+        const error = { code: state.error.code, message: state.error.message ?? "private-database-details" };
+        if (state.error.once) state.error = undefined;
+        return { data: null, error };
       }
       let selected = tables[table]!.filter((row) => query.filters.every(([column, value]) => row[column] === value));
       if (query.action !== "select" && state.missingMutation) selected = [];
@@ -187,6 +191,15 @@ describe("proxy persistence and secret boundaries", () => {
     expect(JSON.stringify(rows)).not.toContain("existing-ciphertext");
     expect(f.calls.find((call) => call.table === "proxies")!.filters).toContainEqual(["team_id", teamId]);
     expect(api.decryptSecret).not.toHaveBeenCalled();
+  });
+
+  test("proxy listing still works before the additive timezone migration", async () => {
+    const f = fixture();
+    f.error = { table: "proxies", action: "select", code: "42703", message: "column geo_timezone does not exist", columnsInclude: "geo_timezone", once: true };
+    const rows = await invoke("listProxies", { teamId }, f);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].geoTimezone).toBeNull();
+    expect(f.calls.filter((call) => call.table === "proxies" && call.action === "select")).toHaveLength(2);
   });
 
   test.each([undefined, "preserve", "clear", "replace"])("save password action %s changes only the intended secret", async (action) => {
@@ -334,19 +347,30 @@ describe("proxy check persistence and deletion", () => {
     const f = fixture();
     await invoke("recordProxyCheck", { ...target, ok: true, ip: "2001:db8::1", latency: 0, ...locale }, f);
     const update = mutations(f)[0]!;
-    expect(update.payload).toMatchObject({ country: null, city: null });
-    expect(f.tables.proxies[0]).toMatchObject({ country: null, city: null, last_check_ok: true, last_check_ip: "2001:db8::1", last_check_latency_ms: 0, last_check_error: null });
+    expect(update.payload).toMatchObject({ country: null, city: null, geo_timezone: null });
+    expect(f.tables.proxies[0]).toMatchObject({ country: null, city: null, geo_timezone: null, last_check_ok: true, last_check_ip: "2001:db8::1", last_check_latency_ms: 0, last_check_error: null });
     expect(update.filters).toContainEqual(["team_id", teamId]);
     expect(update.filters).toContainEqual(["id", id]);
   });
 
   test("success updates supplied locale and failure cannot overwrite locale or expose raw errors", async () => {
     const f = fixture();
-    await invoke("recordProxyCheck", { ...target, ok: true, ip: "1.2.3.4", country: "fr", city: "Paris" }, f);
-    expect(f.tables.proxies[0]).toMatchObject({ country: "FR", city: "Paris" });
-    await invoke("recordProxyCheck", { ...target, ok: false, country: "US", city: "Stale", error: "http://u:private@host:80" }, f);
-    expect(f.tables.proxies[0]).toMatchObject({ country: "FR", city: "Paris", last_check_ok: false, last_check_ip: null });
+    await invoke("recordProxyCheck", { ...target, ok: true, ip: "1.2.3.4", country: "fr", city: "Paris", timezone: "Europe/Paris" }, f);
+    expect(f.tables.proxies[0]).toMatchObject({ country: "FR", city: "Paris", geo_timezone: "Europe/Paris" });
+    await invoke("recordProxyCheck", { ...target, ok: false, country: "US", city: "Stale", timezone: "America/New_York", error: "http://u:private@host:80" }, f);
+    expect(f.tables.proxies[0]).toMatchObject({ country: "FR", city: "Paris", geo_timezone: "Europe/Paris", last_check_ok: false, last_check_ip: null });
     expect(JSON.stringify(mutations(f))).not.toContain("private");
+  });
+
+  test("proxy checks still save before the additive timezone migration", async () => {
+    const f = fixture();
+    f.error = { table: "proxies", action: "update", code: "PGRST204", message: "Could not find the geo_timezone column", payloadKey: "geo_timezone", once: true };
+    await invoke("recordProxyCheck", { ...target, ok: true, ip: "1.2.3.4", timezone: "Europe/Paris" }, f);
+    const updates = mutations(f);
+    expect(updates).toHaveLength(2);
+    expect(updates[0]!.payload).toHaveProperty("geo_timezone", "Europe/Paris");
+    expect(updates[1]!.payload).not.toHaveProperty("geo_timezone");
+    expect(f.tables.proxies[0]).toMatchObject({ last_check_ok: true, last_check_ip: "1.2.3.4" });
   });
 
   test("invalid check results never reach the database", async () => {

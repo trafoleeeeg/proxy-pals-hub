@@ -43,6 +43,7 @@ export type ProxyCheckResult = {
   ip?: string | undefined;
   country?: string | undefined;
   city?: string | undefined;
+  timezone?: string | undefined;
   latency?: number | undefined;
   error?: string | undefined;
 };
@@ -288,9 +289,14 @@ export function normalizeProxyCheck(value: unknown): ProxyCheckResult {
   const country = string(data["country"], 2, "Некорректная страна проверки", true).toUpperCase();
   if (country && !/^[A-Z]{2}$/.test(country)) throw new Error("Некорректная страна проверки");
   const city = string(data["city"], 120, "Некорректный город проверки", true);
+  const timezone = string(data["timezone"], 100, "Некорректный часовой пояс проверки", true);
+  if (timezone) {
+    try { new Intl.DateTimeFormat("en", { timeZone: timezone }); }
+    catch { throw new Error("Некорректный часовой пояс проверки"); }
+  }
   // IPC/network errors may contain a credential-bearing URL. Never persist their raw text.
   return data["ok"]
-    ? { ok: true, ip: data["ip"] as string, ...(country ? { country } : {}), ...(city ? { city } : {}), ...(latency !== undefined ? { latency: latency as number } : {}) }
+    ? { ok: true, ip: data["ip"] as string, ...(country ? { country } : {}), ...(city ? { city } : {}), ...(timezone ? { timezone } : {}), ...(latency !== undefined ? { latency: latency as number } : {}) }
     : { ok: false, error: "Прокси не прошёл проверку подключения", ...(latency !== undefined ? { latency: latency as number } : {}) };
 }
 

@@ -1,9 +1,10 @@
 import("//electron/build/args/testing.gn")
 
-# Local validation binary only; never distribute this component build.
+# Local validation binary only; not a release configuration.
 target_cpu = "x64"
-is_component_build = true
-enable_resource_allowlist_generation = false
+# Keep Electron's tested non-component default; Abseil's Chromium DLL export
+# list is incompatible with Electron's libc++ ABI configuration.
+is_component_build = false
 symbol_level = 0
 blink_symbol_level = 0
 v8_symbol_level = 0

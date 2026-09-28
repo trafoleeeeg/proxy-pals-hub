@@ -3,6 +3,7 @@ import("//electron/build/args/testing.gn")
 # Local validation binary only; never distribute this component build.
 target_cpu = "x64"
 is_component_build = true
+enable_resource_allowlist_generation = false
 symbol_level = 0
 blink_symbol_level = 0
 v8_symbol_level = 0

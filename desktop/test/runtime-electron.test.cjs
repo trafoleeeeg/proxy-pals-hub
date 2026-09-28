@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const { spawn } = require("node:child_process");
+const { spawnBrowser } = require("../runtime/browser-pipe.cjs");
 const { testCertificate } = require("./runtime-proxy-fixtures.cjs");
 
 async function runNativeHarness(t, storageMode = "native") {
@@ -25,7 +25,7 @@ async function runNativeHarness(t, storageMode = "native") {
     const result = await new Promise((resolve, reject) => {
       const env = { ...process.env, UMBRA_RUNTIME_TEST_DIR: directory, UMBRA_RUNTIME_TEST_PHASE: phase, UMBRA_RUNTIME_TEST_STORAGE: storageMode, NODE_EXTRA_CA_CERTS: certificate.certFile };
       delete env.ELECTRON_RUN_AS_NODE;
-      const child = spawn(electron, [path.join(__dirname, "runtime-electron-harness.cjs")], { env, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+      const child = spawnBrowser(electron, [path.join(__dirname, "runtime-electron-harness.cjs")], { env });
       let output = "";
       // This isolated harness uses local fixture credentials only.
       child.stdout.on("data", (chunk) => {

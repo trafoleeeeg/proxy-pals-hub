@@ -10,6 +10,7 @@ const { createPrivacyStore, privacyOrigin } = require("./privacy-policy.cjs");
 const { sanitizeBrowserSettings } = require("./browser-settings.cjs");
 const { SAFE_WEBRTC } = require("./leak-check.cjs");
 const { createFaviconLoader } = require("./favicons.cjs");
+const { protectBackgroundWorkers } = require("./background-workers.cjs");
 
 // Сообщения об ошибках запуска показываются пользователю, поэтому они переводятся
 // на русский язык на границе клиента, без утечки URL и значений cookies.
@@ -41,6 +42,7 @@ function createProfileRuntime(electron, options = {}) {
   const createBrowser = options.createBrowser || createProfileBrowser;
   const setupProxy = options.setupProxy || createRuntimeProxy;
   const configureFingerprint = options.applyFingerprint || applyFingerprint;
+  const configureBackgroundWorkers = options.protectBackgroundWorkers || protectBackgroundWorkers;
   const profiles = new Map();
   let shuttingDown = false;
   let store;
@@ -665,11 +667,19 @@ function createProfileRuntime(electron, options = {}) {
         const defaultUA = entry.ses.getUserAgent().replace(/\s(?:Electron|Umbra)\/[^ ]+/g, "");
         entry.fp = normalizeFingerprint(payload.fingerprint || {}, defaultUA);
         entry.fp.hardwarePermissions = await privacyStore().readPermissions(id);
+        entry.backgroundWorkers = await configureBackgroundWorkers(entry.ses, entry.fp, { onFailure: (message) => {
+          entry.lastError = message;
+          blockSession(entry.ses);
+          void closeProfileWindow(entry.profileId).then(
+            () => app?.emit?.("umbra:profile-protection-failed", { saved: true }),
+            () => app?.emit?.("umbra:profile-protection-failed", { saved: false }),
+          );
+        } });
         // Remove only background worker registrations before opening the network
         // gate. Old workers must not execute with a revoked/missing exception.
         // Cookies, localStorage, IndexedDB and cache storage remain intact.
         if (entry.fp.aggressivePrivacyMode && entry.ses.clearStorageData) await entry.ses.clearStorageData({ storages: ["serviceworkers"] });
-        if (entry.ses.webRequest.onBeforeSendHeaders) installSessionPrivacy(entry.ses, entry.fp);
+        if (entry.ses.webRequest.onBeforeSendHeaders) installSessionPrivacy(entry.ses, entry.fp, () => entry.backgroundWorkers.isActive());
         entry.ses.setUserAgent(entry.fp.userAgent, entry.fp.languages.join(","));
         // Warm the browser chrome while the authenticated proxy and cookies are
         // being prepared. Fingerprint application still completes before any
@@ -748,6 +758,7 @@ function createProfileRuntime(electron, options = {}) {
         entry.browser?.destroy();
         if (warmedBrowser && warmedBrowser !== entry.browser) warmedBrowser.destroy();
         if (entry.ses) blockSession(entry.ses);
+        await entry.backgroundWorkers?.stop().catch(() => {});
         if (entry.proxyRuntime) await entry.proxyRuntime.dispose().catch(() => {});
         if (!entry.closingRequested) profiles.delete(id);
         // Errors from Electron can include navigation URLs and cookie values.
@@ -779,6 +790,7 @@ function createProfileRuntime(electron, options = {}) {
        uninstallResourceRecovery(entry);
       if (entry.ses) {
         blockSession(entry.ses);
+        await entry.backgroundWorkers?.stop();
         for (const win of entry.windows) if (!win.isDestroyed()) win.webContents.stop();
         await Promise.race([
           entry.ses.closeAllConnections(),

@@ -10,7 +10,7 @@ function hasCapability(fp, origin, capability) {
   return fp.hardwareOrigins?.includes(origin) === true; // Legacy local policy.
 }
 
-function installSessionPrivacy(ses, fp) {
+function installSessionPrivacy(ses, fp, canSend = () => true) {
   const identity = userAgentOverride(fp);
   const meta = identity.userAgentMetadata;
   const quoted = (value) => JSON.stringify(String(value));
@@ -22,6 +22,7 @@ function installSessionPrivacy(ses, fp) {
     "sec-ch-ua-bitness": quoted(meta.bitness), "sec-ch-ua-model": '""', "sec-ch-ua-mobile": "?0", "sec-ch-ua-wow64": "?0",
   } : {};
   ses.webRequest.onBeforeSendHeaders((details, callback) => {
+    if (!canSend()) { callback({ cancel: true }); return; }
     const headers = { ...details.requestHeaders };
     const offeredHints = [];
     for (const key of Object.keys(headers)) {
@@ -136,13 +137,12 @@ async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
     let timer;
     try {
       return await Promise.race([wc.debugger.sendCommand(method, params, id), new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error("Privacy setup timeout")), 4000); timer.unref?.();
+        timer = setTimeout(() => reject(new Error("Privacy setup timeout: " + method)), 4000); timer.unref?.();
       })]);
     } finally { clearTimeout(timer); }
   };
-  // Shared/service workers cannot be configured reliably before execution in
-  // this Electron version. The strict document policy blocks their creation;
-  // only explicit site exceptions can use their native implementation.
+  // Shared/service workers belong to a Session, not a tab. The browser-target
+  // controller handles them; attaching here as well causes startup deadlocks.
   const autoAttach = (id) => send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true,
     filter: [{ type: "worker" }, { type: "iframe" }, { type: "page" }, { exclude: true }],
   }, id);
@@ -153,7 +153,7 @@ async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
     if (page) {
       await send("Page.enable", {}, id);
       await send("Emulation.setTimezoneOverride", { timezoneId: fp.timezone }, id);
-      await send("Emulation.setLocaleOverride", { locale: fp.languages[0] }, id);
+      await applyLocale(send, fp.languages[0], id);
       await send("Emulation.setHardwareConcurrencyOverride", { hardwareConcurrency: fp.hardwareConcurrency }, id);
       // OOPIFs inherit top-level device metrics. CDP rejects this method on
       // iframe targets; Screen prototypes cover their JavaScript accessors.
@@ -180,7 +180,7 @@ async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
     await send("Page.enable");
     await Promise.all([
       send("Emulation.setUserAgentOverride", userAgentOverride(fp)),
-      send("Emulation.setLocaleOverride", { locale: fp.languages[0] }),
+      applyLocale(send, fp.languages[0]),
       send("Emulation.setTimezoneOverride", { timezoneId: fp.timezone }),
       send("Emulation.setHardwareConcurrencyOverride", { hardwareConcurrency: fp.hardwareConcurrency }),
       // Preserve viewport size, but do not expose the physical host's DPI.
@@ -195,8 +195,10 @@ async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
     if (wc.debugger.isAttached()) wc.debugger.detach();
     throw new Error("Unable to apply fingerprint before navigation");
   }
+  const backgroundProtected = require("./background-workers.cjs").backgroundWorkersProtected(wc.session);
   return {
     engine: "stock-electron", chromiumVersion: process.versions.chrome || null,
+    backgroundWorkers: backgroundProtected ? "browser-target-before-execution" : "unprotected",
     uaLocaleTimezone: "cdp", documentOverrides: "main-world-javascript",
     screenMetrics: "cdp-screen-and-dpr", hardwareConcurrency: "cdp-and-prototype",
     webRTCPolicy: wc.getWebRTCIPHandlingPolicy(),
@@ -204,8 +206,22 @@ async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
     audioNoise: fp.aggressivePrivacyMode === false ? "disabled-in-normal-mode" : fp.audioNoise ? "document-analyser-and-copyFromChannel-only" : "disabled",
     unsupportedControls: ["fontsPreset", "webglNoise"],
     hardwarePolicy: fp.aggressivePrivacyMode === false ? "normal-native-hardware-apis" : "blocked-by-default-with-explicit-local-origin-exceptions",
-    limitations: ["No custom browser kernel or undetectability guarantee", fp.aggressivePrivacyMode === false ? "Normal mode exposes native GPU, canvas, audio, fonts and background workers; they can reveal host hardware and disagree with the declared fingerprint" : "Shared/service workers are blocked by default; site exceptions expose their native identity", "Compatibility exceptions expose native GPU, audio and canvas characteristics", "Installed fonts can still affect CSS layout", "JavaScript privacy restrictions are observable", "Native WebRTC policy restricts non-proxied UDP", "Popup opener and form POST are unsupported", "Navigation history is not restored after restart"],
+    limitations: ["No custom browser kernel or undetectability guarantee", backgroundProtected ? "Unexpected service-worker process loss stops the profile; reopen it to restore protection" : "Shared/service workers are not protected by the page debugger alone", "Normal mode and compatibility exceptions expose native GPU, audio, canvas and font characteristics", "Installed fonts can still affect CSS layout", "JavaScript privacy restrictions are observable", "Native WebRTC policy restricts non-proxied UDP", "Popup opener and form POST are unsupported", "Navigation history is not restored after restart"],
   };
 }
 
-module.exports = { normalizeFingerprint, applyFingerprint, userAgentOverride, installSessionPrivacy, hasCapability };
+async function applyLocale(send, locale, id) {
+  try { await send("Emulation.setLocaleOverride", { locale }, id); }
+  catch (error) {
+    // Chromium's locale controller is renderer-wide and rejects a second
+    // owner, even when a worker/page in this profile already set that locale.
+    // Accept only an observed match, never an unchecked protocol failure.
+    const result = await send("Runtime.evaluate", {
+      expression: `Intl.DateTimeFormat().resolvedOptions().locale === Intl.DateTimeFormat(${JSON.stringify(locale)}).resolvedOptions().locale`,
+      returnByValue: true,
+    }, id);
+    if (result.exceptionDetails || result.result?.value !== true) throw error;
+  }
+}
+
+module.exports = { normalizeFingerprint, applyFingerprint, userAgentOverride, installSessionPrivacy, hasCapability, applyLocale };

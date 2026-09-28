@@ -1,11 +1,40 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const vm = require("node:vm");
-const { normalizeFingerprint, applyFingerprint, userAgentOverride } = require("../runtime/fingerprint.cjs");
+const { normalizeFingerprint, applyFingerprint, userAgentOverride, applyLocale, installSessionPrivacy } = require("../runtime/fingerprint.cjs");
 
 const WINDOWS_UA = "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
 const CHROME = "150.0.1234.56";
 const fingerprint = (extra = {}) => normalizeFingerprint({ userAgent: WINDOWS_UA, ...extra }, undefined, CHROME);
+
+test("renderer-wide locale conflicts require a verified match, never silently degrade", async () => {
+  for (const value of [true, false, undefined]) {
+    const send = async (method, args, id) => {
+      assert.equal(id, "worker-session");
+      if (method === "Emulation.setLocaleOverride") throw new Error("Locale already owned");
+      assert.equal(method, "Runtime.evaluate");
+      assert.match(args.expression, /fr-CA/);
+      return { result: { value } };
+    };
+    if (value === true) await applyLocale(send, "fr-CA", "worker-session");
+    else await assert.rejects(applyLocale(send, "fr-CA", "worker-session"), /Locale already owned/);
+  }
+});
+
+test("revoked worker protection blocks requests independently of the proxy request gate", () => {
+  let listener;
+  let active = true;
+  const ses = { webRequest: { onBeforeSendHeaders: (handler) => { listener = handler; } } };
+  installSessionPrivacy(ses, fingerprint(), () => active);
+  const request = () => {
+    let response;
+    listener({ url: "https://example.test/", requestHeaders: {} }, (value) => { response = value; });
+    return response;
+  };
+  assert.equal(request().requestHeaders["User-Agent"], fingerprint().userAgent);
+  active = false;
+  assert.deepEqual(request(), { cancel: true });
+});
 
 test("Windows UA and client hints match the actual Chromium runtime", () => {
   const fp = fingerprint();

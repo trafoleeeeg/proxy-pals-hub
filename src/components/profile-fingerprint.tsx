@@ -41,7 +41,7 @@ export function ProfileFingerprint({ value, onChange, disabled = false, country,
       </div>
       <p className="text-xs text-muted-foreground">{aggressivePrivacyMode
         ? "Строгий режим ограничивает аппаратные API. Сайты могут заметить недоступность функций."
-        : "Обычный режим снимает агрессивную блокировку API. SharedWorker и ServiceWorker могут видеть системный отпечаток Electron; GPU, Canvas, аудио и шрифты тоже могут раскрыть реальное устройство. Согласованная подмена уровня Octo здесь не гарантируется."}</p>
+        : "Обычный режим снимает агрессивную блокировку API. GPU, Canvas, аудио и шрифты могут раскрывать реальное оборудование. Защита фоновых процессов требует обновлённого настольного клиента; при потере защиты профиль останавливается с сохранением данных."}</p>
     </div>
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       <div className="grid gap-2"><Label htmlFor="profile-os">Операционная система</Label><Select disabled={disabled} value={value.os} onValueChange={(os) => changeOS(os as FingerprintOS)}>

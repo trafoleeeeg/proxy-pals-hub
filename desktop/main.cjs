@@ -1,4 +1,6 @@
+if (require("./runtime/browser-pipe.cjs").superviseBrowser()) return;
 const { app, BrowserWindow, ipcMain, session, shell, dialog, safeStorage, Notification } = require("electron");
+const { initializeBackgroundWorkers, allowBackgroundWorkers } = require("./runtime/background-workers.cjs");
 const path = require("node:path");
 const { autoUpdater } = require("electron-updater");
 const {
@@ -227,9 +229,11 @@ else {
       mainWindow.focus();
     }
   });
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    await initializeBackgroundWorkers();
     outbox = createSessionOutbox(path.join(app.getPath("userData"), "session-outbox"), safeStorage);
     const panelSession = session.fromPartition("persist:umbra-app");
+    await allowBackgroundWorkers(panelSession);
     panelSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
     panelSession.setPermissionCheckHandler(() => false);
     updates = createUpdateController({
@@ -247,6 +251,18 @@ else {
       },
     });
     createWindow();
+    app.on("umbra:profile-protection-failed", ({ saved }) => {
+      const body = saved
+        ? "Защита фонового процесса потеряна. Профиль остановлен, локальные данные сохранены. Откройте профиль снова."
+        : "Защита фонового процесса потеряна. Сеть профиля заблокирована, но сохранение не завершено. Повторите закрытие профиля; не завершайте Umbra принудительно.";
+      if (Notification.isSupported()) {
+        const notice = new Notification({ title: "Umbra — защитная остановка профиля", body });
+        notice.on("click", () => mainWindow?.focus());
+        notice.show();
+      } else {
+        void dialog.showMessageBox({ type: "warning", title: "Umbra", message: body }).catch(() => {});
+      }
+    });
     app.on("umbra:browser-settings-changed", (settings) => send("umbra:browser-settings-changed", settings));
     app.on("umbra:manage-extensions", () => {
       if (!mainWindow || mainWindow.isDestroyed()) return;

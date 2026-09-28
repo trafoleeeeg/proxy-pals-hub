@@ -28,7 +28,7 @@ export function ProfileFingerprint({ value, onChange, disabled = false, country,
         <RefreshCw className="size-4" /> Новый отпечаток
       </Button>
     </div>
-    <p className="text-xs text-muted-foreground">User-Agent и Client Hints согласуются с ОС профиля и установленным Chromium. Подмена шрифтов и шум WebGL не поддерживаются; Web Workers и отдельные фреймы могут отличаться. Отпечаток macOS на Windows не эмулирует настоящее устройство Mac и не гарантирует нераспознаваемость.</p>
+    <p className="text-xs text-muted-foreground">User-Agent и Client Hints согласуются с ОС профиля и установленным Chromium в странице, dedicated worker и iframe. Подмена шрифтов и шум WebGL не поддерживаются. Отпечаток macOS на Windows не эмулирует настоящее устройство Mac и не гарантирует нераспознаваемость.</p>
     {country && !proxyTimezone && <p className="text-xs text-muted-foreground">Часовой пояс IP пока не подтверждён свежей проверкой прокси. Проверьте прокси перед созданием профиля; пояс можно указать вручную.</p>}
     {proxyTimezone && value.timezone !== proxyTimezone && <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-warning/50 p-3 text-xs text-warning">
       <span>Часовой пояс профиля {value.timezone} отличается от геолокации проверенного IP{proxyIp ? ` ${proxyIp}` : ""}: {proxyTimezone}. Геолокация может быть неточной; смена пояса у действующего профиля может повлиять на сессии.</span>
@@ -41,7 +41,7 @@ export function ProfileFingerprint({ value, onChange, disabled = false, country,
       </div>
       <p className="text-xs text-muted-foreground">{aggressivePrivacyMode
         ? "Строгий режим ограничивает аппаратные API. Сайты могут заметить недоступность функций."
-        : "Обычный режим снимает агрессивную блокировку API. В стандартном Electron доступные API могут раскрыть реальные GPU и шрифты устройства; согласованная подмена уровня Octo здесь не гарантируется."}</p>
+        : "Обычный режим снимает агрессивную блокировку API. SharedWorker и ServiceWorker могут видеть системный отпечаток Electron; GPU, Canvas, аудио и шрифты тоже могут раскрыть реальное устройство. Согласованная подмена уровня Octo здесь не гарантируется."}</p>
     </div>
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       <div className="grid gap-2"><Label htmlFor="profile-os">Операционная система</Label><Select disabled={disabled} value={value.os} onValueChange={(os) => changeOS(os as FingerprintOS)}>

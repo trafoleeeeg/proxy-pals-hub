@@ -31,10 +31,11 @@ function installSessionPrivacy(ses, fp) {
         if (!hasCapability(fp, origin, "workers")) { callback({ cancel: true }); return; }
       }
       if (lower.startsWith("sec-ch-ua")) { offeredHints.push(lower); delete headers[key]; }
-      if (["user-agent", "accept-language"].includes(lower)) delete headers[key];
+      if (["user-agent", "accept-language", "dnt"].includes(lower)) delete headers[key];
     }
     headers["User-Agent"] = fp.userAgent;
     headers["Accept-Language"] = fp.languages.map((language, i) => i ? `${language};q=${Math.max(0.1, 1 - i / 10).toFixed(1)}` : language).join(",");
+    if (fp.doNotTrack) headers.DNT = "1";
     for (const key of offeredHints) if (hints[key]) headers[key] = hints[key];
     callback({ requestHeaders: headers });
   });

@@ -17,7 +17,10 @@ async function fixture(t) {
     if (req.url === "/slow") return;
     if (req.url === "/large") return res.end("x".repeat(100000));
     if (req.url === "/redirect") { res.writeHead(302, { location: "http://localhost/unsafe" }); return res.end(); }
-    res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify({ ip: "203.0.113.7" }));
+    res.setHeader("Content-Type", "application/json");
+    if (req.url === "/geo") return res.end(JSON.stringify({ ip: "203.0.113.7", country_code: "US", city: "Memphis", timezone: "America/Chicago" }));
+    if (req.url === "/geo-mismatch") return res.end(JSON.stringify({ ip: "203.0.113.8", country_code: "US", city: "New York", timezone: "America/New_York" }));
+    res.end(JSON.stringify({ ip: "203.0.113.7" }));
   });
   const listening = await listen(origin);
   t.after(async () => { await listening.close(); await fs.rm(directory, { recursive: true, force: true }); });
@@ -78,6 +81,31 @@ test("checker bounds response size/time, rejects redirects and frees stalled SOC
   assert.equal(result.ok, false); assert.ok(result.latency < 2500);
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(stalled.sockets.size, 0, "pending upstream handshake must be cancelled");
+});
+
+test("checker obtains timezone through the same proxy and ignores unverified geolocation", async (t) => {
+  const f = await fixture(t);
+  const upstream = await mockSocks(f.port);
+  t.after(() => upstream.close());
+  const proxy = { protocol: "socks5", host: "127.0.0.1", port: upstream.port, username: "fixture-user", password: "fixture-pass" };
+  const session = { fromPartition: mockElectronSession };
+  const base = `https://fixture.test:${f.port}`;
+  const good = createProxyChecker({ net: f.net, session }, { endpoints: [`${base}/`], geoEndpoint: () => `${base}/geo`, timeoutMs: 5000 });
+  const checked = await good(proxy);
+  assert.equal(checked.ok, true);
+  assert.equal(checked.ip, "203.0.113.7");
+  assert.equal(checked.country, "US");
+  assert.equal(checked.city, "Memphis");
+  assert.equal(checked.timezone, "America/Chicago");
+  assert.ok(Number.isInteger(checked.latency));
+  assert.ok(upstream.observations.destinations.every((item) => item.host === "fixture.test"));
+  const mismatch = createProxyChecker({ net: f.net, session }, { endpoints: [`${base}/`], geoEndpoint: () => `${base}/geo-mismatch`, timeoutMs: 5000 });
+  const result = await mismatch(proxy);
+  assert.equal(result.ok, true);
+  assert.equal(result.ip, "203.0.113.7");
+  assert.equal(result.timezone, undefined);
+  const unavailable = createProxyChecker({ net: f.net, session }, { endpoints: [`${base}/`], geoEndpoint: () => `${base}/redirect`, timeoutMs: 5000 });
+  assert.equal((await unavailable(proxy)).ok, true, "geolocation failure must not break a working proxy");
 });
 
 test("untrusted HTTPS upstream certificate is rejected with no direct fallback", async (t) => {

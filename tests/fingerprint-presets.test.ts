@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { generateFingerprint, describeFingerprint } from "../src/lib/fingerprint";
+import { generateFingerprint, describeFingerprint, verifiedProxyTimezone } from "../src/lib/fingerprint";
 import { fingerprintSchema } from "../src/lib/server-validation";
 import { fingerprintError } from "../src/components/profile-model";
 
@@ -45,5 +45,14 @@ describe("desktop fingerprint presets", () => {
     expect(fingerprintError({ ...mac, userAgent: generateFingerprint().userAgent })).not.toBeNull();
     expect(fingerprintSchema.safeParse({ ...mac, architecture: "invalid" }).success).toBe(false);
     expect(fingerprintSchema.safeParse({ ...mac, osVersion: "not a version" }).success).toBe(false);
+  });
+  test("timezone suggestion requires a fresh successful check for the same proxy IP", () => {
+    const now = Date.parse("2026-09-29T12:00:00Z");
+    const proxy = { last_check_ok: true, last_checked_at: "2026-09-29T11:55:00Z", last_check_ip: "107.77.234.56", geoTimezone: "America/Chicago" };
+    expect(verifiedProxyTimezone(proxy, now)).toBe("America/Chicago");
+    expect(verifiedProxyTimezone({ ...proxy, last_checked_at: "2026-09-29T11:30:00Z" }, now)).toBeNull();
+    expect(verifiedProxyTimezone({ ...proxy, last_check_ip: null }, now)).toBeNull();
+    expect(verifiedProxyTimezone({ ...proxy, last_check_ok: false }, now)).toBeNull();
+    expect(verifiedProxyTimezone({ ...proxy, geoTimezone: "not/a-timezone" }, now)).toBeNull();
   });
 });

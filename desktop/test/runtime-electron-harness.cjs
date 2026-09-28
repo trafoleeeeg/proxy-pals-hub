@@ -220,7 +220,7 @@ if (process.versions.electron) {
     assert.equal(await runtime.refreshExtensions(), 0);
     assert.equal(runtime.getRunningProfile(ID).diagnostics.extensions.loaded, 1);
     const first = await win.webContents.executeJavaScript("firstDocument");
-    assert.ok(first.ua.includes(`Chrome/${process.versions.chrome}`));
+    assert.ok(first.ua.includes(`Chrome/${process.versions.chrome.split(".")[0]}.0.0.0`));
     assert.ok(first.ua.includes("Windows NT 10.0"));
     assert.equal(first.language, "de-DE"); assert.equal(first.timezone, "Asia/Tokyo"); assert.equal(first.offset, -540);
     assert.equal(first.cores, 6); assert.equal(first.width, 1920); assert.equal(first.node, "undefined"); assert.equal(first.bridge, "undefined");

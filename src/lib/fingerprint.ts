@@ -25,44 +25,37 @@ export type Fingerprint = {
 };
 
 const CHROME_VERSIONS = ["152.0.7977.78"];
-const WINDOWS_VERSIONS = ["10.0", "11.0"];
-const SCREENS = [
-  { width: 1920, height: 1080 },
-  { width: 1536, height: 864 },
-  { width: 1600, height: 900 },
-  { width: 1366, height: 768 },
-  { width: 2560, height: 1440 },
-  { width: 1440, height: 900 },
-];
-const GPUS = [
-  {
-    vendor: "Google Inc. (NVIDIA)",
-    renderer:
-      "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
-  },
-  {
-    vendor: "Google Inc. (NVIDIA)",
-    renderer:
-      "ANGLE (NVIDIA, NVIDIA GeForce GTX 1650 Direct3D11 vs_5_0 ps_5_0, D3D11)",
-  },
-  {
-    vendor: "Google Inc. (AMD)",
-    renderer: "ANGLE (AMD, AMD Radeon RX 6600 Direct3D11 vs_5_0 ps_5_0, D3D11)",
-  },
-  {
-    vendor: "Google Inc. (Intel)",
-    renderer:
-      "ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)",
-  },
-  {
-    vendor: "Google Inc. (Intel)",
-    renderer:
-      "ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)",
-  },
-];
-const CORES = [4, 6, 8, 12, 16];
-const MEMORY = [4, 8];
-const FONT_PRESETS = ["Windows 10 базовый", "Windows 11 базовый", "Windows + MS Office"];
+// Bundles cover supported scalar settings, not emulated physical devices.
+// Never label a random GPU/font set as if the stock engine implemented it.
+export const WINDOWS_CONFIGURATIONS = [
+  { id: "win10-compact", label: "Windows 10 · 1366×768 · 4 потока · 4 ГБ", osVersion: "10.0", width: 1366, height: 768, cores: 4, memory: 4 },
+  { id: "win10-fullhd", label: "Windows 10 · 1920×1080 · 8 потоков · 8 ГБ", osVersion: "10.0", width: 1920, height: 1080, cores: 8, memory: 8 },
+  { id: "win11-fullhd", label: "Windows 11 · 1920×1080 · 8 потоков · 8 ГБ", osVersion: "11.0", width: 1920, height: 1080, cores: 8, memory: 8 },
+  { id: "win11-qhd", label: "Windows 11 · 2560×1440 · 16 потоков · 8 ГБ", osVersion: "11.0", width: 2560, height: 1440, cores: 16, memory: 8 },
+] as const;
+
+export function windowsUserAgent(chromeVersion: string): string {
+  const major = /^\d+/.exec(chromeVersion)?.[0] ?? CHROME_VERSIONS[0]!.split(".")[0];
+  return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`;
+}
+
+export function applyWindowsConfiguration(fp: Fingerprint, id: string): Fingerprint {
+  const config = WINDOWS_CONFIGURATIONS.find((item) => item.id === id);
+  if (!config) return fp;
+  return { ...fp, os: "windows", architecture: "x86", osVersion: config.osVersion,
+    platform: "Win32", userAgent: windowsUserAgent(fp.chromeVersion),
+    screen: { width: config.width, height: config.height, colorDepth: 24 },
+    hardwareConcurrency: config.cores, deviceMemory: config.memory,
+    gpu: { vendor: "", renderer: "" }, fontsPreset: "Нативные шрифты (не эмулируются)",
+  };
+}
+
+export function windowsConfigurationId(fp: Fingerprint): string {
+  return WINDOWS_CONFIGURATIONS.find((item) => fp.os === "windows" && fp.architecture !== "arm" &&
+    Number.parseInt(fp.osVersion, 10) === Number.parseInt(item.osVersion, 10) && fp.screen?.colorDepth === 24 &&
+    fp.screen.width === item.width && fp.screen.height === item.height &&
+    fp.hardwareConcurrency === item.cores && fp.deviceMemory === item.memory)?.id ?? "custom";
+}
 // Keep screen, GPU and CPU families together instead of mixing Mac and Windows hardware.
 const MAC_DEVICES = [
   { architecture: "arm" as const, cores: 8, screen: { width: 1440, height: 900 }, renderer: "ANGLE (Apple, ANGLE Metal Renderer: Apple M1, Unspecified Version)" },
@@ -112,9 +105,10 @@ function pick<T>(arr: readonly T[]): T {
 export function generateFingerprint(country?: string | null, os: FingerprintOS = "windows"): Fingerprint {
   const chromeVersion = pick(CHROME_VERSIONS);
   const mac = os === "macos" ? pick(MAC_DEVICES) : null;
-  const osVersion = mac ? pick(["14.0.0", "15.0.0"]) : pick(WINDOWS_VERSIONS);
-  const screen = mac?.screen ?? pick(SCREENS);
-  const gpu = mac ? { vendor: "Google Inc. (Apple)", renderer: mac.renderer } : pick(GPUS);
+  const windows = pick(WINDOWS_CONFIGURATIONS);
+  const osVersion = mac ? pick(["14.0.0", "15.0.0"]) : windows.osVersion;
+  const screen = mac?.screen ?? { width: windows.width, height: windows.height };
+  const gpu = mac ? { vendor: "Google Inc. (Apple)", renderer: mac.renderer } : { vendor: "", renderer: "" };
   const locale = (country && COUNTRY_LOCALES[country.toUpperCase()]) || COUNTRY_LOCALES["US"]!;
   const major = chromeVersion.split(".")[0];
 
@@ -127,12 +121,12 @@ export function generateFingerprint(country?: string | null, os: FingerprintOS =
     platform: mac ? "MacIntel" : "Win32",
     screen: { ...screen, colorDepth: 24 },
     gpu,
-    hardwareConcurrency: mac?.cores ?? pick(CORES),
-    deviceMemory: mac ? 8 : pick(MEMORY),
+    hardwareConcurrency: mac?.cores ?? windows.cores,
+    deviceMemory: mac ? 8 : windows.memory,
     language: locale.language,
     languages: [locale.language, locale.language.split("-")[0] ?? "en"],
     timezone: locale.timezone,
-    fontsPreset: mac ? "macOS базовый" : pick(FONT_PRESETS),
+    fontsPreset: mac ? "macOS базовый" : "Нативные шрифты (не эмулируются)",
     canvasNoise: Math.round(Math.random() * 1e6),
     webglNoise: Math.round(Math.random() * 1e6),
     audioNoise: Math.round(Math.random() * 1e6),
@@ -144,6 +138,6 @@ export function generateFingerprint(country?: string | null, os: FingerprintOS =
 
 export function describeFingerprint(fp: Partial<Fingerprint>): string {
   if (!fp?.chromeVersion) return "Отпечаток не задан";
-  const os = fp.os === "macos" ? `macOS ${fp.osVersion?.split(".")[0] ?? ""}` : `Windows ${fp.osVersion === "11.0" ? "11" : "10"}`;
+  const os = fp.os === "macos" ? `macOS ${fp.osVersion?.split(".")[0] ?? ""}` : `Windows ${Number.parseInt(fp.osVersion ?? "10", 10) === 11 ? "11" : "10"}`;
   return `${os} · Chrome ${fp.chromeVersion.split(".")[0]} · ${fp.screen?.width}x${fp.screen?.height} · ${fp.timezone}`;
 }

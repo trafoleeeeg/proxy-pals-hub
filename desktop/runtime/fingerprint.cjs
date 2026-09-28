@@ -56,7 +56,8 @@ function normalizeFingerprint(raw = {}, defaultUA, runtimeChrome = process.versi
   if (typeof userAgent !== "string" || !userAgent || userAgent.length > 1024 || /[\r\n\0]/.test(userAgent)) throw new Error("Invalid user agent");
   const os = raw.os ?? (raw.platform === "MacIntel" || /Macintosh/.test(userAgent) ? "macos" : "windows");
   if (!["windows", "macos"].includes(os)) throw new Error("Invalid fingerprint operating system");
-  const windows11 = os === "windows" && (/^(?:Windows\s+)?11(?:\.|$)/i.test(raw.osVersion || "") || /Windows NT 11/.test(userAgent));
+  const explicitWindows10 = /^(?:Windows\s+)?10(?:\.|$)/i.test(raw.osVersion || "");
+  const windows11 = os === "windows" && !explicitWindows10 && (/^(?:Windows\s+)?11(?:\.|$)/i.test(raw.osVersion || "") || /Windows NT 11/.test(userAgent));
   // Earlier clients accepted arbitrary Windows version labels. Preserve those
   // profiles by deriving a canonical version rather than rejecting old data.
   const osVersion = os === "windows" ? (windows11 ? "11.0.0" : "10.0.0") : (raw.osVersion ?? "14.0.0");
@@ -68,8 +69,15 @@ function normalizeFingerprint(raw = {}, defaultUA, runtimeChrome = process.versi
   const osToken = os === "macos" ? "Macintosh; Intel Mac OS X 10_15_7" : "Windows NT 10.0; Win64; x64";
   userAgent = userAgent.replace(/\((?:Windows NT|Macintosh)[^)]*\)/, `(${osToken})`);
   if (runtimeChrome) userAgent = userAgent.replace(/Chrome\/[\d.]+/g, `Chrome/${runtimeChrome}`);
+  const chromeVersion = runtimeChrome || raw.chromeVersion || raw.chrome_version || /Chrome\/([\d.]+)/.exec(userAgent)?.[1];
+  if (os === "windows") {
+    if (typeof chromeVersion !== "string" || !/^\d+(?:\.\d+){0,3}$/.test(chromeVersion)) throw new Error("Invalid fingerprint Chromium version");
+    // Match Chrome UA reduction; the real full runtime version lives in UA-CH.
+    // Never preserve conflicting Firefox/Edge/Electron suffixes from old data.
+    userAgent = `Mozilla/5.0 (${osToken}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion.split(".")[0]}.0.0.0 Safari/537.36`;
+  }
   let languages;
-  try { languages = Intl.getCanonicalLocales(raw.languages ?? [raw.language ?? "en-US", "en"]); }
+  try { languages = Intl.getCanonicalLocales(raw.language ? [raw.language, ...(raw.languages ?? [])] : (raw.languages ?? ["en-US", "en"])); }
   catch { throw new Error("Invalid fingerprint languages"); }
   if (!languages.length || languages.length > 10) throw new Error("Invalid fingerprint languages");
   const timezone = raw.timezone ?? "UTC";
@@ -79,6 +87,8 @@ function normalizeFingerprint(raw = {}, defaultUA, runtimeChrome = process.versi
   const vendor = raw.gpu?.vendor ?? raw.webgl_vendor;
   const renderer = raw.gpu?.renderer ?? raw.webgl_renderer;
   if ([vendor, renderer].some((value) => value != null && (typeof value !== "string" || value.length > 1024))) throw new Error("Invalid fingerprint GPU");
+  const memory = raw.deviceMemory ?? raw.device_memory ?? 8;
+  if (typeof memory !== "number" || !Number.isFinite(memory) || memory < 0.25 || memory > 256) throw new Error("Invalid fingerprint memory");
   return {
     userAgent, platform, os, osVersion, architecture, languages, timezone, aggressivePrivacyMode,
     screen: {
@@ -88,10 +98,10 @@ function normalizeFingerprint(raw = {}, defaultUA, runtimeChrome = process.versi
     },
     hardwareConcurrency: integer(raw.hardwareConcurrency ?? raw.hardware_concurrency, 8, 1, 256),
     // Chromium exposes coarse memory buckets with an 8 GiB upper bound.
-    deviceMemory: Math.min(8, 2 ** Math.floor(Math.log2(integer(raw.deviceMemory ?? raw.device_memory, 8, 1, 256)))),
+    deviceMemory: Math.min(8, 2 ** Math.floor(Math.log2(memory))),
     gpu: { vendor, renderer }, doNotTrack: !!(raw.doNotTrack ?? raw.do_not_track),
     webrtc: raw.webrtc === "disabled" ? "disabled" : "proxy",
-    chromeVersion: runtimeChrome || raw.chromeVersion || raw.chrome_version,
+    chromeVersion,
     windows11,
     canvasNoise: integer(raw.canvasNoise ?? raw.canvas_noise, 0, 0, 2147483647),
     audioNoise: integer(raw.audioNoise ?? raw.audio_noise, 0, 0, 2147483647),
@@ -155,8 +165,8 @@ async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
       await send("Emulation.setTimezoneOverride", { timezoneId: fp.timezone }, id);
       await applyLocale(send, fp.languages[0], id);
       await send("Emulation.setHardwareConcurrencyOverride", { hardwareConcurrency: fp.hardwareConcurrency }, id);
-      // OOPIFs inherit top-level device metrics. CDP rejects this method on
-      // iframe targets; Screen prototypes cover their JavaScript accessors.
+      // CDP rejects metrics on iframe targets. Prototype overrides cover JS,
+      // NOT OOPIF CSS device/resolution queries; report this engine boundary.
       if (type === "page") await send("Emulation.setDeviceMetricsOverride", { width: 0, height: 0, deviceScaleFactor: fp.os === "macos" ? 2 : 1, mobile: false, screenWidth: fp.screen.width, screenHeight: fp.screen.height }, id);
       await send("Page.addScriptToEvaluateOnNewDocument", { source, runImmediately: true }, id);
     } else {
@@ -200,7 +210,7 @@ async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
     engine: "stock-electron", chromiumVersion: process.versions.chrome || null,
     backgroundWorkers: backgroundProtected ? "browser-target-before-execution" : "unprotected",
     uaLocaleTimezone: "cdp", documentOverrides: "main-world-javascript",
-    screenMetrics: "cdp-screen-and-dpr", hardwareConcurrency: "cdp-and-prototype",
+    screenMetrics: "cdp-top-level-and-js-only-oopif", hardwareConcurrency: "cdp-and-prototype",
     webRTCPolicy: wc.getWebRTCIPHandlingPolicy(),
     canvasNoise: fp.aggressivePrivacyMode === false ? "disabled-in-normal-mode" : fp.canvasNoise ? "document-2d-readback-and-html-canvas-serialization-only" : "disabled",
     audioNoise: fp.aggressivePrivacyMode === false ? "disabled-in-normal-mode" : fp.audioNoise ? "document-analyser-and-copyFromChannel-only" : "disabled",

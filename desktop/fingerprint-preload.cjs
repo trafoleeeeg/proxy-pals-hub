@@ -12,6 +12,7 @@ function applyDocumentFingerprint(fp) {
   define(nav, "language", fp.languages[0]);
   define(nav, "platform", fp.platform);
   define(nav, "userAgent", fp.userAgent);
+  define(nav, "appVersion", fp.userAgent.replace(/^Mozilla\//, ""));
   // Never inherit an exception from the top frame or a wildcard. Opaque
   // documents (data:, sandboxed frames) stay restricted.
   const origin = globalThis.origin || globalThis.location?.origin;

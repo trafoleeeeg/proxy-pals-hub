@@ -31,7 +31,7 @@ async function probe() {
   const hints = navigator.userAgentData ? await navigator.userAgentData.getHighEntropyValues(["architecture", "bitness", "platformVersion", "uaFullVersion"]) : null;
   return {
     platform: navigator.platform, memory: navigator.deviceMemory, language: navigator.language,
-    languages: [...navigator.languages], userAgent: navigator.userAgent,
+    languages: [...navigator.languages], userAgent: navigator.userAgent, appVersion: navigator.appVersion,
     hardwareConcurrency: navigator.hardwareConcurrency, doNotTrack: navigator.doNotTrack,
     hints: hints && { brands: hints.brands, platform: hints.platform, architecture: hints.architecture, bitness: hints.bitness, platformVersion: hints.platformVersion, uaFullVersion: hints.uaFullVersion },
     prototypeMemory: Object.getOwnPropertyDescriptor(prototype, "deviceMemory").get.call(navigator),
@@ -39,6 +39,11 @@ async function probe() {
     audioBlocked: typeof AudioContext === "undefined", sharedBlocked: typeof SharedWorker === "undefined", serviceBlocked: navigator.serviceWorker === undefined,
     dpr: globalThis.devicePixelRatio, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     screen: globalThis.screen && { width: screen.width, height: screen.height },
+    screenCss: globalThis.screen && {
+      width: matchMedia(`(device-width: ${screen.width}px)`).matches,
+      height: matchMedia(`(device-height: ${screen.height}px)`).matches,
+      dpr: matchMedia(`(resolution: ${devicePixelRatio}dppx)`).matches,
+    },
     headers: await fetch("/headers").then((response) => response.json()),
   };
 }
@@ -148,6 +153,8 @@ app.whenReady().then(async () => {
     assert.deepEqual(result.languages, ["fr-CA", "fr"]);
     assert.equal(result.timezone, "America/Toronto");
     assert.equal(result.userAgent, windowsFp.userAgent);
+    assert.equal(result.appVersion, windowsFp.userAgent.replace(/^Mozilla\//, ""));
+    assert.match(result.userAgent, /Chrome\/\d+\.0\.0\.0 Safari\/537\.36$/);
     assert.equal(result.doNotTrack, "1");
     assert.equal(result.headers.ua, windowsFp.userAgent);
     assert.match(result.headers.language, /^fr-CA/);
@@ -162,12 +169,18 @@ app.whenReady().then(async () => {
   };
   checkWindows(windowsMain);
   assert.deepEqual(windowsMain.screen, { width: 1600, height: 900 });
+  assert.deepEqual(windowsMain.screenCss, { width: true, height: true, dpr: true });
   const windowsWorker = await windowsProfile.executeJavaScript("new Promise((resolve,reject)=>{const w=new Worker('/worker.js');w.onmessage=e=>{resolve(e.data);w.terminate();};w.onerror=reject;})");
   checkWindows(windowsWorker);
   assert.deepEqual(windowsWorker.hints, windowsMain.hints, "worker Client Hints must agree with the page");
   const windowsFrame = await crossFrame(windowsProfile);
   checkWindows(windowsFrame);
   assert.deepEqual(windowsFrame.screen, windowsMain.screen, "cross-origin iframe screen must agree with the page");
+  // Known stock-engine boundary, not a protection success: OOPIF CSS can still
+  // use host screen metrics. Keep an explicit diagnostic in every native run.
+  // Do not "fix" this by wrapping matchMedia: real stylesheets would still leak.
+  assert.ok(Object.values(windowsFrame.screenCss).every(value => typeof value === "boolean"));
+  console.log(`UMBRA_SCREEN_IDENTITY_AUDIT: main=true oopif=${Object.values(windowsFrame.screenCss).every(Boolean)}`);
   const workerIdentityMatches = (result) => result.userAgent === windowsFp.userAgent && result.platform === "Win32" &&
     result.language === "fr-CA" && result.timezone === "America/Toronto" &&
     result.hardwareConcurrency === 6 && result.deviceMemory === 4 &&

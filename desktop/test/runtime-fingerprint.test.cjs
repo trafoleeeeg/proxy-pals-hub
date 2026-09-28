@@ -40,7 +40,7 @@ test("Windows UA and client hints match the actual Chromium runtime", () => {
   const fp = fingerprint();
   const override = userAgentOverride(fp);
   assert.match(fp.userAgent, /Windows NT 10\.0; Win64; x64/);
-  assert.match(fp.userAgent, /Chrome\/150\.0\.1234\.56/);
+  assert.match(fp.userAgent, /Chrome\/150\.0\.0\.0/);
   assert.equal(fp.platform, "Win32");
   assert.equal(override.userAgentMetadata.platform, "Windows");
   assert.equal(override.userAgentMetadata.platformVersion, "13.0.0");
@@ -90,11 +90,26 @@ test("legacy Mac fingerprints are inferred and Intel variants remain supported",
 });
 
 test("memory stays within Chromium buckets and invalid identity fields fail closed", () => {
+  assert.equal(fingerprint({ deviceMemory: 0.25 }).deviceMemory, 0.25);
+  assert.equal(fingerprint({ deviceMemory: 0.5 }).deviceMemory, 0.5);
   assert.equal(fingerprint({ deviceMemory: 32 }).deviceMemory, 8);
   assert.equal(fingerprint({ deviceMemory: 6 }).deviceMemory, 4);
   for (const input of [{ os: "unknown" }, { os: "macos", osVersion: "15.0\r\n" }, { architecture: "bad" }, { deviceMemory: 0 }]) {
     assert.throws(() => fingerprint(input), /Invalid fingerprint/);
   }
+});
+
+test("Windows canonical identity removes conflicting legacy tokens and honors the primary locale", () => {
+  const fp = fingerprint({ os: "windows", osVersion: "11.0.0", userAgent: "Firefox/999 Electron/20 Chrome/99.1.2.3", chromeVersion: "999.9.9.9",
+    language: "fr-ca", languages: ["en-us", "fr-CA", "en-US"] });
+  assert.equal(fp.userAgent, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36");
+  assert.deepEqual(fp.languages, ["fr-CA", "en-US"]);
+  const metadata = userAgentOverride(fp).userAgentMetadata;
+  assert.equal(metadata.fullVersion, CHROME);
+  assert.equal(metadata.platformVersion, "13.0.0");
+  assert.equal(metadata.mobile, false);
+  assert.equal(metadata.model, "");
+  assert.equal(userAgentOverride(fingerprint({ osVersion: "10.0" })).userAgentMetadata.platformVersion, "10.0.0");
 });
 
 test("legacy profiles retain strict API blocking while new normal-mode profiles opt out explicitly", () => {
@@ -130,7 +145,7 @@ test("native screen CSS and hardware concurrency preserve viewport size but mask
   assert.deepEqual(wc.commands.find((item) => item.command === "Emulation.setDeviceMetricsOverride").args, {
     width: 0, height: 0, deviceScaleFactor: 1, mobile: false, screenWidth: 1512, screenHeight: 982,
   });
-  assert.equal(diagnostics.screenMetrics, "cdp-screen-and-dpr");
+  assert.equal(diagnostics.screenMetrics, "cdp-top-level-and-js-only-oopif");
   assert.ok(diagnostics.limitations.some((item) => item.includes("Shared/service workers")));
 });
 

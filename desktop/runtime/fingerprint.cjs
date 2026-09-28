@@ -140,11 +140,10 @@ async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
       })]);
     } finally { clearTimeout(timer); }
   };
-  // Shared/service workers cannot be configured reliably before execution in
-  // this Electron version. The strict document policy blocks their creation;
-  // only explicit site exceptions can use their native implementation.
+  // Attach before worker code runs. Shared/service workers have their own
+  // execution contexts and do not inherit the page's CDP identity overrides.
   const autoAttach = (id) => send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true,
-    filter: [{ type: "worker" }, { type: "iframe" }, { type: "page" }, { exclude: true }],
+    filter: [{ type: "worker" }, { type: "shared_worker" }, { type: "service_worker" }, { type: "iframe" }, { type: "page" }, { exclude: true }],
   }, id);
   async function configureChild(id, type) {
     const page = type === "iframe" || type === "page";
@@ -160,6 +159,9 @@ async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
       if (type === "page") await send("Emulation.setDeviceMetricsOverride", { width: 0, height: 0, deviceScaleFactor: fp.os === "macos" ? 2 : 1, mobile: false, screenWidth: fp.screen.width, screenHeight: fp.screen.height }, id);
       await send("Page.addScriptToEvaluateOnNewDocument", { source, runImmediately: true }, id);
     } else {
+      await send("Emulation.setTimezoneOverride", { timezoneId: fp.timezone }, id);
+      await send("Emulation.setLocaleOverride", { locale: fp.languages[0] }, id);
+      await send("Emulation.setHardwareConcurrencyOverride", { hardwareConcurrency: fp.hardwareConcurrency }, id);
       const evaluated = await send("Runtime.evaluate", { expression: source, returnByValue: true }, id);
       if (evaluated.exceptionDetails) throw new Error("Worker privacy setup failed");
     }
@@ -204,7 +206,7 @@ async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
     audioNoise: fp.aggressivePrivacyMode === false ? "disabled-in-normal-mode" : fp.audioNoise ? "document-analyser-and-copyFromChannel-only" : "disabled",
     unsupportedControls: ["fontsPreset", "webglNoise"],
     hardwarePolicy: fp.aggressivePrivacyMode === false ? "normal-native-hardware-apis" : "blocked-by-default-with-explicit-local-origin-exceptions",
-    limitations: ["No custom browser kernel or undetectability guarantee", fp.aggressivePrivacyMode === false ? "Normal mode exposes native GPU, canvas, audio, fonts and background workers; they can reveal host hardware and disagree with the declared fingerprint" : "Shared/service workers are blocked by default; site exceptions expose their native identity", "Compatibility exceptions expose native GPU, audio and canvas characteristics", "Installed fonts can still affect CSS layout", "JavaScript privacy restrictions are observable", "Native WebRTC policy restricts non-proxied UDP", "Popup opener and form POST are unsupported", "Navigation history is not restored after restart"],
+    limitations: ["No custom browser kernel or undetectability guarantee", fp.aggressivePrivacyMode === false ? "Normal mode exposes native GPU, canvas, audio and fonts; they can reveal host hardware and disagree with the declared fingerprint" : "Shared/service workers are blocked by default; explicit site exceptions can expose native hardware APIs", "Compatibility exceptions expose native GPU, audio and canvas characteristics", "Installed fonts can still affect CSS layout", "JavaScript privacy restrictions are observable", "Native WebRTC policy restricts non-proxied UDP", "Popup opener and form POST are unsupported", "Navigation history is not restored after restart"],
   };
 }
 

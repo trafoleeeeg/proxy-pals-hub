@@ -101,6 +101,10 @@ test("native screen CSS and hardware concurrency preserve viewport size but mask
   assert.deepEqual(wc.commands.find((item) => item.command === "Emulation.setDeviceMetricsOverride").args, {
     width: 0, height: 0, deviceScaleFactor: 1, mobile: false, screenWidth: 1512, screenHeight: 982,
   });
+  const autoAttach = wc.commands.find((item) => item.command === "Target.setAutoAttach").args;
+  for (const type of ["worker", "shared_worker", "service_worker", "iframe", "page"]) {
+    assert.ok(autoAttach.filter.some((entry) => entry.type === type), `${type} must be paused for identity setup`);
+  }
   assert.equal(diagnostics.screenMetrics, "cdp-screen-and-dpr");
   assert.ok(diagnostics.limitations.some((item) => item.includes("Shared/service workers")));
 });

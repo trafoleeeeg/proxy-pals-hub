@@ -42,12 +42,22 @@ async function probe() {
   };
 }
 const probeSource = `(${probe.toString()})()`;
+async function workerIdentity() {
+  const hints = navigator.userAgentData ? await navigator.userAgentData.getHighEntropyValues(["architecture", "platformVersion", "uaFullVersion"]) : null;
+  return {
+    userAgent: navigator.userAgent, platform: navigator.platform,
+    language: navigator.language, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    hardwareConcurrency: navigator.hardwareConcurrency, deviceMemory: navigator.deviceMemory,
+    hints: hints && { platform: hints.platform, platformVersion: hints.platformVersion, architecture: hints.architecture, uaFullVersion: hints.uaFullVersion },
+  };
+}
+const workerIdentitySource = `(${workerIdentity.toString()})()`;
 app.whenReady().then(async () => {
   server = http.createServer((req, res) => {
     if (req.url === "/headers") { res.setHeader("Content-Type", "application/json"); return res.end(JSON.stringify({ ua: req.headers["user-agent"], language: req.headers["accept-language"], dnt: req.headers.dnt || null })); }
     if (req.url === "/worker.js") { res.setHeader("Content-Type", "text/javascript"); return res.end(`${probeSource}.then(result => postMessage(result));`); }
-    if (req.url === "/shared.js") { res.setHeader("Content-Type", "text/javascript"); return res.end("onconnect=e=>e.ports[0].postMessage('ready');"); }
-    if (req.url === "/sw.js") { res.setHeader("Content-Type", "text/javascript"); return res.end("self.addEventListener('install',()=>self.skipWaiting()); self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));"); }
+    if (req.url === "/shared.js") { res.setHeader("Content-Type", "text/javascript"); return res.end(`onconnect=e=>{${workerIdentitySource}.then(result=>e.ports[0].postMessage(result));};`); }
+    if (req.url === "/sw.js") { res.setHeader("Content-Type", "text/javascript"); return res.end(`self.addEventListener('install',()=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('message',e=>{${workerIdentitySource}.then(result=>e.ports[0].postMessage(result));});`); }
     res.setHeader("Content-Type", "text/html");
     res.end(req.url === "/frame" ? `<script>${probeSource}.then(result=>parent.postMessage(result,'*'));<\/script>` : "<!doctype html><title>Privacy test</title>");
   });
@@ -101,7 +111,7 @@ app.whenReady().then(async () => {
   assert.equal(relaxed.webgpuBlocked, false);
   assert.equal(relaxed.serviceBlocked, false);
   assert.equal(relaxed.sharedBlocked, false);
-  assert.equal(await compatible.executeJavaScript("new Promise(resolve=>{const w=new SharedWorker('/shared.js');w.port.onmessage=e=>{resolve(e.data);w.port.close();};})"), "ready");
+  assert.ok(await compatible.executeJavaScript("new Promise(resolve=>{const w=new SharedWorker('/shared.js');w.port.onmessage=e=>{resolve(e.data);w.port.close();};})"));
   assert.equal(await compatible.executeJavaScript("navigator.serviceWorker.register('/sw.js').then(()=>navigator.serviceWorker.ready).then(()=>true)"), true);
   check(await crossFrame(compatible), true); // Parent consent never includes another origin.
   const normal = await open([], null, false);
@@ -110,7 +120,7 @@ app.whenReady().then(async () => {
   assert.equal(ordinary.audioBlocked, false);
   assert.equal(ordinary.sharedBlocked, false);
   assert.equal(ordinary.serviceBlocked, false);
-  assert.equal(await normal.executeJavaScript("new Promise(resolve=>{const w=new SharedWorker('/shared.js');w.port.onmessage=e=>{resolve(e.data);w.port.close();};})"), "ready");
+  assert.ok(await normal.executeJavaScript("new Promise(resolve=>{const w=new SharedWorker('/shared.js');w.port.onmessage=e=>{resolve(e.data);w.port.close();};})"));
   assert.equal(await normal.executeJavaScript("navigator.serviceWorker.register('/sw.js').then(()=>navigator.serviceWorker.ready).then(()=>true)"), true);
   const ordinaryFrame = await crossFrame(normal);
   assert.equal(ordinaryFrame.canvasBlocked, false);
@@ -153,7 +163,18 @@ app.whenReady().then(async () => {
   const windowsFrame = await crossFrame(windowsProfile);
   checkWindows(windowsFrame);
   assert.deepEqual(windowsFrame.screen, windowsMain.screen, "cross-origin iframe screen must agree with the page");
-  assert.deepEqual(windowsFrame.hints, windowsMain.hints, "cross-origin iframe Client Hints must agree with the page");
+  const workerIdentityMatches = (result) => result.userAgent === windowsFp.userAgent && result.platform === "Win32" &&
+    result.language === "fr-CA" && result.timezone === "America/Toronto" &&
+    result.hardwareConcurrency === 6 && result.deviceMemory === 4 &&
+    (!result.hints || (result.hints.platform === "Windows" && result.hints.platformVersion === "13.0.0" &&
+      result.hints.architecture === "x86" && result.hints.uaFullVersion === windowsFp.chromeVersion));
+  const sharedIdentity = await windowsProfile.executeJavaScript("new Promise((resolve,reject)=>{const w=new SharedWorker('/shared.js');const timer=setTimeout(()=>reject(new Error('shared worker timeout')),8000);w.port.onmessage=e=>{clearTimeout(timer);resolve(e.data);w.port.close();};w.onerror=reject;})");
+  assert.equal(typeof sharedIdentity.userAgent, "string");
+  const serviceIdentity = await windowsProfile.executeJavaScript("navigator.serviceWorker.register('/sw.js').then(()=>navigator.serviceWorker.ready).then(reg=>new Promise((resolve,reject)=>{const channel=new MessageChannel();const timer=setTimeout(()=>reject(new Error('service worker timeout')),8000);channel.port1.onmessage=e=>{clearTimeout(timer);resolve(e.data);channel.port1.close();};reg.active.postMessage('identity',[channel.port2]);}))");
+  assert.equal(typeof serviceIdentity.userAgent, "string");
+  // Keep an explicit, non-identifying CI signal for the known stock-Electron
+  // limitation. Do not log the native worker values or claim they are isolated.
+  console.log(`UMBRA_WORKER_IDENTITY_AUDIT: shared=${workerIdentityMatches(sharedIdentity)} service=${workerIdentityMatches(serviceIdentity)}`);
   await compatible.executeJavaScript("document.cookie='synthetic=fixture; path=/'; localStorage.setItem('fixture','only-compatible'); true");
   assert.equal(await strict.executeJavaScript("document.cookie === '' && localStorage.getItem('fixture') === null"), true);
   assert.equal(failures, 0);

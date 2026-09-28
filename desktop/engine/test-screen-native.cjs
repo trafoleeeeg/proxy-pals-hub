@@ -4,6 +4,7 @@ const { app, BrowserWindow, session } = require("electron");
 const assert = require("node:assert/strict");
 const http = require("node:http");
 const path = require("node:path");
+const { once } = require("node:events");
 
 assert.ok(process.env.UMBRA_NATIVE_SCREEN_TEST_DIR, "isolated test directory required");
 app.setPath("userData", process.env.UMBRA_NATIVE_SCREEN_TEST_DIR);
@@ -17,7 +18,7 @@ const finish = code => {
   server?.close();
   app.exit(code);
 };
-setTimeout(() => finish(1), 60000).unref();
+setTimeout(() => finish(1), 120000).unref();
 const presets = {
   a: { width: 1733, height: 977, availableWidth: 1733, availableHeight: 937, colorDepth: 24, deviceScaleFactor: 1 },
   b: { width: 1371, height: 811, availableWidth: 1371, availableHeight: 771, colorDepth: 24, deviceScaleFactor: 2 },
@@ -75,6 +76,37 @@ async function checkZoom(win, p) {
   win.webContents.setZoomFactor(1);
 }
 
+function restrictRequests(ses, port) {
+  ses.webRequest.onBeforeRequest((details, done) => {
+    const url = new URL(details.url);
+    done({ cancel: url.protocol !== "about:" && !(url.protocol === "http:" && ["127.0.0.1", "localhost"].includes(url.hostname) && url.port === String(port)) });
+  });
+}
+
+async function checkPopup(win, url) {
+  win.webContents.setWindowOpenHandler(() => ({
+    action: "allow",
+    overrideBrowserWindowOptions: { show: false },
+  }));
+  const created = once(win.webContents, "did-create-window");
+  await win.webContents.executeJavaScript(`void window.open(${JSON.stringify(url)}, '_blank')`, true);
+  const [popup] = await created;
+  windows.push(popup);
+  assert.equal(popup.webContents.session, win.webContents.session, "popup must inherit its parent's session");
+  if (popup.webContents.isLoading()) await once(popup.webContents, "did-finish-load");
+  await checkFrames(popup);
+  popup.destroy();
+}
+
+async function checkRendererRestart(win, url) {
+  const gone = once(win.webContents, "render-process-gone");
+  // Crash only this synthetic renderer, never an installed Umbra profile.
+  win.webContents.forcefullyCrashRenderer();
+  await gone;
+  await win.loadURL(url);
+  await checkFrames(win);
+}
+
 app.whenReady().then(async () => {
   server = http.createServer((req, res) => {
     res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -82,19 +114,30 @@ app.whenReady().then(async () => {
   });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const port = server.address().port;
+  const plainSession = session.fromPartition("persist:screen-unconfigured");
+  assert.equal(typeof plainSession.setUmbraScreenMetrics, "function", "unpatched Electron: native screen API missing");
+  restrictRequests(plainSession, port);
+  const plainWindow = new BrowserWindow({ show: false, webPreferences: { session: plainSession, sandbox: true, contextIsolation: true, nodeIntegration: false } });
+  windows.push(plainWindow);
+  await plainWindow.loadURL(`http://127.0.0.1:${port}/unconfigured`);
+  const readPlainScreen = "JSON.stringify([screen.width, screen.height, screen.availWidth, screen.availHeight, screen.colorDepth, devicePixelRatio])";
+  // Keep host values in memory only; failure messages must not print them.
+  const plainBefore = await plainWindow.webContents.executeJavaScript(readPlainScreen);
+  assert.throws(() => plainSession.setUmbraScreenMetrics(presets.a), "cannot retrofit policy after a session has already created a view");
+  const profileWindows = [];
   for (const [key, p] of Object.entries(presets)) {
     const ses = session.fromPartition(`persist:screen-${key}`);
     assert.equal(typeof ses.setUmbraScreenMetrics, "function", "unpatched Electron: native screen API missing");
     assert.throws(() => ses.setUmbraScreenMetrics({ ...p, width: -1 }));
     assert.throws(() => ses.setUmbraScreenMetrics({ ...p, deviceScaleFactor: "1" }));
     assert.throws(() => ses.setUmbraScreenMetrics({ ...p, availableWidth: p.width + 1 }));
+    assert.throws(() => ses.setUmbraScreenMetrics({ ...p, deviceScaleFactor: NaN }));
+    assert.throws(() => ses.setUmbraScreenMetrics({ ...p, deviceScaleFactor: Infinity }));
     ses.setUmbraScreenMetrics(p);
-    ses.webRequest.onBeforeRequest((details, done) => {
-      const url = new URL(details.url);
-      done({ cancel: url.protocol !== "about:" && !(url.protocol === "http:" && ["127.0.0.1", "localhost"].includes(url.hostname) && url.port === String(port)) });
-    });
+    restrictRequests(ses, port);
     const win = new BrowserWindow({ show: false, webPreferences: { session: ses, sandbox: true, contextIsolation: true, nodeIntegration: false } });
     windows.push(win);
+    profileWindows.push(win);
     await win.loadURL(`http://127.0.0.1:${port}/${key}`);
     await checkFrames(win);
     assert.throws(() => ses.setUmbraScreenMetrics({ ...p, width: p.width + 1 }), "policy must be immutable once used");
@@ -105,9 +148,12 @@ app.whenReady().then(async () => {
     // Navigate back across sites and force fresh OOPIF creation.
     await win.loadURL(`http://127.0.0.1:${port}/${key}`);
     await checkFrames(win);
+    await checkPopup(win, `http://127.0.0.1:${port}/${key}`);
+    await checkRendererRestart(win, `http://127.0.0.1:${port}/${key}`);
   }
   // Recheck A after B was created: a process-global override would fail here.
-  await checkFrames(windows[0]);
+  await checkFrames(profileWindows[0]);
+  assert.ok(plainBefore === await plainWindow.webContents.executeJavaScript(readPlainScreen), "configured sessions must not affect an unconfigured session");
   process.stdout.write("UMBRA_NATIVE_SCREEN_OK\n", () => finish(0));
 }).catch(error => {
   process.stderr.write("UMBRA_NATIVE_SCREEN_FAILED: " + error.message + "\n", () => finish(1));

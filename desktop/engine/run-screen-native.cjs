@@ -25,7 +25,7 @@ const assert = require("node:assert/strict");
         for (const line of lines) process.stderr.write(line + "\n");
       });
       const code = await new Promise((resolve, reject) => {
-        const timer = setTimeout(() => { child.kill(); reject(new Error("Native screen fixture timed out")); }, 70000);
+        const timer = setTimeout(() => { child.kill(); reject(new Error("Native screen fixture timed out")); }, 150000);
         child.once("error", error => { clearTimeout(timer); reject(error); });
         child.once("close", code => { clearTimeout(timer); resolve(code); });
       });

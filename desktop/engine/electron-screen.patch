@@ -1,0 +1,148 @@
+diff --git a/shell/browser/api/electron_api_session.cc b/shell/browser/api/electron_api_session.cc
+index 84ad350..f6459a7 100644
+--- a/shell/browser/api/electron_api_session.cc
++++ b/shell/browser/api/electron_api_session.cc
+@@ -1038,6 +1038,38 @@ std::string Session::GetUserAgent() {
+   return browser_context_->GetUserAgent();
+ }
+ 
++void Session::SetUmbraScreenMetrics(gin_helper::ErrorThrower thrower,
++                                  const base::DictValue& options) {
++  const auto width = options.FindInt("width");
++  const auto height = options.FindInt("height");
++  const auto available_width = options.FindInt("availableWidth");
++  const auto available_height = options.FindInt("availableHeight");
++  const auto color_depth = options.FindInt("colorDepth");
++  const auto* scale_value = options.Find("deviceScaleFactor");
++  if (!width || !height || !available_width || !available_height ||
++      !color_depth || !scale_value ||
++      (!scale_value->is_int() && !scale_value->is_double())) {
++    thrower.ThrowTypeError("Screen metrics require all six numeric fields");
++    return;
++  }
++  const double scale = scale_value->GetDouble();
++  // The comparisons also reject NaN and infinities, without coercing strings.
++  if (*width < 320 || *width > 16384 || *height < 200 || *height > 16384 ||
++      *available_width < 1 || *available_width > *width ||
++      *available_height < 1 || *available_height > *height ||
++      *color_depth < 1 || *color_depth > 64 || !(scale >= 0.5 && scale <= 4)) {
++    thrower.ThrowRangeError("Screen metrics are outside supported bounds");
++    return;
++  }
++  auto* preferences = SessionPreferences::FromBrowserContext(browser_context_);
++  if (!preferences ||
++      !preferences->SetScreenMetrics({*width, *height, *available_width,
++                                     *available_height, *color_depth, scale})) {
++    thrower.ThrowError(
++        "Screen metrics must be configured before creating session pages");
++  }
++}
++
+ void Session::SetSSLConfig(network::mojom::SSLConfigPtr config) {
+   browser_context_->SetSSLConfig(std::move(config));
+ }
+@@ -1824,6 +1856,7 @@ void Session::FillObjectTemplate(v8::Isolate* isolate,
+                  &Session::AllowNTLMCredentialsForDomains)
+       .SetMethod("isPersistent", &Session::IsPersistent)
+       .SetMethod("setUserAgent", &Session::SetUserAgent)
++      .SetMethod("setUmbraScreenMetrics", &Session::SetUmbraScreenMetrics)
+       .SetMethod("getUserAgent", &Session::GetUserAgent)
+       .SetMethod("setSSLConfig", &Session::SetSSLConfig)
+       .SetMethod("getBlobData", &Session::GetBlobData)
+diff --git a/shell/browser/api/electron_api_session.h b/shell/browser/api/electron_api_session.h
+index 8bd1071..87ce60d 100644
+--- a/shell/browser/api/electron_api_session.h
++++ b/shell/browser/api/electron_api_session.h
+@@ -141,6 +141,8 @@ class Session final : public gin::Wrappable<Session>,
+   void AllowNTLMCredentialsForDomains(const std::string& domains);
+   void SetUserAgent(const std::string& user_agent, gin::Arguments* args);
+   std::string GetUserAgent();
++  void SetUmbraScreenMetrics(gin_helper::ErrorThrower thrower,
++                            const base::DictValue& options);
+   void SetSSLConfig(network::mojom::SSLConfigPtr config);
+   bool IsPersistent();
+   v8::Local<v8::Promise> GetBlobData(v8::Isolate* isolate,
+diff --git a/shell/browser/electron_browser_client.cc b/shell/browser/electron_browser_client.cc
+index 79e4150..96d1e95 100644
+--- a/shell/browser/electron_browser_client.cc
++++ b/shell/browser/electron_browser_client.cc
+@@ -519,6 +519,21 @@ void ElectronBrowserClient::OverrideWebPreferences(
+   if (auto* web_preferences = WebContentsPreferences::From(web_contents)) {
+     web_preferences->OverrideWebkitPrefs(prefs, renderer_prefs);
+   }
++
++  if (auto* session_preferences = SessionPreferences::FromBrowserContext(
++          web_contents->GetBrowserContext())) {
++    // WebPreferences travel to every RenderView, including OOPIFs and newly
++    // created renderers. Do not mutate physical ScreenInfo/VisualProperties.
++    session_preferences->MarkScreenMetricsUsed();
++    if (const auto& screen = session_preferences->screen_metrics()) {
++      prefs->umbra_screen_width = screen->width;
++      prefs->umbra_screen_height = screen->height;
++      prefs->umbra_screen_available_width = screen->available_width;
++      prefs->umbra_screen_available_height = screen->available_height;
++      prefs->umbra_screen_color_depth = screen->color_depth;
++      prefs->umbra_screen_device_scale_factor = screen->device_scale_factor;
++    }
++  }
+ }
+ 
+ bool ElectronBrowserClient::WebPreferencesNeedUpdateForColorRelatedStateChanges(
+diff --git a/shell/browser/session_preferences.h b/shell/browser/session_preferences.h
+index 3c03e70..f08b89f 100644
+--- a/shell/browser/session_preferences.h
++++ b/shell/browser/session_preferences.h
+@@ -5,6 +5,7 @@
+ #ifndef ELECTRON_SHELL_BROWSER_SESSION_PREFERENCES_H_
+ #define ELECTRON_SHELL_BROWSER_SESSION_PREFERENCES_H_
+ 
++#include <optional>
+ #include <vector>
+ 
+ #include "base/files/file_path.h"
+@@ -17,6 +18,18 @@ class BrowserContext;
+ 
+ namespace electron {
+ 
++// A reporting policy, not a physical display or compositor configuration.
++// Owned by BrowserContext so separate profile sessions cannot share values.
++struct UmbraScreenMetrics {
++  int width;
++  int height;
++  int available_width;
++  int available_height;
++  int color_depth;
++  double device_scale_factor;
++  bool operator==(const UmbraScreenMetrics&) const = default;
++};
++
+ class SessionPreferences : public base::SupportsUserData::Data {
+  public:
+   static SessionPreferences* FromBrowserContext(
+@@ -30,6 +43,17 @@ class SessionPreferences : public base::SupportsUserData::Data {
+ 
+   bool HasServiceWorkerPreloadScript();
+ 
++  const std::optional<UmbraScreenMetrics>& screen_metrics() const {
++    return screen_metrics_;
++  }
++  bool SetScreenMetrics(const UmbraScreenMetrics& metrics) {
++    if (screen_metrics_used_ && screen_metrics_ != metrics)
++      return false;
++    screen_metrics_ = metrics;
++    return true;
++  }
++  void MarkScreenMetricsUsed() { screen_metrics_used_ = true; }
++
+  private:
+   SessionPreferences();
+ 
+@@ -37,6 +61,8 @@ class SessionPreferences : public base::SupportsUserData::Data {
+   static int kLocatorKey;
+ 
+   std::vector<PreloadScript> preload_scripts_;
++  std::optional<UmbraScreenMetrics> screen_metrics_;
++  bool screen_metrics_used_ = false;
+ };
+ 
+ }  // namespace electron

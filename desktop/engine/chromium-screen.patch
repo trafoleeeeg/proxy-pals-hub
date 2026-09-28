@@ -1,0 +1,328 @@
+diff --git a/third_party/blink/common/web_preferences/web_preferences_mojom_traits.cc b/third_party/blink/common/web_preferences/web_preferences_mojom_traits.cc
+index 3ecf125..0f987b1 100644
+--- a/third_party/blink/common/web_preferences/web_preferences_mojom_traits.cc
++++ b/third_party/blink/common/web_preferences/web_preferences_mojom_traits.cc
+@@ -16,6 +16,30 @@ bool StructTraits<blink::mojom::WebPreferencesDataView,
+                   blink::web_pref::WebPreferences>::
+     Read(blink::mojom::WebPreferencesDataView data,
+          blink::web_pref::WebPreferences* out) {
++  out->umbra_screen_width = data.umbra_screen_width();
++  out->umbra_screen_height = data.umbra_screen_height();
++  out->umbra_screen_available_width = data.umbra_screen_available_width();
++  out->umbra_screen_available_height = data.umbra_screen_available_height();
++  out->umbra_screen_color_depth = data.umbra_screen_color_depth();
++  out->umbra_screen_device_scale_factor = data.umbra_screen_device_scale_factor();
++  // Reject partial or malformed policies at the IPC boundary too.
++  if (out->umbra_screen_width != 0 || out->umbra_screen_height != 0 ||
++      out->umbra_screen_available_width != 0 ||
++      out->umbra_screen_available_height != 0 ||
++      out->umbra_screen_color_depth != 0 ||
++      out->umbra_screen_device_scale_factor != 0) {
++    if (out->umbra_screen_width < 320 || out->umbra_screen_width > 16384 ||
++        out->umbra_screen_height < 200 || out->umbra_screen_height > 16384 ||
++        out->umbra_screen_available_width < 1 ||
++        out->umbra_screen_available_width > out->umbra_screen_width ||
++        out->umbra_screen_available_height < 1 ||
++        out->umbra_screen_available_height > out->umbra_screen_height ||
++        out->umbra_screen_color_depth < 1 || out->umbra_screen_color_depth > 64 ||
++        !(out->umbra_screen_device_scale_factor >= 0.5 &&
++          out->umbra_screen_device_scale_factor <= 4)) {
++      return false;
++    }
++  }
+   if (!data.ReadStandardFontFamilyMap(&out->standard_font_family_map) ||
+       !data.ReadFixedFontFamilyMap(&out->fixed_font_family_map) ||
+       !data.ReadSerifFontFamilyMap(&out->serif_font_family_map) ||
+diff --git a/third_party/blink/public/common/web_preferences/web_preferences.h b/third_party/blink/public/common/web_preferences/web_preferences.h
+index b042d68..ef4e271 100644
+--- a/third_party/blink/public/common/web_preferences/web_preferences.h
++++ b/third_party/blink/public/common/web_preferences/web_preferences.h
+@@ -43,6 +43,14 @@ BLINK_COMMON_EXPORT extern const char kCommonScript[];
+ // browser/profiles/profile.cc, and
+ // content/public/common/common_param_traits_macros.h
+ struct BLINK_COMMON_EXPORT WebPreferences {
++  // Umbra: web-exposed screen policy. Width zero keeps stock behavior.
++  // These are not compositor/physical screen metrics.
++  int umbra_screen_width = 0;
++  int umbra_screen_height = 0;
++  int umbra_screen_available_width = 0;
++  int umbra_screen_available_height = 0;
++  int umbra_screen_color_depth = 0;
++  double umbra_screen_device_scale_factor = 0;
+ #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
+   static constexpr float kDefaultMinimumPageScaleFactor = 0.25f;
+   static constexpr bool kShrinksViewportContentsToFit = true;
+diff --git a/third_party/blink/public/common/web_preferences/web_preferences_mojom_traits.h b/third_party/blink/public/common/web_preferences/web_preferences_mojom_traits.h
+index 735a8ca..1dcf042 100644
+--- a/third_party/blink/public/common/web_preferences/web_preferences_mojom_traits.h
++++ b/third_party/blink/public/common/web_preferences/web_preferences_mojom_traits.h
+@@ -20,6 +20,27 @@ namespace mojo {
+ template <>
+ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::WebPreferencesDataView,
+                                         blink::web_pref::WebPreferences> {
++  static int umbra_screen_width(const blink::web_pref::WebPreferences& r) {
++    return r.umbra_screen_width;
++  }
++  static int umbra_screen_height(const blink::web_pref::WebPreferences& r) {
++    return r.umbra_screen_height;
++  }
++  static int umbra_screen_available_width(
++      const blink::web_pref::WebPreferences& r) {
++    return r.umbra_screen_available_width;
++  }
++  static int umbra_screen_available_height(
++      const blink::web_pref::WebPreferences& r) {
++    return r.umbra_screen_available_height;
++  }
++  static int umbra_screen_color_depth(const blink::web_pref::WebPreferences& r) {
++    return r.umbra_screen_color_depth;
++  }
++  static double umbra_screen_device_scale_factor(
++      const blink::web_pref::WebPreferences& r) {
++    return r.umbra_screen_device_scale_factor;
++  }
+   static const std::map<std::string, std::u16string>& standard_font_family_map(
+       const blink::web_pref::WebPreferences& r) {
+     return r.standard_font_family_map;
+diff --git a/third_party/blink/public/mojom/webpreferences/web_preferences.mojom b/third_party/blink/public/mojom/webpreferences/web_preferences.mojom
+index 9a04abd..089832c 100644
+--- a/third_party/blink/public/mojom/webpreferences/web_preferences.mojom
++++ b/third_party/blink/public/mojom/webpreferences/web_preferences.mojom
+@@ -115,6 +115,12 @@ enum EffectiveConnectionType {
+ };
+ 
+ struct WebPreferences {
++  int32 umbra_screen_width;
++  int32 umbra_screen_height;
++  int32 umbra_screen_available_width;
++  int32 umbra_screen_available_height;
++  int32 umbra_screen_color_depth;
++  double umbra_screen_device_scale_factor;
+   map<string, mojo_base.mojom.String16> standard_font_family_map;
+   map<string, mojo_base.mojom.String16> fixed_font_family_map;
+   map<string, mojo_base.mojom.String16> serif_font_family_map;
+diff --git a/third_party/blink/renderer/core/css/media_values.cc b/third_party/blink/renderer/core/css/media_values.cc
+index 0d60244..330d457 100644
+--- a/third_party/blink/renderer/core/css/media_values.cc
++++ b/third_party/blink/renderer/core/css/media_values.cc
+@@ -164,6 +164,8 @@ double MediaValues::CalculateDynamicViewportHeight(LocalFrame* frame) {
+ 
+ int MediaValues::CalculateDeviceWidth(LocalFrame* frame) {
+   DCHECK(frame && frame->View() && frame->GetSettings() && frame->GetPage());
++  if (frame->GetSettings()->GetUmbraScreenWidth() > 0)
++    return frame->GetSettings()->GetUmbraScreenWidth();
+   const display::ScreenInfo& screen_info =
+       frame->GetPage()->GetChromeClient().GetScreenInfo(*frame);
+   int device_width = screen_info.rect.width();
+@@ -176,6 +178,8 @@ int MediaValues::CalculateDeviceWidth(LocalFrame* frame) {
+ 
+ int MediaValues::CalculateDeviceHeight(LocalFrame* frame) {
+   DCHECK(frame && frame->View() && frame->GetSettings() && frame->GetPage());
++  if (frame->GetSettings()->GetUmbraScreenWidth() > 0)
++    return frame->GetSettings()->GetUmbraScreenHeight();
+   const display::ScreenInfo& screen_info =
+       frame->GetPage()->GetChromeClient().GetScreenInfo(*frame);
+   int device_height = screen_info.rect.height();
+@@ -193,7 +197,7 @@ bool MediaValues::CalculateStrictMode(LocalFrame* frame) {
+ }
+ 
+ float MediaValues::CalculateDevicePixelRatio(LocalFrame* frame) {
+-  return frame->DevicePixelRatio();
++  return frame->WebExposedDevicePixelRatio();
+ }
+ 
+ bool MediaValues::CalculateDeviceSupportsHDR(LocalFrame* frame) {
+diff --git a/third_party/blink/renderer/core/exported/web_settings_impl.cc b/third_party/blink/renderer/core/exported/web_settings_impl.cc
+index f9d2d0a..e8bd433 100644
+--- a/third_party/blink/renderer/core/exported/web_settings_impl.cc
++++ b/third_party/blink/renderer/core/exported/web_settings_impl.cc
+@@ -52,6 +52,20 @@ WebSettingsImpl::WebSettingsImpl(Settings* settings,
+   DCHECK(settings);
+ }
+ 
++void WebSettingsImpl::SetUmbraScreenMetrics(int width,
++                                           int height,
++                                           int available_width,
++                                           int available_height,
++                                           int color_depth,
++                                           double device_scale_factor) {
++  settings_->SetUmbraScreenWidth(width);
++  settings_->SetUmbraScreenHeight(height);
++  settings_->SetUmbraScreenAvailableWidth(available_width);
++  settings_->SetUmbraScreenAvailableHeight(available_height);
++  settings_->SetUmbraScreenColorDepth(color_depth);
++  settings_->SetUmbraScreenDeviceScaleFactor(device_scale_factor);
++}
++
+ void WebSettingsImpl::SetFromStrings(const WebString& name,
+                                      const WebString& value) {
+   settings_->SetFromStrings(name, value);
+diff --git a/third_party/blink/renderer/core/exported/web_settings_impl.h b/third_party/blink/renderer/core/exported/web_settings_impl.h
+index 2bb646b..40b5634 100644
+--- a/third_party/blink/renderer/core/exported/web_settings_impl.h
++++ b/third_party/blink/renderer/core/exported/web_settings_impl.h
+@@ -49,6 +49,13 @@ class CORE_EXPORT WebSettingsImpl final : public WebSettings {
+ 
+   void SetFromStrings(const WebString& name, const WebString& value) override;
+ 
++  void SetUmbraScreenMetrics(int width,
++                             int height,
++                             int available_width,
++                             int available_height,
++                             int color_depth,
++                             double device_scale_factor);
++
+   bool ShrinksViewportContentToFit() const override;
+   bool ViewportEnabled() const override;
+   void SetAccelerated2dCanvasMSAASampleCount(int) override;
+diff --git a/third_party/blink/renderer/core/exported/web_view_impl.cc b/third_party/blink/renderer/core/exported/web_view_impl.cc
+index ca627cb..859ed77 100644
+--- a/third_party/blink/renderer/core/exported/web_view_impl.cc
++++ b/third_party/blink/renderer/core/exported/web_view_impl.cc
+@@ -1597,6 +1597,10 @@ void WebView::ApplyWebPreferences(const web_pref::WebPreferences& prefs,
+                                   WebView* web_view) {
+   WebViewImpl* web_view_impl = To<WebViewImpl>(web_view);
+   WebSettings* settings = web_view->GetSettings();
++  static_cast<WebSettingsImpl*>(settings)->SetUmbraScreenMetrics(
++      prefs.umbra_screen_width, prefs.umbra_screen_height,
++      prefs.umbra_screen_available_width, prefs.umbra_screen_available_height,
++      prefs.umbra_screen_color_depth, prefs.umbra_screen_device_scale_factor);
+   ApplyFontsFromMap(prefs.standard_font_family_map,
+                     SetStandardFontFamilyWrapper, settings);
+   ApplyFontsFromMap(prefs.fixed_font_family_map, SetFixedFontFamilyWrapper,
+diff --git a/third_party/blink/renderer/core/frame/local_dom_window.cc b/third_party/blink/renderer/core/frame/local_dom_window.cc
+index 511fce6..8b45d01 100644
+--- a/third_party/blink/renderer/core/frame/local_dom_window.cc
++++ b/third_party/blink/renderer/core/frame/local_dom_window.cc
+@@ -1938,7 +1938,7 @@ double LocalDOMWindow::devicePixelRatio() const {
+     return 0.0;
+   }
+ 
+-  return GetFrame()->DevicePixelRatio();
++  return GetFrame()->WebExposedDevicePixelRatio();
+ }
+ 
+ ScriptPromise<ScrollResult> LocalDOMWindow::scrollBy(ScriptState* script_state,
+diff --git a/third_party/blink/renderer/core/frame/local_frame.cc b/third_party/blink/renderer/core/frame/local_frame.cc
+index fca86cb..f8fc439 100644
+--- a/third_party/blink/renderer/core/frame/local_frame.cc
++++ b/third_party/blink/renderer/core/frame/local_frame.cc
+@@ -1854,6 +1854,19 @@ double LocalFrame::DevicePixelRatio() const {
+   return ratio;
+ }
+ 
++double LocalFrame::WebExposedDevicePixelRatio() const {
++  if (!page_ || GetSettings()->GetUmbraScreenWidth() == 0)
++    return DevicePixelRatio();
++  // LayoutZoomFactor includes host DSF. Remove it, but preserve page zoom,
++  // which is intentionally observable through CSS resolution and window DPR.
++  const float physical_scale = page_->GetChromeClient().WindowToViewportScalar(
++      &LocalFrameRoot(), 1.0f);
++  if (!(physical_scale > 0))
++    return GetSettings()->GetUmbraScreenDeviceScaleFactor();
++  return GetSettings()->GetUmbraScreenDeviceScaleFactor() * LayoutZoomFactor() /
++         physical_scale;
++}
++
+ String LocalFrame::SelectedText() const {
+   return Selection().SelectedText();
+ }
+diff --git a/third_party/blink/renderer/core/frame/local_frame.h b/third_party/blink/renderer/core/frame/local_frame.h
+index ba6ec93..a35e512 100644
+--- a/third_party/blink/renderer/core/frame/local_frame.h
++++ b/third_party/blink/renderer/core/frame/local_frame.h
+@@ -448,6 +448,8 @@ class CORE_EXPORT LocalFrame final
+                       float css_zoom_factor);
+ 
+   double DevicePixelRatio() const;
++  // Reporting-only DPR. Does not change layout, input or compositor scaling.
++  double WebExposedDevicePixelRatio() const;
+ 
+   // Informs the local root's document and its local descendant subtree that a
+   // media query value changed.
+diff --git a/third_party/blink/renderer/core/frame/screen.cc b/third_party/blink/renderer/core/frame/screen.cc
+index ed50289..960d5c3 100644
+--- a/third_party/blink/renderer/core/frame/screen.cc
++++ b/third_party/blink/renderer/core/frame/screen.cc
+@@ -109,6 +109,10 @@ unsigned Screen::colorDepth() const {
+   if (!DomWindow()) {
+     return unknown_color_depth;
+   }
++  if (auto* settings = DomWindow()->GetFrame()->GetSettings();
++      settings->GetUmbraScreenWidth() > 0) {
++    return settings->GetUmbraScreenColorDepth();
++  }
+   return GetScreenInfo().depth == 0
+              ? unknown_color_depth
+              : base::saturated_cast<unsigned>(GetScreenInfo().depth);
+@@ -160,6 +164,8 @@ bool Screen::isExtended() const {
+   if (!DomWindow()) {
+     return false;
+   }
++  if (DomWindow()->GetFrame()->GetSettings()->GetUmbraScreenWidth() > 0)
++    return false;
+   auto* context = GetExecutionContext();
+   if (!context->IsFeatureEnabled(
+           network::mojom::PermissionsPolicyFeature::kWindowManagement)) {
+@@ -173,6 +179,14 @@ gfx::Rect Screen::GetRect(bool available) const {
+   if (!DomWindow())
+     return gfx::Rect();
+   LocalFrame* frame = DomWindow()->GetFrame();
++  if (auto* settings = frame->GetSettings();
++      settings->GetUmbraScreenWidth() > 0) {
++    return gfx::Rect(0, 0,
++                     available ? settings->GetUmbraScreenAvailableWidth()
++                               : settings->GetUmbraScreenWidth(),
++                     available ? settings->GetUmbraScreenAvailableHeight()
++                               : settings->GetUmbraScreenHeight());
++  }
+   const display::ScreenInfo& screen_info = GetScreenInfo();
+   gfx::Rect rect = available ? screen_info.available_rect : screen_info.rect;
+   if (frame->GetSettings()->GetReportScreenSizeInPhysicalPixelsQuirk())
+diff --git a/third_party/blink/renderer/core/frame/settings.json5 b/third_party/blink/renderer/core/frame/settings.json5
+index 302de65..7b1058d 100644
+--- a/third_party/blink/renderer/core/frame/settings.json5
++++ b/third_party/blink/renderer/core/frame/settings.json5
+@@ -53,6 +53,42 @@
+   },
+ 
+   data: [
++    // Umbra reporting-only policy, delivered by WebPreferences to all views.
++    // Zero width disables it; physical widget/compositor metrics stay intact.
++    {
++      name: "umbraScreenWidth",
++      type: "int",
++      initial: 0,
++      invalidate: ["MediaQuery"],
++    },
++    {
++      name: "umbraScreenHeight",
++      type: "int",
++      initial: 0,
++      invalidate: ["MediaQuery"],
++    },
++    {
++      name: "umbraScreenAvailableWidth",
++      type: "int",
++      initial: 0,
++    },
++    {
++      name: "umbraScreenAvailableHeight",
++      type: "int",
++      initial: 0,
++    },
++    {
++      name: "umbraScreenColorDepth",
++      type: "int",
++      initial: 0,
++      invalidate: ["MediaQuery"],
++    },
++    {
++      name: "umbraScreenDeviceScaleFactor",
++      type: "double",
++      initial: 0,
++      invalidate: ["MediaQuery"],
++    },
+     {
+       name: "batterySaverEnabled",
+       type: "bool",

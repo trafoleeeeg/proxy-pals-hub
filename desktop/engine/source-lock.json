@@ -1,0 +1,16 @@
+{
+  "status": "experimental-unbuilt-do-not-release",
+  "electron": {
+    "repository": "https://github.com/electron/electron.git",
+    "tag": "v44.4.5",
+    "commit": "694f45852a0f1726cd23bfd379854de489cccb65"
+  },
+  "chromium": {
+    "repository": "https://chromium.googlesource.com/chromium/src.git",
+    "mirror": "https://github.com/chromium/chromium.git",
+    "tag": "152.0.7977.130",
+    "commit": "2c592105bbcd9490a9894df48d0fe59b2c512651"
+  },
+  "nativeScreenApi": "session.setUmbraScreenMetrics",
+  "appIntegrationEnabled": false
+}

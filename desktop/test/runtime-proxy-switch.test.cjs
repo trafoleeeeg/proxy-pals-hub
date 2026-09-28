@@ -52,6 +52,7 @@ function harness(options = {}) {
     } },
   };
   const runtime = createProfileRuntime(electron, {
+    protectBackgroundWorkers: async () => ({ stop: async () => {}, isActive: () => true }),
     createBrowser: async (_electron, opts) => { browserOptions = opts; return { shell: { isDestroyed: () => false, focus() {} }, destroy() {}, publish() {}, markReady() {}, createTab: () => new Window() }; },
     setupProxy: async (_ses, proxy) => {
       setups.push(proxy);

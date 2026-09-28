@@ -71,6 +71,7 @@ function harness() {
     } },
   };
   const runtime = createProfileRuntime(electron, {
+    protectBackgroundWorkers: async () => ({ stop: async () => {}, isActive: () => true }),
     createBrowser: async (_electron, options) => (browserConfig = options, {
       shell: { isDestroyed: () => false, focus() {} }, destroy() {},
       createTab: () => new Window({ webPreferences: { partition: options.partition, contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, devTools: false } }),

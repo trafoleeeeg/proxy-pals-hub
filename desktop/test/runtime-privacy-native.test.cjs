@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const os = require("node:os");
-const { spawn } = require("node:child_process");
+const { spawnBrowser } = require("../runtime/browser-pipe.cjs");
 
 test("sandboxed Electron strict and normal modes plus exact-origin compatibility", { timeout: 65000 }, async (t) => {
   let electron;
@@ -14,7 +14,7 @@ test("sandboxed Electron strict and normal modes plus exact-origin compatibility
   const env = { ...process.env, UMBRA_PRIVACY_TEST_DIR: directory };
   delete env.ELECTRON_RUN_AS_NODE;
   const result = await new Promise((resolve, reject) => {
-    const child = spawn(electron, [path.join(__dirname, "runtime-privacy-harness.cjs")], { env, windowsHide: true });
+    const child = spawnBrowser(electron, [path.join(__dirname, "runtime-privacy-harness.cjs")], { env });
     let output = "";
     child.stdout.on("data", (chunk) => { output = (output + chunk).slice(-8192); });
     child.stderr.on("data", (chunk) => { output = (output + chunk).slice(-8192); });
@@ -24,7 +24,7 @@ test("sandboxed Electron strict and normal modes plus exact-origin compatibility
   });
   assert.equal(result.code, 0, result.output);
   assert.match(result.output, /UMBRA_PRIVACY_NATIVE_OK/);
-  const audit = result.output.match(/UMBRA_WORKER_IDENTITY_AUDIT: shared=(?:true|false) service=(?:true|false)/);
+  const audit = result.output.match(/UMBRA_WORKER_IDENTITY_AUDIT: shared=true service=true/);
   assert.ok(audit, "worker identity audit must complete without exposing native values");
   console.log(audit[0]);
 });

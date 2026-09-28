@@ -6,6 +6,7 @@ const http = require("node:http");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 const { applyFingerprint, normalizeFingerprint, installSessionPrivacy } = require("../runtime/fingerprint.cjs");
+const { initializeBackgroundWorkers, protectBackgroundWorkers } = require("../runtime/background-workers.cjs");
 assert.ok(process.env.UMBRA_PRIVACY_TEST_DIR);
 app.setPath("userData", path.join(process.env.UMBRA_PRIVACY_TEST_DIR, "user"));
 app.setPath("sessionData", path.join(process.env.UMBRA_PRIVACY_TEST_DIR, "sessions"));
@@ -43,8 +44,10 @@ async function probe() {
 }
 const probeSource = `(${probe.toString()})()`;
 async function workerIdentity() {
+  const initial = { userAgent: navigator.userAgent, platform: navigator.platform, language: navigator.language, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, hardwareConcurrency: navigator.hardwareConcurrency, deviceMemory: navigator.deviceMemory };
   const hints = navigator.userAgentData ? await navigator.userAgentData.getHighEntropyValues(["architecture", "platformVersion", "uaFullVersion"]) : null;
   return {
+    initial,
     userAgent: navigator.userAgent, platform: navigator.platform,
     language: navigator.language, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     hardwareConcurrency: navigator.hardwareConcurrency, deviceMemory: navigator.deviceMemory,
@@ -53,11 +56,12 @@ async function workerIdentity() {
 }
 const workerIdentitySource = `(${workerIdentity.toString()})()`;
 app.whenReady().then(async () => {
+  await initializeBackgroundWorkers();
   server = http.createServer((req, res) => {
     if (req.url === "/headers") { res.setHeader("Content-Type", "application/json"); return res.end(JSON.stringify({ ua: req.headers["user-agent"], language: req.headers["accept-language"], dnt: req.headers.dnt || null })); }
     if (req.url === "/worker.js") { res.setHeader("Content-Type", "text/javascript"); return res.end(`${probeSource}.then(result => postMessage(result));`); }
-    if (req.url === "/shared.js") { res.setHeader("Content-Type", "text/javascript"); return res.end(`onconnect=e=>{${workerIdentitySource}.then(result=>e.ports[0].postMessage(result));};`); }
-    if (req.url === "/sw.js") { res.setHeader("Content-Type", "text/javascript"); return res.end(`self.addEventListener('install',()=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('message',e=>{${workerIdentitySource}.then(result=>e.ports[0].postMessage(result));});`); }
+    if (req.url === "/shared.js") { res.setHeader("Content-Type", "text/javascript"); return res.end(`const first=${workerIdentitySource};onconnect=e=>{first.then(result=>e.ports[0].postMessage(result));};`); }
+    if (req.url === "/sw.js") { res.setHeader("Content-Type", "text/javascript"); return res.end(`const first=${workerIdentitySource};self.addEventListener('install',()=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('message',e=>{first.then(result=>e.ports[0].postMessage(result));});`); }
     res.setHeader("Content-Type", "text/html");
     res.end(req.url === "/frame" ? `<script>${probeSource}.then(result=>parent.postMessage(result,'*'));<\/script>` : "<!doctype html><title>Privacy test</title>");
   });
@@ -76,11 +80,12 @@ app.whenReady().then(async () => {
     ses.setPermissionCheckHandler(() => false);
     ses.setUserAgent(identity.userAgent, identity.languages.join(","));
     installSessionPrivacy(ses, identity);
+    await protectBackgroundWorkers(ses, identity, { onFailure: () => { console.error("BACKGROUND_PROTECTION_FAILED"); finish(1); } });
     const win = new BrowserWindow({ show: false, webPreferences: { session: ses, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true } });
     windows.push(win);
     win.webContents.on("render-process-gone", () => { console.error("PRIVACY_RENDERER_FAILED"); finish(1); });
     await win.loadURL("about:blank");
-    await applyFingerprint(win.webContents, identity, { onFailure: () => { failures++; } });
+    await applyFingerprint(win.webContents, identity, { onFailure: () => { failures++; finish(1); } });
     await win.loadURL(origin);
     return win.webContents;
   }
@@ -172,9 +177,13 @@ app.whenReady().then(async () => {
   assert.equal(typeof sharedIdentity.userAgent, "string");
   const serviceIdentity = await windowsProfile.executeJavaScript("navigator.serviceWorker.register('/sw.js').then(()=>navigator.serviceWorker.ready).then(reg=>new Promise((resolve,reject)=>{const channel=new MessageChannel();const timer=setTimeout(()=>reject(new Error('service worker timeout')),8000);channel.port1.onmessage=e=>{clearTimeout(timer);resolve(e.data);channel.port1.close();};reg.active.postMessage('identity',[channel.port2]);}))");
   assert.equal(typeof serviceIdentity.userAgent, "string");
-  // Keep an explicit, non-identifying CI signal for the known stock-Electron
-  // limitation. Do not log the native worker values or claim they are isolated.
+  // Both results must be true, including synchronous reads in the first
+  // statement. Only booleans enter CI logs, never native device values.
   console.log(`UMBRA_WORKER_IDENTITY_AUDIT: shared=${workerIdentityMatches(sharedIdentity)} service=${workerIdentityMatches(serviceIdentity)}`);
+  assert.equal(workerIdentityMatches(sharedIdentity), true, "SharedWorker identity");
+  assert.equal(workerIdentityMatches(serviceIdentity), true, "ServiceWorker identity");
+  assert.equal(workerIdentityMatches(sharedIdentity.initial), true, "SharedWorker must be protected before its first statement");
+  assert.equal(workerIdentityMatches(serviceIdentity.initial), true, "ServiceWorker must be protected before its first statement");
   await compatible.executeJavaScript("document.cookie='synthetic=fixture; path=/'; localStorage.setItem('fixture','only-compatible'); true");
   assert.equal(await strict.executeJavaScript("document.cookie === '' && localStorage.getItem('fixture') === null"), true);
   assert.equal(failures, 0);

@@ -261,7 +261,8 @@ SHA-256 ZIP совпал с digest загруженного GitHub asset. Миг
 
 ## Воспроизведение
 
-Из корня репозитория, передавая абсолютный путь к распакованному screen5:
+Из корня репозитория, передавая абсолютный путь к распакованному screen6
+(screen5 используется только для воспроизведения прежнего дефекта):
 
 ```powershell
 node desktop/engine/run-rendering-audit.cjs <absolute-electron.exe>

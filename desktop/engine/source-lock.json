@@ -1,5 +1,5 @@
 {
-  "status": "experimental-tested-do-not-release",
+  "status": "release-approved",
   "electron": {
     "repository": "https://github.com/electron/electron.git",
     "tag": "v44.4.5",

@@ -127,6 +127,11 @@ jobs:
           Expand-Archive -LiteralPath desktop/.engine/dist.zip -DestinationPath desktop/.engine/unpacked -Force
           if (-not (Test-Path desktop/.engine/unpacked/electron.exe)) { throw 'Custom Electron executable is missing' }
 
+      - name: Test native screen and orientation across isolated profiles
+        working-directory: desktop
+        timeout-minutes: 5
+        run: node engine/run-screen-native.cjs "$env:GITHUB_WORKSPACE\desktop\.engine\unpacked\electron.exe"
+
       - name: Test Windows sandbox and encrypted restart
         working-directory: desktop
         timeout-minutes: 5

@@ -196,10 +196,21 @@ index db0f997452..6c1ec63966 100644
                      SetStandardFontFamilyWrapper, settings);
    ApplyFontsFromMap(prefs.fixed_font_family_map, SetFixedFontFamilyWrapper,
 diff --git a/third_party/blink/renderer/core/frame/local_dom_window.cc b/third_party/blink/renderer/core/frame/local_dom_window.cc
-index 18ee492066..c4356c9592 100644
+index 18ee492066..cb98fe61cd 100644
 --- a/third_party/blink/renderer/core/frame/local_dom_window.cc
 +++ b/third_party/blink/renderer/core/frame/local_dom_window.cc
-@@ -1938,7 +1938,7 @@ double LocalDOMWindow::devicePixelRatio() const {
+@@ -1199,6 +1199,10 @@ int LocalDOMWindow::orientation() const {
+     return 0;
+   }
+
++  if (frame->GetSettings()->GetUmbraScreenWidth() > 0) {
++    return 0;
++  }
++
+   ChromeClient& chrome_client = frame->GetChromeClient();
+   int orientation = chrome_client.GetScreenInfo(*frame).orientation_angle;
+   // For backward compatibility, we want to return a value in the range of
+@@ -1938,7 +1942,7 @@ double LocalDOMWindow::devicePixelRatio() const {
      return 0.0;
    }
  
@@ -334,3 +345,55 @@ index 302de65601..7b1058db45 100644
      {
        name: "batterySaverEnabled",
        type: "bool",
+diff --git a/third_party/blink/renderer/modules/screen_orientation/screen_orientation_controller.cc b/third_party/blink/renderer/modules/screen_orientation/screen_orientation_controller.cc
+index a8d9885cb4..8db8ce62d4 100644
+--- a/third_party/blink/renderer/modules/screen_orientation/screen_orientation_controller.cc
++++ b/third_party/blink/renderer/modules/screen_orientation/screen_orientation_controller.cc
+@@ -12,6 +12,7 @@
+ #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+ #include "third_party/blink/renderer/core/frame/local_frame.h"
+ #include "third_party/blink/renderer/core/frame/local_frame_view.h"
++#include "third_party/blink/renderer/core/frame/settings.h"
+ #include "third_party/blink/renderer/core/fullscreen/scoped_allow_fullscreen.h"
+ #include "third_party/blink/renderer/core/page/chrome_client.h"
+ #include "third_party/blink/renderer/core/page/page.h"
+@@ -112,6 +113,17 @@ void ScreenOrientationController::UpdateOrientation() {
+   DCHECK(GetPage());
+   ChromeClient& chrome_client = GetPage()->GetChromeClient();
+   LocalFrame& frame = *DomWindow()->GetFrame();
++  // Web-exposed orientation must be derived from the same per-profile screen
++  // policy as Screen and CSS device dimensions, not the host display.
++  if (const auto* settings = frame.GetSettings();
++      settings->GetUmbraScreenWidth() > 0) {
++    orientation_->SetType(ComputeOrientation(
++        gfx::Rect(0, 0, settings->GetUmbraScreenWidth(),
++                  settings->GetUmbraScreenHeight()),
++        0));
++    orientation_->SetAngle(0);
++    return;
++  }
+   const display::ScreenInfo& screen_info = chrome_client.GetScreenInfo(frame);
+   display::mojom::blink::ScreenOrientation orientation_type =
+       screen_info.orientation_type;
+@@ -155,6 +167,9 @@ void ScreenOrientationController::PageVisibilityChanged() {
+   // The orientation type and angle are tied in a way that if the angle has
+   // changed, the type must have changed.
+   LocalFrame& frame = *DomWindow()->GetFrame();
++  if (frame.GetSettings()->GetUmbraScreenWidth() > 0) {
++    return;
++  }
+   uint16_t current_angle =
+       GetPage()->GetChromeClient().GetScreenInfo(frame).orientation_angle;
+ 
+@@ -194,6 +209,11 @@ void ScreenOrientationController::NotifyOrientationChangedInternal() {
+   if (!IsActiveAndVisible())
+     return;
+ 
++  // A host display rotation does not change an immutable profile screen.
++  if (DomWindow()->GetFrame()->GetSettings()->GetUmbraScreenWidth() > 0) {
++    return;
++  }
++
+   UpdateOrientation();
+   GetExecutionContext()
+       ->GetTaskRunner(TaskType::kMiscPlatformAPI)

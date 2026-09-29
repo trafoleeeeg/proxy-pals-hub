@@ -95,10 +95,38 @@ function harness() {
     },
     privacyStore: { readPermissions: async (id) => privacyRecords.get(id) || {}, writePermissions: async (id, rules) => { privacyRecords.set(id, structuredClone(rules)); } },
   });
-  return { runtime, windows, sessions, records, tabRecords, bookmarkRecords, storageClears, get browserConfig() { return browserConfig; }, get configured() { return configured; }, get disposed() { return disposed; }, setFlushGate: (gate) => { flushGate = gate; }, setNavigationGate: (gate) => { navigationGate = gate; }, setSnapshotFailure: (value) => { snapshotFailure = value; } };
+  return { runtime, electron, privacyRecords, windows, sessions, records, tabRecords, bookmarkRecords, storageClears, get browserConfig() { return browserConfig; }, get configured() { return configured; }, get disposed() { return disposed; }, setFlushGate: (gate) => { flushGate = gate; }, setNavigationGate: (gate) => { navigationGate = gate; }, setSnapshotFailure: (value) => { snapshotFailure = value; } };
 }
 
 const payload = () => ({ profileId: ID, deviceId: "test-device", name: "Test", lockToken: "test-lock-token", fingerprint: FP, cookies: "[]", cookiesUpdatedAt: null, proxy: null, startUrl: "https://example.test" });
+
+test("isolated profile awaits fonts before network/windows and cannot grant host font access", async () => {
+  const h = harness();
+  const ses = h.electron.session.fromPartition(`persist:profile-${ID}`);
+  const started = defer(), complete = defer();
+  ses.setUmbraFontIsolation = async () => { started.resolve(); await complete.promise; };
+  h.privacyRecords.set(ID, { "https://example.test": ["fonts", "workers"] });
+  const launch = h.runtime.launchProfileWindow({ ...payload(), fingerprint: { ...FP, fontIsolation: true } });
+  await started.promise;
+  assert.equal(h.configured, 0);
+  assert.equal(h.windows.length, 0);
+  complete.resolve(); await launch;
+  assert.equal(ses.permissionCheck(null, "local-fonts", "https://example.test"), false);
+  let granted;
+  ses.permissionRequest(null, "local-fonts", value => { granted = value; }, { requestingUrl: "https://example.test" });
+  assert.equal(granted, false);
+  assert.deepEqual(h.browserConfig.getPrivacy("https://example.test").permissions, ["workers"]);
+  await assert.rejects(h.browserConfig.setPrivacy("https://example.test", ["fonts"]), /Изоляция шрифтов/);
+  await h.runtime.closeAllProfiles();
+  await assert.rejects(h.runtime.launchProfileWindow(payload()), /перезапустите Umbra/);
+});
+
+test("unavailable font isolation cannot open network or profile windows", async () => {
+  const h = harness();
+  await assert.rejects(h.runtime.launchProfileWindow({ ...payload(), fingerprint: { ...FP, fontIsolation: true } }), /изоляции шрифтов/);
+  assert.equal(h.configured, 0);
+  assert.equal(h.windows.length, 0);
+});
 
 test("strict startup clears stale service workers while normal startup preserves them", async () => {
   for (const aggressivePrivacyMode of [undefined, true]) {

@@ -4,6 +4,16 @@ import { fingerprintSchema } from "../src/lib/server-validation";
 import { fingerprintError, profileFingerprintPayload } from "../src/components/profile-model";
 
 describe("desktop fingerprint presets", () => {
+  test("font isolation round-trips without enabling itself for old profiles", () => {
+    const fp = generateFingerprint("US");
+    expect(fp.fontIsolation).toBe(false);
+    const { fontIsolation: _old, ...legacy } = fp;
+    expect(fingerprintSchema.parse(legacy).fontIsolation).toBe(false);
+    const enabled = { ...fp, fontIsolation: true };
+    expect(fingerprintSchema.parse(enabled).fontIsolation).toBe(true);
+    expect(applyWindowsConfiguration(enabled, WINDOWS_CONFIGURATIONS[0].id).fontIsolation).toBe(true);
+    expect(fingerprintSchema.safeParse({ ...fp, fontIsolation: "true" }).success).toBe(false);
+  });
   for (const os of ["windows", "macos"] as const) {
     test(`${os} presets round-trip through the editor and server`, () => {
       for (let i = 0; i < 30; i++) {

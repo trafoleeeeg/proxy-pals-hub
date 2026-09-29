@@ -77,6 +77,7 @@ export type UmbraBridge = {
     };
   }>;
   appVersion: () => Promise<string>;
+  runtimeCapabilities?: () => Promise<{ fontIsolation: boolean }>;
   checkEngineVersions?: () => Promise<{ ok: boolean; error?: string; installedElectron?: string; installedChromium?: string; latestElectron?: string; stableChrome?: string; electronUpdateAvailable?: boolean; chromeMajorAhead?: boolean }>;
   checkUpdate: () => Promise<{ ok: boolean; version?: string | null; current?: string; error?: string }>;
   updateState: () => Promise<UpdateStatus>;
@@ -251,6 +252,13 @@ export class DesktopProfileLifecycle {
       try {
         payload = await this.api.launch(profileId, this.bridge.platform);
         if (!payload.lockToken) throw new Error("Сервер не выдал токен сессии профиля.");
+        if (payload.fingerprint && typeof payload.fingerprint === "object" &&
+          "fontIsolation" in payload.fingerprint && payload.fingerprint.fontIsolation === true) {
+          const capabilities = await withDesktopTimeout(
+            this.bridge.runtimeCapabilities?.() ?? Promise.resolve({ fontIsolation: false }),
+            "Не удалось проверить поддержку изоляции шрифтов.");
+          if (!capabilities.fontIsolation) throw new Error("Обновите настольный клиент: этот движок не поддерживает изоляцию шрифтов.");
+        }
         this.sessions.set(profileId, {
           profileId, name: payload.name, lockToken: payload.lockToken, cookiesUpdatedAt: payload.cookiesUpdatedAt,
           ...(payload.deviceId ? { deviceId: payload.deviceId } : {}),

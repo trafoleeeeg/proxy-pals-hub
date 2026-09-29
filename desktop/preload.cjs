@@ -38,6 +38,7 @@ if (window.location.origin === trustedOrigin) contextBridge.exposeInMainWorld("u
 
   // Обновление в один клик.
   appVersion: () => ipcRenderer.invoke("umbra:app-version"),
+  runtimeCapabilities: () => ipcRenderer.invoke("umbra:runtime-capabilities"),
   checkEngineVersions: () => ipcRenderer.invoke("umbra:check-engine-versions"),
   checkUpdate: () => ipcRenderer.invoke("umbra:check-update"),
   updateState: () => ipcRenderer.invoke("umbra:update-state"),

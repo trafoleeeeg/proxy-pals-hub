@@ -52,6 +52,8 @@ function normalizeFingerprint(raw = {}, defaultUA, runtimeChrome = process.versi
   // Profiles created before the mode existed retain the previous strict policy.
   const aggressivePrivacyMode = raw.aggressivePrivacyMode === undefined ? true : raw.aggressivePrivacyMode;
   if (typeof aggressivePrivacyMode !== "boolean") throw new Error("Invalid fingerprint privacy mode");
+  const fontIsolation = raw.fontIsolation === undefined ? false : raw.fontIsolation;
+  if (typeof fontIsolation !== "boolean") throw new Error("Invalid fingerprint font isolation mode");
   const integer = (value, fallback, min, max) => {
     if (value == null) return fallback;
     if (!Number.isInteger(value) || value < min || value > max) throw new Error("Invalid fingerprint dimensions");
@@ -95,7 +97,7 @@ function normalizeFingerprint(raw = {}, defaultUA, runtimeChrome = process.versi
   const memory = raw.deviceMemory ?? raw.device_memory ?? 8;
   if (typeof memory !== "number" || !Number.isFinite(memory) || memory < 0.25 || memory > 256) throw new Error("Invalid fingerprint memory");
   return {
-    userAgent, platform, os, osVersion, architecture, languages, timezone, aggressivePrivacyMode,
+    userAgent, platform, os, osVersion, architecture, languages, timezone, aggressivePrivacyMode, fontIsolation,
     screen: {
       width: integer(raw.screen?.width ?? raw.screen_width, 1280, 320, 16384),
       height: integer(raw.screen?.height ?? raw.screen_height, 800, 200, 16384),
@@ -253,9 +255,10 @@ async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
     canvasNoise: "disabled-incoherent-partial-override-removed",
     audioNoise: "disabled-incoherent-partial-override-removed",
     gpuIdentity: "native-when-allowed-not-emulated",
+    fonts: fp.nativeFontIsolation ? "fixed-bundle-native-isolation" : "native-host-fonts",
     unsupportedControls: ["fontsPreset", "webglNoise", "canvasNoise", "audioNoise", "gpu.vendor", "gpu.renderer"],
     hardwarePolicy: fp.aggressivePrivacyMode === false ? "normal-native-hardware-apis" : "blocked-by-default-with-explicit-local-origin-exceptions",
-    limitations: [fp.nativeScreenMetrics ? "Native screen isolation does not protect every hardware API or guarantee undetectability" : "No custom browser kernel or undetectability guarantee", backgroundProtected ? "Unexpected service-worker process loss stops the profile; reopen it to restore protection" : "Shared/service workers are not protected by the page debugger alone", "Normal mode and compatibility exceptions expose native GPU, audio, canvas and font characteristics", "Installed fonts can still affect CSS layout", "JavaScript privacy restrictions are observable", "Native WebRTC policy restricts non-proxied UDP", "Popup opener and form POST are unsupported", "Navigation history is not restored after restart"],
+    limitations: [fp.nativeScreenMetrics ? "Native screen isolation does not protect every hardware API or guarantee undetectability" : "No custom browser kernel or undetectability guarantee", backgroundProtected ? "Unexpected service-worker process loss stops the profile; reopen it to restore protection" : "Shared/service workers are not protected by the page debugger alone", "Normal mode and compatibility exceptions expose native GPU, audio and canvas characteristics", fp.nativeFontIsolation ? "Fixed font bundle is not Windows font emulation; glyph coverage is limited, rasterization and PDF/printing are not isolated" : "Installed fonts can still affect CSS layout", "JavaScript privacy restrictions are observable", "Native WebRTC policy restricts non-proxied UDP", "Popup opener and form POST are unsupported", "Navigation history is not restored after restart"],
   };
 }
 

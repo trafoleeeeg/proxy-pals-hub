@@ -48,7 +48,11 @@
       "ipc-policy.cjs",
       "session-outbox.cjs",
       "runtime/**/*.cjs",
+      "engine/font-bundle-lock.json",
       "runtime/lark-bot.bookmarklet.txt"
+    ],
+    "extraResources": [
+      { "from": "assets/isolated-fonts", "to": "isolated-fonts", "filter": ["*.ttf", "LICENSE.txt", "NOTICE.txt"] }
     ],
     "publish": [
       {

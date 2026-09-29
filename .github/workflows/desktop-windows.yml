@@ -149,6 +149,13 @@ jobs:
         # Native browser and DPAPI fixtures contend for shared Windows resources.
         run: node --test --test-concurrency=1 test/*.test.cjs
 
+      - name: Test allowed graphics and audio API consistency
+        working-directory: desktop
+        timeout-minutes: 3
+        # Native data consistency, not a guarantee of hardware anonymity.
+        # Software GPU research is deliberately not enabled in CI or the app.
+        run: node engine/run-rendering-audit.cjs "$env:GITHUB_WORKSPACE\desktop\.engine\unpacked\electron.exe"
+
       - name: Build Windows app
         working-directory: desktop
         run: npm run build:win

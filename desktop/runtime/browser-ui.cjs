@@ -119,8 +119,8 @@ function renderer() {
     const normal = privacyConsent.mode === "normal";
     byId("privacy-origin").textContent = privacyConsent.origin || "Откройте сайт";
     byId("privacy-intro").textContent = normal
-      ? "Обычный режим: WebGL, Canvas, Web Audio и workers доступны всем сайтам и могут раскрыть реальное устройство. Доступ к локальным шрифтам и устройствам по запросу по-прежнему запрещён. Для блокировки включите агрессивный режим в настройках профиля и перезапустите его."
-      : "По умолчанию аппаратные API заблокированы. Разрешайте только то, без чего этот сайт не работает:";
+      ? "Обычный режим: WebGL, Canvas, Web Audio и workers доступны всем сайтам и могут раскрыть реальное устройство. Перечисление шрифтов через API и доступ к устройствам запрещены; шрифты через CSS не скрыты. Для блокировки включите агрессивный режим в настройках профиля и перезапустите его."
+      : "По умолчанию аппаратные API заблокированы. Разрешённые API работают нативно, без подмены GPU и шума Canvas/Audio, и могут раскрыть реальное оборудование. Разрешайте только то, без чего этот сайт не работает:";
     for (const capability of privacyCapabilities) {
       byId(`privacy-${capability}`).checked = privacyConsent.permissions?.includes(capability) === true;
       byId(`privacy-${capability}`).disabled = normal;
@@ -375,7 +375,7 @@ function renderer() {
     byId("privacy-button").textContent = normalPrivacy || state.privacy?.allowed ? "⚠" : "◈";
     byId("privacy-button").title = normalPrivacy ? "Обычный режим: аппаратные API доступны и могут раскрыть устройство" : state.privacy?.allowed ? "Защита сайта ослаблена: есть исключения для аппаратных API" : "Защита: аппаратные API заблокированы. Настроить исключение";
     byId("privacy-notice").textContent = normalPrivacy
-      ? "Обычный режим: WebGL, Canvas, Web Audio и workers доступны; сайты могут увидеть реальное оборудование. Локальные шрифты и устройства остаются под запретом."
+      ? "Обычный режим: WebGL, Canvas, Web Audio и workers доступны; сайты могут увидеть реальное оборудование. Перечисление шрифтов через API и доступ к устройствам запрещены; CSS-шрифты не скрыты."
       : state.privacy?.allowed
       ? `Для этого сайта разрешены: ${state.privacy.permissions.join(", ")}. Они могут раскрыть характеристики компьютера.`
       : "Аппаратные API заблокированы. Если сайт не работает, нажмите ◈ для настройки исключения.";

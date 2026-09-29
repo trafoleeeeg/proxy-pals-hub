@@ -37,6 +37,9 @@ if (process.versions.electron) {
   app.commandLine.appendSwitch("disable-quic");
   app.commandLine.appendSwitch("disable-background-networking");
   app.commandLine.appendSwitch("disable-component-update");
+  // Chromium's own WebRTC tests enable loopback enumeration. This isolated
+  // harness uses it only to make its local STUN positive control meaningful.
+  if (process.env.UMBRA_RUNTIME_TEST_STORAGE === "network-privacy") app.commandLine.appendSwitch("allow-loopback-in-peer-connection");
   app.on("web-contents-created", (_event, wc) => {
     process.stdout.write(`NATIVE_CONTENT_CREATED ${wc.id}\n`);
     wc.on("did-finish-load", () => process.stdout.write(`NATIVE_CONTENT_LOADED ${wc.id}\n`));
@@ -119,6 +122,10 @@ if (process.versions.electron) {
       cookies: "[]", cookiesUpdatedAt: "2000-01-01T00:00:00.000Z", startUrl: `https://localhost:${local.port}/${id}`,
       fingerprint: { userAgent: "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36", osVersion: "11.0", platform: "Win32", chromeVersion: "140.0.7339.81", languages: ["de-DE", "de"], timezone: "Asia/Tokyo", screen: { width: 1920, height: 1080, colorDepth: 24 }, hardwareConcurrency: 6, deviceMemory: 8, canvasNoise: 1327, audioNoise: 997 },
     });
+    if (mode === "network-privacy") {
+      await require("./runtime-network-privacy.cjs").auditNetworkPrivacy({ electron, plainPort: plain.port, proxy: payload().proxy, cleanups });
+      return;
+    }
     if (mode === "network") {
       const socks = await mockSocks(local.port); cleanups.push(() => socks.close());
       const checker = createProxyChecker({ net: electronNet, session: { fromPartition: (partition) => trustFixture(session.fromPartition(partition)) } }, { endpoints: [`https://localhost:${local.port}/ip`], geoEndpoint: null, timeoutMs: 2500 });

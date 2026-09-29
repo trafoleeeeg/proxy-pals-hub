@@ -106,8 +106,8 @@ Chromium с возможностями screen5. 16/32 не предлагают�
 | CAN-01 Canvas/SVG/OffscreenCanvas | Семантика простого readback проверена, hardware isolation отсутствует | Текст, SVG, пути, gradients, filters, image transfer, color management, WebGL readPixels |
 | AUD-01 Audio | Buffer semantics проверена, hardware isolation отсутствует | Реальное offline rendering, AudioWorklet, default sample rate, latency, output device, live/offline differences |
 | FONT-01 CSS/Canvas шрифты | Host lookup доступен без opt-in; opt-in ограничивает набор | Расширенная glyph coverage, fallback, emoji, downloadable fonts, PDF, печать; законность распространения набора |
-| NET-01 IPv4/IPv6/DNS | Политики есть, отсутствие утечек не доказано | Собственный внешний DNS/HTTPS challenge и захват пакетов: HTTP/SOCKS, сбой/смена прокси, VPN on/off |
-| NET-02 WebRTC/ICE/STUN/TURN | Запрет непроксируемого UDP предусмотрен | Проверить фактические кандидаты и маршруты, TCP/UDP/TURN/IPv6, worker и iframe; policy flag не равен измерению |
+| NET-01 IPv4/IPv6/DNS | SOCKS получает неразрешённое имя `.invalid` и доставляет запрос; отсутствие фоновых DNS/IPv6-утечек не доказано | Собственный внешний DNS/HTTPS challenge и захват пакетов: HTTP/SOCKS, сбой/смена прокси, VPN on/off |
+| NET-02 WebRTC/ICE/STUN/TURN | Локальный IPv4 STUN: контроль доставляет пакеты, защищённые main и cross-origin iframe не доставляют и не выдают ICE-кандидатов | Внешние ICE-маршруты, TCP/UDP/TURN/IPv6, смена сети; локальная проверка не равна полному сетевому аудиту |
 | NET-03 WebSocket/WebTransport/QUIC | WS/WSS: локальный тест на screen5 подтвердил отказ без прямого fallback при падении bridge и отключении upstream; WebTransport/QUIC не проверены | Внешний маршрут, другие прокси-протоколы и UDP-транспорты |
 | NET-04 LAN/loopback/port probing | Не проверено | Контролируемые локальные endpoints и DNS rebinding; отдельно с прокси и без; не сканировать реальную LAN |
 | TLS-01 TLS/HTTP2/TCP | Не проверено | Контролируемый сервер; определить, что формирует клиент, а что прокси. Общий TLS hash не обязательно дефект |
@@ -170,6 +170,33 @@ DNS/IPv6/ICE-утечек или идентичного поведения пр�
 существующие отдельные проверки SOCKS5/HTTPS-прокси покрывают авторизацию HTTPS,
 но не заменяют аналогичную матрицу WebSocket-сбоев для каждого протокола.
 
+## Локальные STUN и SOCKS DNS: 30 сентября 2026
+
+Новый `desktop/test/runtime-network-privacy.cjs`, запускаемый режимом
+`network-privacy` нативного harness, проверен на том же опубликованном screen5:
+
+- Уникальное имя в зарезервированной зоне `.invalid` передаётся в SOCKS5
+  как имя, а не локально вычисленный IP. Тестовый SOCKS сам направляет его
+  на loopback HTTP-сервер; успешный ответ подтверждает рабочий маршрут.
+  Это не захват пакетов DNS и не исключение параллельного speculative lookup.
+- Поднят свой IPv4 STUN-сервер на `127.0.0.1`. Контрольная временная сессия
+  с политикой `default` действительно доставляет ему Binding Request.
+  Без этого положительного контроля весь тест считается проваленным.
+- Во второй сессии применён реальный `applyFingerprint` в обычном режиме
+  (`aggressivePrivacyMode: false`, `webrtc: proxy`) и настроен HTTP-прокси.
+  ICE gathering завершается, список кандидатов пуст, новых STUN-запросов нет.
+  То же проверено в cross-origin iframe (`localhost` внутри `127.0.0.1`).
+- Chromium по умолчанию не включает loopback в список WebRTC-интерфейсов.
+  Только данный тестовый процесс получает `allow-loopback-in-peer-connection`,
+  как собственные WebRTC browser tests Chromium. Это необходимо для рабочего
+  положительного контроля; настройки приложения и sandbox не ослаблялись.
+
+Сырые адреса ICE и параметры реальных интерфейсов не печатаются и не сохраняются.
+Публичные STUN-сервисы и рабочие аккаунты не используются. Проверка подтверждает
+локальную IPv4-политику, но не проверяет внешние IPv6, TURN/TCP/TLS, DNS-пакеты,
+маршруты при VPN/смене сети и звонки в реальных сервисах. Runtime не менялся:
+в проверенных сценариях дополнительной утечки не обнаружено.
+
 ## Воспроизведение
 
 Из корня репозитория, передавая абсолютный путь к распакованному screen5:
@@ -181,6 +208,7 @@ node desktop/engine/run-screen-native.cjs <absolute-electron.exe> screen
 $env:ELECTRON_OVERRIDE_DIST_PATH = '<absolute-directory-containing-electron.exe>'
 $env:UMBRA_REQUIRE_NATIVE = '1'
 node --test --test-name-pattern 'HTTP/SOCKS5' desktop/test/runtime-native-smoke.test.cjs
+node --test --test-name-pattern 'local STUN' desktop/test/runtime-native-smoke.test.cjs
 ```
 
 Первый runner теперь включает третий режим `font-isolated` и проверяет отсутствие

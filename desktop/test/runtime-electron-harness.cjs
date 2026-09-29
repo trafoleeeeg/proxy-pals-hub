@@ -36,6 +36,7 @@ if (process.versions.electron) {
   app.commandLine.appendSwitch("in-process-gpu");
   app.commandLine.appendSwitch("disable-quic");
   app.commandLine.appendSwitch("disable-background-networking");
+  app.commandLine.appendSwitch("disable-component-update");
   app.on("web-contents-created", (_event, wc) => {
     process.stdout.write(`NATIVE_CONTENT_CREATED ${wc.id}\n`);
     wc.on("did-finish-load", () => process.stdout.write(`NATIVE_CONTENT_LOADED ${wc.id}\n`));
@@ -100,7 +101,10 @@ if (process.versions.electron) {
     const plain = await listen(http.createServer((req, res) => { httpHits.push(req.url); res.setHeader("Content-Type", "text/html"); res.end("<title>HTTP fixture</title><h1>HTTP through proxy</h1>"); }));
     cleanups.push(() => plain.close());
     const auth = { a: 0, b: 0, rejected: 0 };
-    const credentials = ({ username, password }) => {
+    const credentials = ({ username, password, hostname, port }) => {
+      // A browser component request can race the fixture's first request.
+      // Never let the synthetic HTTP upstream resolve or contact the internet.
+      if (!["127.0.0.1", "localhost"].includes(hostname) || ![local.port, plain.port].includes(port)) return { requestAuthentication: true };
       const valid = (username === "a" && password === "a-pass") || (username === "b" && password === "b-pass");
       if (valid) auth[username]++; else auth.rejected++;
       return { requestAuthentication: !valid };
@@ -116,7 +120,7 @@ if (process.versions.electron) {
     });
     if (mode === "network") {
       const socks = await mockSocks(local.port); cleanups.push(() => socks.close());
-      const checker = createProxyChecker({ net: electronNet, session: { fromPartition: (partition) => trustFixture(session.fromPartition(partition)) } }, { endpoints: [`https://localhost:${local.port}/ip`], timeoutMs: 2500 });
+      const checker = createProxyChecker({ net: electronNet, session: { fromPartition: (partition) => trustFixture(session.fromPartition(partition)) } }, { endpoints: [`https://localhost:${local.port}/ip`], geoEndpoint: null, timeoutMs: 2500 });
       for (const [password, expected] of [["a-pass", true], ["wrong", false]]) {
         const before = hits.length;
         const result = await checker({ ...payload().proxy, password });
@@ -129,7 +133,11 @@ if (process.versions.electron) {
         assert.equal(result.ok, expected);
         if (!expected) assert.equal(hits.length, before);
       }
-      assert.equal(socks.observations.destinations[0].host, "localhost");
+      // SOCKS mock rejects every other port before connecting. Check remote DNS
+      // for the actual fixture, not the arrival order of background requests.
+      const fixtureDestinations = socks.observations.destinations.filter(destination => destination.port === local.port);
+      assert.ok(fixtureDestinations.length > 0);
+      assert.ok(fixtureDestinations.every(destination => destination.host === "localhost"));
       const tlsProxy = new Server({ host: "127.0.0.1", port: 0, serverType: "https", httpsOptions: certificate, prepareRequestFunction: credentials });
       await tlsProxy.listen(); cleanups.push(() => tlsProxy.close(true));
       assert.equal((await checker({ protocol: "https", host: "localhost", port: tlsProxy.port, username: "a", password: "a-pass" })).ok, true);

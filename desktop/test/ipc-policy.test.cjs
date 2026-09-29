@@ -20,14 +20,14 @@ test("external URL policy rejects executable protocols and embedded credentials"
 });
 test("sandboxed preload loads without requiring package.json and exposes no bridge to other origins", () => {
   const script = fs.readFileSync(path.join(__dirname, "../preload.cjs"), "utf8");
-  const run = (origin) => {
+  const run = (origin, argv = ["--umbra-version=0.4.0", "--umbra-app-origin=https%3A%2F%2Fpanel.example"]) => {
     let bridge;
     vm.runInNewContext(script, {
       require: (module) => {
         assert.equal(module, "electron", "Sandbox cannot require local CommonJS files");
         return { contextBridge: { exposeInMainWorld: (_key, value) => { bridge = value; } }, ipcRenderer: {} };
       },
-      process: { platform: "win32", versions: { electron: "44.4.5", chrome: "152.0.7977.130" }, argv: ["--umbra-version=0.4.0", "--umbra-app-origin=https%3A%2F%2Fpanel.example"] },
+      process: { platform: "win32", versions: { electron: "44.4.5", chrome: "152.0.7977.130" }, argv },
       window: { location: { origin } },
     });
     return bridge;
@@ -35,4 +35,10 @@ test("sandboxed preload loads without requiring package.json and exposes no brid
   assert.equal(run("https://panel.example").version, "0.4.0");
   assert.equal(run("https://panel.example").engine.chromium, "152.0.7977.130");
   assert.equal(run("https://other.example"), undefined);
+  const packaged = run("https://proxy-pals-hub.lovable.app", []);
+  assert.equal(typeof packaged.checkProxy, "function");
+  assert.equal(typeof packaged.launchProfile, "function");
+  assert.match(fs.readFileSync(path.join(__dirname, "../main.cjs"), "utf8"),
+    /const DEFAULT_APP_URL = "https:\/\/proxy-pals-hub\.lovable\.app\/app"/);
+  assert.equal(run("https://other.example", []), undefined);
 });

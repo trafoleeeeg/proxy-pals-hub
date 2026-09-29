@@ -1,7 +1,10 @@
 const { contextBridge, ipcRenderer } = require("electron");
 const readArgument = (prefix) => process.argv.find((value) => value.startsWith(prefix))?.slice(prefix.length);
 const version = readArgument("--umbra-version=") || "unknown";
-const trustedOrigin = decodeURIComponent(readArgument("--umbra-app-origin=") || "");
+// Sandboxed Electron 44 preloads receive an empty process.argv on Windows.
+// The packaged panel uses this fixed origin; the main process independently
+// validates the sender's top frame on every privileged IPC request.
+const trustedOrigin = decodeURIComponent(readArgument("--umbra-app-origin=") || "") || "https://proxy-pals-hub.lovable.app";
 
 if (window.location.origin === trustedOrigin) contextBridge.exposeInMainWorld("umbra", {
   isDesktop: true,

@@ -108,6 +108,25 @@ function normalizeFingerprint(raw = {}, defaultUA, runtimeChrome = process.versi
   };
 }
 
+function applyNativeScreenMetrics(ses, fp, { required = false } = {}) {
+  if (typeof ses?.setUmbraScreenMetrics !== "function") {
+    if (required) throw new Error("Native screen protection is unavailable");
+    return false;
+  }
+  const metrics = {
+    width: fp.screen.width,
+    height: fp.screen.height,
+    availableWidth: fp.screen.width,
+    availableHeight: Math.max(1, fp.screen.height - (fp.os === "macos" ? 25 : 40)),
+    colorDepth: fp.screen.colorDepth,
+    deviceScaleFactor: fp.os === "macos" ? 2 : 1,
+  };
+  try { ses.setUmbraScreenMetrics(metrics); }
+  catch { throw new Error("Native screen protection could not be applied; restart Umbra before changing screen settings"); }
+  fp.nativeScreenMetrics = true;
+  return true;
+}
+
 function userAgentOverride(fp) {
   const result = { userAgent: fp.userAgent, acceptLanguage: fp.languages.join(","), platform: fp.platform };
   const match = /Chrome\/(\d+)\.([\d.]+)/.exec(fp.userAgent);
@@ -165,9 +184,9 @@ async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
       await send("Emulation.setTimezoneOverride", { timezoneId: fp.timezone }, id);
       await applyLocale(send, fp.languages[0], id);
       await send("Emulation.setHardwareConcurrencyOverride", { hardwareConcurrency: fp.hardwareConcurrency }, id);
-      // CDP rejects metrics on iframe targets. Prototype overrides cover JS,
-      // NOT OOPIF CSS device/resolution queries; report this engine boundary.
-      if (type === "page") await send("Emulation.setDeviceMetricsOverride", { width: 0, height: 0, deviceScaleFactor: fp.os === "macos" ? 2 : 1, mobile: false, screenWidth: fp.screen.width, screenHeight: fp.screen.height }, id);
+      // CDP rejects metrics on iframe targets. The native session policy covers
+      // their CSS; stock Electron's JS fallback cannot cover OOPIF CSS.
+      if (type === "page" && !fp.nativeScreenMetrics) await send("Emulation.setDeviceMetricsOverride", { width: 0, height: 0, deviceScaleFactor: fp.os === "macos" ? 2 : 1, mobile: false, screenWidth: fp.screen.width, screenHeight: fp.screen.height }, id);
       await send("Page.addScriptToEvaluateOnNewDocument", { source, runImmediately: true }, id);
     } else {
       const evaluated = await send("Runtime.evaluate", { expression: source, returnByValue: true }, id);
@@ -193,11 +212,12 @@ async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
       applyLocale(send, fp.languages[0]),
       send("Emulation.setTimezoneOverride", { timezoneId: fp.timezone }),
       send("Emulation.setHardwareConcurrencyOverride", { hardwareConcurrency: fp.hardwareConcurrency }),
-      // Preserve viewport size, but do not expose the physical host's DPI.
-      send("Emulation.setDeviceMetricsOverride", {
+      // Stock Electron fallback preserves viewport size but only covers the
+      // top-level target. Native sessions must not receive a second override.
+      ...(fp.nativeScreenMetrics ? [] : [send("Emulation.setDeviceMetricsOverride", {
         width: 0, height: 0, deviceScaleFactor: fp.os === "macos" ? 2 : 1, mobile: false,
         screenWidth: fp.screen.width, screenHeight: fp.screen.height,
-      }),
+      })]),
       send("Page.addScriptToEvaluateOnNewDocument", { source }),
     ]);
   } catch {
@@ -207,16 +227,16 @@ async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
   }
   const backgroundProtected = require("./background-workers.cjs").backgroundWorkersProtected(wc.session);
   return {
-    engine: "stock-electron", chromiumVersion: process.versions.chrome || null,
+    engine: fp.nativeScreenMetrics ? "umbra-screen-electron" : "stock-electron", chromiumVersion: process.versions.chrome || null,
     backgroundWorkers: backgroundProtected ? "browser-target-before-execution" : "unprotected",
     uaLocaleTimezone: "cdp", documentOverrides: "main-world-javascript",
-    screenMetrics: "cdp-top-level-and-js-only-oopif", hardwareConcurrency: "cdp-and-prototype",
+    screenMetrics: fp.nativeScreenMetrics ? "native-session-css-and-javascript" : "cdp-top-level-and-js-only-oopif", hardwareConcurrency: "cdp-and-prototype",
     webRTCPolicy: wc.getWebRTCIPHandlingPolicy(),
     canvasNoise: fp.aggressivePrivacyMode === false ? "disabled-in-normal-mode" : fp.canvasNoise ? "document-2d-readback-and-html-canvas-serialization-only" : "disabled",
     audioNoise: fp.aggressivePrivacyMode === false ? "disabled-in-normal-mode" : fp.audioNoise ? "document-analyser-and-copyFromChannel-only" : "disabled",
     unsupportedControls: ["fontsPreset", "webglNoise"],
     hardwarePolicy: fp.aggressivePrivacyMode === false ? "normal-native-hardware-apis" : "blocked-by-default-with-explicit-local-origin-exceptions",
-    limitations: ["No custom browser kernel or undetectability guarantee", backgroundProtected ? "Unexpected service-worker process loss stops the profile; reopen it to restore protection" : "Shared/service workers are not protected by the page debugger alone", "Normal mode and compatibility exceptions expose native GPU, audio, canvas and font characteristics", "Installed fonts can still affect CSS layout", "JavaScript privacy restrictions are observable", "Native WebRTC policy restricts non-proxied UDP", "Popup opener and form POST are unsupported", "Navigation history is not restored after restart"],
+    limitations: [fp.nativeScreenMetrics ? "Native screen isolation does not protect every hardware API or guarantee undetectability" : "No custom browser kernel or undetectability guarantee", backgroundProtected ? "Unexpected service-worker process loss stops the profile; reopen it to restore protection" : "Shared/service workers are not protected by the page debugger alone", "Normal mode and compatibility exceptions expose native GPU, audio, canvas and font characteristics", "Installed fonts can still affect CSS layout", "JavaScript privacy restrictions are observable", "Native WebRTC policy restricts non-proxied UDP", "Popup opener and form POST are unsupported", "Navigation history is not restored after restart"],
   };
 }
 
@@ -234,4 +254,4 @@ async function applyLocale(send, locale, id) {
   }
 }
 
-module.exports = { normalizeFingerprint, applyFingerprint, userAgentOverride, installSessionPrivacy, hasCapability, applyLocale };
+module.exports = { normalizeFingerprint, applyNativeScreenMetrics, applyFingerprint, userAgentOverride, installSessionPrivacy, hasCapability, applyLocale };

@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const vm = require("node:vm");
-const { normalizeFingerprint, applyFingerprint, userAgentOverride, applyLocale, installSessionPrivacy } = require("../runtime/fingerprint.cjs");
+const { normalizeFingerprint, applyNativeScreenMetrics, applyFingerprint, userAgentOverride, applyLocale, installSessionPrivacy } = require("../runtime/fingerprint.cjs");
 
 const WINDOWS_UA = "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
 const CHROME = "150.0.1234.56";
@@ -147,6 +147,25 @@ test("native screen CSS and hardware concurrency preserve viewport size but mask
   });
   assert.equal(diagnostics.screenMetrics, "cdp-top-level-and-js-only-oopif");
   assert.ok(diagnostics.limitations.some((item) => item.includes("Shared/service workers")));
+});
+
+test("native session screen metrics are applied before navigation and stock packaged engines fail closed", async () => {
+  const windows = fingerprint({ screen: { width: 1733, height: 977, colorDepth: 24 } });
+  assert.equal(applyNativeScreenMetrics({}, windows), false);
+  assert.equal(windows.nativeScreenMetrics, undefined);
+  assert.throws(() => applyNativeScreenMetrics({}, windows, { required: true }), /Native screen protection is unavailable/);
+  const calls = [];
+  assert.equal(applyNativeScreenMetrics({ setUmbraScreenMetrics: (metrics) => calls.push(metrics) }, windows, { required: true }), true);
+  assert.deepEqual(calls, [{ width: 1733, height: 977, availableWidth: 1733, availableHeight: 937, colorDepth: 24, deviceScaleFactor: 1 }]);
+  assert.equal(windows.nativeScreenMetrics, true);
+  const wc = webContents();
+  const diagnostics = await applyFingerprint(wc, windows);
+  assert.equal(diagnostics.screenMetrics, "native-session-css-and-javascript");
+  assert.equal(wc.commands.some((item) => item.command === "Emulation.setDeviceMetricsOverride"), false);
+  const mac = fingerprint({ os: "macos", osVersion: "15.0.0", screen: { width: 1512, height: 982 } });
+  applyNativeScreenMetrics({ setUmbraScreenMetrics: (metrics) => calls.push(metrics) }, mac);
+  assert.deepEqual(calls[1], { width: 1512, height: 982, availableWidth: 1512, availableHeight: 957, colorDepth: 24, deviceScaleFactor: 2 });
+  assert.throws(() => applyNativeScreenMetrics({ setUmbraScreenMetrics: () => { throw new Error("internal path"); } }, fingerprint()), /Native screen protection could not be applied/);
 });
 
 test("unsafe native WebRTC policy or failed CDP protection prevents navigation setup", async () => {

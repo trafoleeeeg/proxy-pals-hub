@@ -1,5 +1,5 @@
 {
-  "status": "experimental-unbuilt-do-not-release",
+  "status": "experimental-tested-do-not-release",
   "electron": {
     "repository": "https://github.com/electron/electron.git",
     "tag": "v44.4.5",
@@ -17,5 +17,12 @@
     "commit": "955266bfdd854cd280dffd47548673914484e4c0"
   },
   "nativeScreenApi": "session.setUmbraScreenMetrics",
-  "appIntegrationEnabled": false
+  "appIntegrationEnabled": true,
+  "distribution": {
+    "windowsX64": {
+      "releaseTag": "umbra-engine-v44.4.5-screen1",
+      "asset": "dist.zip",
+      "sha256": "85c03ec0f8df7c79c46900b949d59b0ed8c32c7613cb18dafb04744d7e9f16c6"
+    }
+  }
 }

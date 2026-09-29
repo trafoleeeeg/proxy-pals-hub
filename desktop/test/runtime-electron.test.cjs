@@ -23,7 +23,7 @@ async function runNativeHarness(t, storageMode = "native") {
   const certificate = testCertificate(directory);
   for (const phase of storageMode === "native" ? ["initial", "restart"] : ["initial"]) {
     const result = await new Promise((resolve, reject) => {
-      const env = { ...process.env, UMBRA_RUNTIME_TEST_DIR: directory, UMBRA_RUNTIME_TEST_PHASE: phase, UMBRA_RUNTIME_TEST_STORAGE: storageMode, NODE_EXTRA_CA_CERTS: certificate.certFile };
+      const env = { ...process.env, ...(process.platform === "win32" ? { UMBRA_REQUIRE_NATIVE_SCREEN: "1" } : {}), UMBRA_RUNTIME_TEST_DIR: directory, UMBRA_RUNTIME_TEST_PHASE: phase, UMBRA_RUNTIME_TEST_STORAGE: storageMode, NODE_EXTRA_CA_CERTS: certificate.certFile };
       delete env.ELECTRON_RUN_AS_NODE;
       const child = spawnBrowser(electron, [path.join(__dirname, "runtime-electron-harness.cjs")], { env });
       let output = "";

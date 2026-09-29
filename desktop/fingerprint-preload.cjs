@@ -47,7 +47,9 @@ function applyDocumentFingerprint(fp) {
       if (ctor) ctor.prototype.getImageData = denied;
     }
   }
-  if (globalThis.screen) {
+  // Native Screen and DPR getters also drive CSS in cross-origin frames. A
+  // JavaScript accessor here would hide the zoom-aware native value.
+  if (globalThis.screen && !fp.nativeScreenMetrics) {
     define(globalThis, "devicePixelRatio", fp.os === "macos" ? 2 : 1);
     const screenProto = globalThis.Screen?.prototype || screen;
     define(screenProto, "width", fp.screen.width);

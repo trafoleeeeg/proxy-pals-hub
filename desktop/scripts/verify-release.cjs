@@ -4,8 +4,10 @@ const { createHash } = require("node:crypto");
 const assert = require("node:assert/strict");
 const yaml = require("js-yaml");
 const pkg = require("../package.json");
+const { verifyEngine } = require("./verify-engine.cjs");
 
 async function verifyRelease(directory = path.join(__dirname, "../dist")) {
+  await verifyEngine();
   const manifest = yaml.load(fs.readFileSync(path.join(directory, "latest.yml"), "utf8"));
   assert.equal(manifest.version, pkg.version, "Updater version differs from package version");
   const expected = "Umbra-Setup-" + pkg.version + "-x64.exe";
@@ -23,6 +25,25 @@ async function verifyRelease(directory = path.join(__dirname, "../dist")) {
   assert(fs.statSync(target + ".blockmap").size > 0, "Missing differential update blockmap");
   assert.equal(pkg.build.nsis.deleteAppDataOnUninstall, false, "Profile data must survive updates");
   const archive = path.join(directory, "win-unpacked/resources/app.asar");
+  const executable = path.join(directory, "win-unpacked/Umbra.exe");
+  if (fs.existsSync(executable)) {
+    const marker = Buffer.from("setUmbraScreenMetrics");
+    const fd = fs.openSync(executable, "r");
+    let found = false;
+    try {
+      const buffer = Buffer.allocUnsafe(1024 * 1024 + marker.length);
+      let overlap = 0;
+      let read;
+      while ((read = fs.readSync(fd, buffer, overlap, 1024 * 1024, null)) > 0) {
+        if (buffer.subarray(0, overlap + read).includes(marker)) { found = true; break; }
+        const total = overlap + read;
+        const nextOverlap = Math.min(marker.length - 1, total);
+        buffer.copyWithin(0, total - nextOverlap, total);
+        overlap = nextOverlap;
+      }
+    } finally { fs.closeSync(fd); }
+    assert(found, "Packaged Umbra.exe does not contain the native screen API");
+  }
   if (fs.existsSync(archive)) {
     const asar = require("@electron/asar");
     const files = new Set(asar.listPackage(archive).map((name) => name.split(path.sep).join("/")));

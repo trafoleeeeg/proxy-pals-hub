@@ -108,7 +108,7 @@ Chromium с возможностями screen5. 16/32 не предлагают�
 | FONT-01 CSS/Canvas шрифты | Host lookup доступен без opt-in; opt-in ограничивает набор | Расширенная glyph coverage, fallback, emoji, downloadable fonts, PDF, печать; законность распространения набора |
 | NET-01 IPv4/IPv6/DNS | Политики есть, отсутствие утечек не доказано | Собственный внешний DNS/HTTPS challenge и захват пакетов: HTTP/SOCKS, сбой/смена прокси, VPN on/off |
 | NET-02 WebRTC/ICE/STUN/TURN | Запрет непроксируемого UDP предусмотрен | Проверить фактические кандидаты и маршруты, TCP/UDP/TURN/IPv6, worker и iframe; policy flag не равен измерению |
-| NET-03 WebSocket/WebTransport/QUIC | Отдельного доказательства в этом аудите нет | Доступность и маршрут каждого транспорта; никакого автоматического direct fallback |
+| NET-03 WebSocket/WebTransport/QUIC | WS/WSS: локальный тест на screen5 подтвердил отказ без прямого fallback при падении bridge и отключении upstream; WebTransport/QUIC не проверены | Внешний маршрут, другие прокси-протоколы и UDP-транспорты |
 | NET-04 LAN/loopback/port probing | Не проверено | Контролируемые локальные endpoints и DNS rebinding; отдельно с прокси и без; не сканировать реальную LAN |
 | TLS-01 TLS/HTTP2/TCP | Не проверено | Контролируемый сервер; определить, что формирует клиент, а что прокси. Общий TLS hash не обязательно дефект |
 | DEV-01 camera/mic/USB/HID/serial/geolocation | Permission guards существуют | Проверить descriptors, ранее выданные разрешения, iframe и extension paths. Не ослаблять отказ ради маскировки |
@@ -146,6 +146,30 @@ Chromium с возможностями screen5. 16/32 не предлагают�
 ради более «обычного» вида. Если прозрачного безопасного решения пока нет,
 ограничение остаётся явно указанным.
 
+## Дополнительная сетевая проверка: 30 сентября 2026
+
+Расширен `desktop/test/runtime-electron-harness.cjs`, режим `network`.
+Использован опубликованный screen5, временные сессии и только loopback-серверы;
+рабочие профили, cookies, внешние прокси и сторонние тестовые сайты не затрагивались.
+
+- HTTP/HTTPS и настоящие Chromium WS/WSS работают через аутентифицированный
+  HTTP-прокси до сбоя. Для обоих WebSocket-подключений проверены авторизация
+  на upstream и получение handshake целевым сервером.
+- Принудительное завершение локального proxy worker закрывает открытые WS/WSS.
+  Новые запросы всех четырёх транспортов не достигают целевых серверов.
+- Отключение upstream при живом bridge также закрывает WS/WSS и не приводит
+  к прямому соединению. HTTP может вернуть 5xx от bridge — это отказ прокси,
+  а не доставка запроса целевому серверу.
+- После сбоя отдельная контрольная direct-сессия достигает HTTP/HTTPS-серверов:
+  отрицательный результат не объясняется отключением самих тестовых серверов.
+
+Подтверждённой ошибки в этой части runtime не обнаружено; добавлена регрессионная
+проверка, рабочая логика прокси не изменялась. Это не доказательство отсутствия
+DNS/IPv6/ICE-утечек или идентичного поведения при смене сети. QUIC в harness
+отключён; WebTransport не измерялся. Сценарии сбоя WS/WSS проверены с HTTP-upstream;
+существующие отдельные проверки SOCKS5/HTTPS-прокси покрывают авторизацию HTTPS,
+но не заменяют аналогичную матрицу WebSocket-сбоев для каждого протокола.
+
 ## Воспроизведение
 
 Из корня репозитория, передавая абсолютный путь к распакованному screen5:
@@ -154,6 +178,9 @@ Chromium с возможностями screen5. 16/32 не предлагают�
 node desktop/engine/run-rendering-audit.cjs <absolute-electron.exe>
 node desktop/engine/run-screen-native.cjs <absolute-electron.exe> hardware
 node desktop/engine/run-screen-native.cjs <absolute-electron.exe> screen
+$env:ELECTRON_OVERRIDE_DIST_PATH = '<absolute-directory-containing-electron.exe>'
+$env:UMBRA_REQUIRE_NATIVE = '1'
+node --test --test-name-pattern 'HTTP/SOCKS5' desktop/test/runtime-native-smoke.test.cjs
 ```
 
 Первый runner теперь включает третий режим `font-isolated` и проверяет отсутствие

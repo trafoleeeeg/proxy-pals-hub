@@ -12,7 +12,7 @@ if (process.versions.electron) {
   const fs = require("node:fs");
   const https = require("node:https");
   const http = require("node:http");
-  const { X509Certificate, randomUUID } = require("node:crypto");
+  const { X509Certificate, randomUUID, createHash } = require("node:crypto");
   const { Worker } = require("node:worker_threads");
   const assert = require("node:assert/strict");
   const { once } = require("node:events");
@@ -98,7 +98,8 @@ if (process.versions.electron) {
     const local = await listen(origin); cleanups.push(() => local.close());
     process.stdout.write("NATIVE_ORIGIN_READY\n");
     const httpHits = [];
-    const plain = await listen(http.createServer((req, res) => { httpHits.push(req.url); res.setHeader("Content-Type", "text/html"); res.end("<title>HTTP fixture</title><h1>HTTP through proxy</h1>"); }));
+    const plainServer = http.createServer((req, res) => { httpHits.push(req.url); res.setHeader("Content-Type", "text/html"); res.end("<title>HTTP fixture</title><h1>HTTP through proxy</h1>"); });
+    const plain = await listen(plainServer);
     cleanups.push(() => plain.close());
     const auth = { a: 0, b: 0, rejected: 0 };
     const credentials = ({ username, password, hostname, port }) => {
@@ -141,18 +142,65 @@ if (process.versions.electron) {
       const tlsProxy = new Server({ host: "127.0.0.1", port: 0, serverType: "https", httpsOptions: certificate, prepareRequestFunction: credentials });
       await tlsProxy.listen(); cleanups.push(() => tlsProxy.close(true));
       assert.equal((await checker({ protocol: "https", host: "localhost", port: tlsProxy.port, username: "a", password: "a-pass" })).ok, true);
-      const workers = [];
-      class TrackedWorker extends Worker { constructor(...args) { super(...args); workers.push(this); } }
-      const crashSession = trustFixture(session.fromPartition(`crash-${randomUUID()}`));
-      const bridge = await createRuntimeProxy(crashSession, payload().proxy, { WorkerClass: TrackedWorker });
-      cleanups.push(() => bridge.dispose());
-      assert.match(await (await crashSession.fetch(`http://127.0.0.1:${plain.port}/native-http`)).text(), /HTTP through proxy/);
-      await requestJson(electronNet, crashSession, `https://localhost:${local.port}/ip`, 2500);
-      const priorHits = hits.length;
-      const exited = once(workers[0], "exit"); await workers[0].terminate(); await exited;
-      await assert.rejects(requestJson(electronNet, crashSession, `https://localhost:${local.port}/ip`, 1000));
-      assert.equal(hits.length, priorHits);
-      assert.ok(bridge.diagnostics.failures > 0);
+      // Real Chromium WebSockets, not mocked webRequest callbacks. The fixture
+      // only needs a handshake: no application messages or external endpoints.
+      const upgrades = [];
+      function upgrade(req, socket) {
+        upgrades.push(req.url);
+        const accept = createHash("sha1").update(req.headers["sec-websocket-key"] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest("base64");
+        socket.on("error", () => {});
+        socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
+      }
+      plainServer.on("upgrade", upgrade); origin.on("upgrade", upgrade);
+      for (const fault of ["worker-crash", "upstream-outage"]) {
+        const workers = [];
+        class TrackedWorker extends Worker { constructor(...args) { super(...args); workers.push(this); } }
+        const crashSession = trustFixture(session.fromPartition(`crash-${randomUUID()}`));
+        const bridge = await createRuntimeProxy(crashSession, payload().proxy, { WorkerClass: TrackedWorker });
+        cleanups.push(() => bridge.dispose());
+        const win = new BrowserWindow({ show: false, webPreferences: { session: crashSession, sandbox: true, contextIsolation: true, nodeIntegration: false } });
+        cleanups.push(async () => { if (!win.isDestroyed()) win.destroy(); });
+        await win.loadURL(`http://127.0.0.1:${plain.port}/native-http-${fault}`);
+        await requestJson(electronNet, crashSession, `https://localhost:${local.port}/ip`, 2500);
+        const urls = [`ws://127.0.0.1:${plain.port}/${fault}`, `wss://localhost:${local.port}/${fault}`];
+        const openSockets = () => win.webContents.executeJavaScript(`Promise.all(${JSON.stringify(urls)}.map(url => new Promise(resolve => {
+          const socket = new WebSocket(url);
+          (globalThis.auditSockets ||= []).push(socket);
+          const timer = setTimeout(() => { socket.close(); resolve('timeout'); }, 2500);
+          socket.onopen = () => { clearTimeout(timer); resolve('open'); };
+          socket.onerror = () => { clearTimeout(timer); resolve('error'); };
+        })))`);
+        const beforeOpen = upgrades.length;
+        const beforeAuth = auth.a;
+        assert.deepEqual(await openSockets(), ["open", "open"], fault);
+        assert.equal(upgrades.length, beforeOpen + 2);
+        assert.ok(auth.a >= beforeAuth + 2, "Both WebSocket connections must authenticate at upstream proxy");
+        const counts = [hits.length, httpHits.length, upgrades.length];
+        if (fault === "worker-crash") {
+          const exited = once(workers[0], "exit"); await workers[0].terminate(); await exited;
+          assert.ok(bridge.diagnostics.failures > 0);
+        } else {
+          await upstream.close(true);
+        }
+        await waitUntil(() => win.webContents.executeJavaScript("auditSockets.every(socket => socket.readyState === WebSocket.CLOSED)"));
+        const blockedHttp = await crashSession.fetch(`http://127.0.0.1:${plain.port}/blocked-${fault}`, { signal: AbortSignal.timeout(2500) }).catch(() => null);
+        // A live bridge returns a 5xx proxy error when upstream is unavailable;
+        // a dead bridge rejects the request outright. Neither reaches origin.
+        assert.ok(blockedHttp === null || blockedHttp.status >= 500, "HTTP must fail closed");
+        await assert.rejects(requestJson(electronNet, crashSession, `https://localhost:${local.port}/ip`, 1000));
+        assert.deepEqual(await openSockets(), ["error", "error"], "WebSockets must fail, not silently connect directly");
+        assert.deepEqual([hits.length, httpHits.length, upgrades.length], counts, "No origin traffic after proxy failure");
+        // Keep the hidden window until final cleanup: closing the last window
+        // would terminate Electron before the second fault scenario runs.
+        await bridge.dispose();
+        process.stdout.write(`NATIVE_FAIL_CLOSED_OK ${fault} HTTP HTTPS WS WSS\n`);
+      }
+      // Negative-control check: the origin remains reachable, so absence of hits
+      // above cannot be explained by the fixture server being down.
+      const control = trustFixture(session.fromPartition(`direct-control-${randomUUID()}`));
+      const direct = await createRuntimeProxy(control, null); cleanups.push(() => direct.dispose());
+      assert.match(await (await control.fetch(`http://127.0.0.1:${plain.port}/control`)).text(), /HTTP through proxy/);
+      await requestJson(electronNet, control, `https://localhost:${local.port}/ip`, 2500);
       return;
     }
     const closed = [];

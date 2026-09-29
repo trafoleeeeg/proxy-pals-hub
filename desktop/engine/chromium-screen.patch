@@ -105,10 +105,19 @@ index a4a1271ee6..adf1caacdd 100644
    map<string, mojo_base.mojom.String16> fixed_font_family_map;
    map<string, mojo_base.mojom.String16> serif_font_family_map;
 diff --git a/third_party/blink/renderer/core/css/media_values.cc b/third_party/blink/renderer/core/css/media_values.cc
-index 0d60244742..7963fbb364 100644
+index 0d60244742..036a52624b 100644
 --- a/third_party/blink/renderer/core/css/media_values.cc
 +++ b/third_party/blink/renderer/core/css/media_values.cc
-@@ -164,6 +164,9 @@ double MediaValues::CalculateDynamicViewportHeight(LocalFrame* frame) {
+@@ -4,6 +4,8 @@
+ 
+ #include "third_party/blink/renderer/core/css/media_values.h"
+ 
++#include <algorithm>
++
+ #include "third_party/blink/public/common/css/scripting.h"
+ #include "third_party/blink/renderer/core/css/css_resolution_units.h"
+ #include "third_party/blink/renderer/core/css/css_to_length_conversion_data.h"
+@@ -164,6 +166,9 @@ double MediaValues::CalculateDynamicViewportHeight(LocalFrame* frame) {
  
  int MediaValues::CalculateDeviceWidth(LocalFrame* frame) {
    DCHECK(frame && frame->View() && frame->GetSettings() && frame->GetPage());
@@ -118,7 +127,7 @@ index 0d60244742..7963fbb364 100644
    const display::ScreenInfo& screen_info =
        frame->GetPage()->GetChromeClient().GetScreenInfo(*frame);
    int device_width = screen_info.rect.width();
-@@ -176,6 +179,9 @@ int MediaValues::CalculateDeviceWidth(LocalFrame* frame) {
+@@ -176,6 +181,9 @@ int MediaValues::CalculateDeviceWidth(LocalFrame* frame) {
  
  int MediaValues::CalculateDeviceHeight(LocalFrame* frame) {
    DCHECK(frame && frame->View() && frame->GetSettings() && frame->GetPage());
@@ -128,7 +137,7 @@ index 0d60244742..7963fbb364 100644
    const display::ScreenInfo& screen_info =
        frame->GetPage()->GetChromeClient().GetScreenInfo(*frame);
    int device_height = screen_info.rect.height();
-@@ -193,7 +199,7 @@ bool MediaValues::CalculateStrictMode(LocalFrame* frame) {
+@@ -193,12 +201,15 @@ bool MediaValues::CalculateStrictMode(LocalFrame* frame) {
  }
  
  float MediaValues::CalculateDevicePixelRatio(LocalFrame* frame) {
@@ -137,6 +146,45 @@ index 0d60244742..7963fbb364 100644
  }
  
  bool MediaValues::CalculateDeviceSupportsHDR(LocalFrame* frame) {
+   DCHECK(frame);
+   DCHECK(frame->GetPage());
++  if (frame->GetSettings()->GetUmbraScreenWidth() > 0) {
++    return false;
++  }
+   return frame->GetPage()
+       ->GetChromeClient()
+       .GetScreenInfo(*frame)
+@@ -208,6 +219,10 @@ bool MediaValues::CalculateDeviceSupportsHDR(LocalFrame* frame) {
+ int MediaValues::CalculateColorBitsPerComponent(LocalFrame* frame) {
+   DCHECK(frame);
+   DCHECK(frame->GetPage());
++  if (const auto* settings = frame->GetSettings();
++      settings->GetUmbraScreenWidth() > 0) {
++    return std::max(1, settings->GetUmbraScreenColorDepth() / 3);
++  }
+   const display::ScreenInfo& screen_info =
+       frame->GetPage()->GetChromeClient().GetScreenInfo(*frame);
+   if (screen_info.is_monochrome) {
+@@ -219,6 +234,9 @@ int MediaValues::CalculateColorBitsPerComponent(LocalFrame* frame) {
+ int MediaValues::CalculateMonochromeBitsPerComponent(LocalFrame* frame) {
+   DCHECK(frame);
+   DCHECK(frame->GetPage());
++  if (frame->GetSettings()->GetUmbraScreenWidth() > 0) {
++    return 0;
++  }
+   const display::ScreenInfo& screen_info =
+       frame->GetPage()->GetChromeClient().GetScreenInfo(*frame);
+   if (!screen_info.is_monochrome) {
+@@ -385,6 +403,9 @@ int MediaValues::CalculateAvailableHoverTypes(LocalFrame* frame) {
+ ColorSpaceGamut MediaValues::CalculateColorGamut(LocalFrame* frame) {
+   DCHECK(frame);
+   DCHECK(frame->GetPage());
++  if (frame->GetSettings()->GetUmbraScreenWidth() > 0) {
++    return ColorSpaceGamut::SRGB;
++  }
+   const MediaFeatureOverrides* overrides =
+       frame->GetPage()->GetMediaFeatureOverrides();
+   std::optional<ColorSpaceGamut> override_value =
 diff --git a/third_party/blink/renderer/core/exported/web_settings_impl.cc b/third_party/blink/renderer/core/exported/web_settings_impl.cc
 index f9d2d0aa39..fdaa1c70e4 100644
 --- a/third_party/blink/renderer/core/exported/web_settings_impl.cc

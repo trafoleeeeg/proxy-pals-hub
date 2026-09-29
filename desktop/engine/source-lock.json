@@ -20,9 +20,9 @@
   "appIntegrationEnabled": true,
   "distribution": {
     "windowsX64": {
-      "releaseTag": "umbra-engine-v44.4.5-screen2",
+      "releaseTag": "umbra-engine-v44.4.5-screen3",
       "asset": "dist.zip",
-      "sha256": "6158158a090fcb454e990aba1efda2199e5be9a313b82f8623024614839220d9"
+      "sha256": "a920c3c4888a7da7756219b6255fcf0441e7dffb38a25be6cdcc9f9d95b9d660"
     }
   }
 }

@@ -21,7 +21,7 @@ const finish = code => {
 setTimeout(() => finish(1), 120000).unref();
 const presets = {
   a: { width: 1733, height: 977, availableWidth: 1733, availableHeight: 937, colorDepth: 24, deviceScaleFactor: 1 },
-  b: { width: 1371, height: 811, availableWidth: 1371, availableHeight: 771, colorDepth: 24, deviceScaleFactor: 2 },
+  b: { width: 1371, height: 811, availableWidth: 1371, availableHeight: 771, colorDepth: 30, deviceScaleFactor: 2 },
   portrait: { width: 811, height: 1371, availableWidth: 811, availableHeight: 1331, colorDepth: 24, deviceScaleFactor: 1 },
 };
 
@@ -36,11 +36,15 @@ function fixture(route, port) {
     :root { --screen-match: no; --zoom-match: no; }
     @media ${query(p.deviceScaleFactor)} { :root { --screen-match: yes; } }
     @media ${query(p.deviceScaleFactor * 1.25)} { :root { --zoom-match: yes; } }
+    @media (color: ${Math.floor(p.colorDepth / 3)}) { :root { --color-depth-match: yes; } }
     </style><script>
     globalThis.firstScreenCheck = {
       dimensions: screen.width === ${p.width} && screen.height === ${p.height},
       available: screen.availWidth === ${p.availableWidth} && screen.availHeight === ${p.availableHeight} && screen.availLeft === 0 && screen.availTop === 0,
       depth: screen.colorDepth === ${p.colorDepth} && screen.pixelDepth === ${p.colorDepth},
+      colorMedia: matchMedia('(color: ${Math.floor(p.colorDepth / 3)})').matches && matchMedia('(monochrome: 0)').matches && getComputedStyle(document.documentElement).getPropertyValue('--color-depth-match').trim() === 'yes',
+      gamut: matchMedia('(color-gamut: srgb)').matches && !matchMedia('(color-gamut: p3)').matches && !matchMedia('(color-gamut: rec2020)').matches,
+      dynamicRange: matchMedia('(dynamic-range: standard)').matches && !matchMedia('(dynamic-range: high)').matches && !matchMedia('(video-dynamic-range: high)').matches,
       dpr: devicePixelRatio === ${p.deviceScaleFactor},
       orientation: screen.orientation.type === '${p.height > p.width ? "portrait-primary" : "landscape-primary"}' && screen.orientation.angle === 0 && (window.orientation === undefined || window.orientation === 0),
       css: getComputedStyle(document.documentElement).getPropertyValue('--screen-match').trim() === 'yes',
@@ -57,7 +61,8 @@ async function checkFrames(win) {
   assert.ok(child.frames[0], "nested child missing");
   for (const frame of [root, child, child.frames[0]]) {
     const checks = await frame.executeJavaScript("globalThis.firstScreenCheck");
-    assert.deepEqual(checks, { dimensions: true, available: true, depth: true, dpr: true, orientation: true, css: true, nativeGetter: true });
+    assert.deepEqual(checks, { dimensions: true, available: true, depth: true, colorMedia: true, gamut: true, dynamicRange: true, dpr: true, orientation: true, css: true, nativeGetter: true },
+      `Synthetic display media: colorMedia=${checks.colorMedia} gamut=${checks.gamut} dynamicRange=${checks.dynamicRange}`);
   }
 }
 
@@ -122,7 +127,7 @@ app.whenReady().then(async () => {
   const plainWindow = new BrowserWindow({ show: false, webPreferences: { session: plainSession, sandbox: true, contextIsolation: true, nodeIntegration: false } });
   windows.push(plainWindow);
   await plainWindow.loadURL(`http://127.0.0.1:${port}/unconfigured`);
-  const readPlainScreen = "JSON.stringify([screen.width, screen.height, screen.availWidth, screen.availHeight, screen.colorDepth, devicePixelRatio, screen.orientation.type, screen.orientation.angle, window.orientation])";
+  const readPlainScreen = "JSON.stringify([screen.width, screen.height, screen.availWidth, screen.availHeight, screen.colorDepth, devicePixelRatio, screen.orientation.type, screen.orientation.angle, window.orientation, matchMedia('(color: 8)').matches, matchMedia('(color-gamut: p3)').matches, matchMedia('(dynamic-range: high)').matches])";
   // Keep host values in memory only; failure messages must not print them.
   const plainBefore = await plainWindow.webContents.executeJavaScript(readPlainScreen);
   assert.throws(() => plainSession.setUmbraScreenMetrics(presets.a), "cannot retrofit policy after a session has already created a view");

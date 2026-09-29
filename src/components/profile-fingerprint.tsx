@@ -29,7 +29,7 @@ export function ProfileFingerprint({ value, onChange, disabled = false, country,
       </Button>
     </div>
     <p className="text-xs text-muted-foreground">Обновлённый клиент согласует User-Agent и Client Hints с ОС профиля и установленным Chromium, включая фоновые workers. Подмена шрифтов и шум WebGL не поддерживаются. Отпечаток macOS на Windows не эмулирует настоящее устройство Mac и не гарантирует нераспознаваемость.</p>
-    <p role="note" className="text-xs text-warning">Ограничение экрана: CSS-запросы внутри сторонних iframe могут раскрывать реальные размеры и DPI. Подмена screen в JavaScript не закрывает этот канал, в том числе в строгом режиме.</p>
+    <p role="note" className="text-xs text-warning">На Windows обновлённый движок согласует размеры, DPI и ориентацию экрана с CSS в сторонних iframe. Цветовые параметры экрана проверяются отдельно. GPU, Canvas, аудио и установленные шрифты в обычном режиме могут раскрывать устройство; полная нераспознаваемость не гарантируется.</p>
     {value.os === "windows" && <div className="grid gap-2 rounded-md border border-border p-3">
       <Label htmlFor="windows-configuration">Набор параметров Windows</Label>
       <Select disabled={disabled} value={windowsConfigurationId(value)} onValueChange={(id) => onChange(applyWindowsConfiguration(value, id))}>

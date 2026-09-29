@@ -8,6 +8,7 @@ const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { normalizeFingerprint, applyFingerprint, applyNativeScreenMetrics, applyNativeHardwareMetrics } = require('../runtime/fingerprint.cjs');
 const { initializeBackgroundWorkers, protectBackgroundWorkers } = require('../runtime/background-workers.cjs');
+const { applyFontIsolation } = require('../runtime/font-isolation.cjs');
 
 assert.ok(process.env.UMBRA_RENDERING_AUDIT_DIR);
 app.setPath('userData', process.env.UMBRA_RENDERING_AUDIT_DIR);
@@ -128,8 +129,8 @@ app.whenReady().then(async () => {
   const port = server.address().port;
   const origin = `http://127.0.0.1:${port}`;
   const result = { driver: software ? 'software-research' : 'default', profiles: {} };
-  for (const mode of ['normal', 'strict-exception']) {
-    const fp = normalizeFingerprint({ os: 'windows', userAgent: 'Mozilla/5.0 Chrome/152.0.0.0', aggressivePrivacyMode: mode !== 'normal', canvasNoise: 17491, audioNoise: 27491, gpu: { vendor: 'Umbra synthetic audit vendor', renderer: 'Umbra synthetic audit GPU' } });
+  for (const mode of ['normal', 'strict-exception', 'font-isolated']) {
+    const fp = normalizeFingerprint({ os: 'windows', userAgent: 'Mozilla/5.0 Chrome/152.0.0.0', aggressivePrivacyMode: mode === 'strict-exception', fontIsolation: mode === 'font-isolated', canvasNoise: 17491, audioNoise: 27491, gpu: { vendor: 'Umbra synthetic audit vendor', renderer: 'Umbra synthetic audit GPU' } });
     fp.hardwarePermissions = { [origin]: ['gpu', 'canvas', 'audio', 'fonts', 'workers'], [`http://localhost:${port}`]: ['gpu', 'canvas', 'audio', 'fonts', 'workers'] };
     const ses = session.fromPartition('rendering-audit-' + randomUUID());
     ses.webRequest.onBeforeRequest((d, done) => {
@@ -140,6 +141,7 @@ app.whenReady().then(async () => {
     ses.setPermissionCheckHandler(() => false);
     applyNativeScreenMetrics(ses, fp, { required: true });
     applyNativeHardwareMetrics(ses, fp, { required: true });
+    await applyFontIsolation(ses, fp);
     await protectBackgroundWorkers(ses, fp, { onFailure: () => finish(1) });
     const win = new BrowserWindow({ show: false, webPreferences: { session: ses, sandbox: true, contextIsolation: true, nodeIntegration: false } });
     windows.push(win);

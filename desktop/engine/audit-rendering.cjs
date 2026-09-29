@@ -13,6 +13,13 @@ assert.ok(process.env.UMBRA_RENDERING_AUDIT_DIR);
 app.setPath('userData', process.env.UMBRA_RENDERING_AUDIT_DIR);
 app.enableSandbox();
 app.commandLine.appendSwitch('disable-background-networking');
+app.commandLine.appendSwitch('disable-component-update');
+const denyExternalRequests = ses => ses.webRequest.onBeforeRequest((details, done) => {
+  done({ cancel: !['about:', 'data:', 'blob:'].includes(new URL(details.url).protocol) });
+});
+// Cover default/background sessions as well. Fixture sessions replace this
+// with the exact loopback origin allowance before creating any documents.
+app.on('session-created', denyExternalRequests);
 const software = process.env.UMBRA_RENDERING_AUDIT_SOFTWARE === '1';
 if (software) {
   // Explicit test driver, not the unsafe automatic WebGL fallback. Never use
@@ -108,6 +115,7 @@ async function sample() {
 }
 
 app.whenReady().then(async () => {
+  denyExternalRequests(session.defaultSession);
   await initializeBackgroundWorkers();
   server = http.createServer((req, res) => {
     if (req.url === '/render-worker.js') {

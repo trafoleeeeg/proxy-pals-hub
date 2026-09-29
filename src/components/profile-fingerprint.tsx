@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { fingerprintError } from "./profile-model";
 import { desktop } from "@/lib/desktop";
+import { isSupportedProfileMemory, SUPPORTED_PROFILE_MEMORY } from "@/lib/fingerprint-memory";
 
 export function ProfileFingerprint({ value, onChange, disabled = false, country, proxyTimezone, proxyIp }: {
   value: Fingerprint; onChange: (fp: Fingerprint) => void; disabled?: boolean; country?: string | null | undefined;
@@ -86,7 +87,9 @@ export function ProfileFingerprint({ value, onChange, disabled = false, country,
       <Label className="grid gap-2">Высота экрана<Input type="number" min={240} max={4320} value={value.screen?.height ?? ""} onChange={(e) => onChange({ ...value, screen: { ...value.screen, height: Number(e.target.value) } })} /></Label>
       <Label className="grid gap-2">Логические потоки процессора<Input type="number" min={1} max={128} value={value.hardwareConcurrency} onChange={(e) => onChange({ ...value, hardwareConcurrency: Number(e.target.value) })} /></Label>
       <div className="grid gap-2"><Label htmlFor="profile-memory">Память, ГБ</Label><Select disabled={disabled} value={String(value.deviceMemory)} onValueChange={(memory) => onChange({ ...value, deviceMemory: Number(memory) })}>
-        <SelectTrigger id="profile-memory"><SelectValue /></SelectTrigger><SelectContent>{[0.25, 0.5, 1, 2, 4, 8].map((memory) => <SelectItem key={memory} value={String(memory)}>{memory}</SelectItem>)}</SelectContent>
+        <SelectTrigger id="profile-memory"><SelectValue /></SelectTrigger><SelectContent>
+          {!isSupportedProfileMemory(value.deviceMemory) && <SelectItem disabled value={String(value.deviceMemory)}>{value.deviceMemory} · прежнее значение</SelectItem>}
+          {SUPPORTED_PROFILE_MEMORY.map((memory) => <SelectItem key={memory} value={String(memory)}>{memory}</SelectItem>)}</SelectContent>
       </Select></div>
     </div>
     <Label className="grid gap-2">User-Agent{value.os === "windows"

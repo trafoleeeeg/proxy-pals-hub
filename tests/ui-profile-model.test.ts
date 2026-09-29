@@ -34,7 +34,7 @@ describe("profile UI data", () => {
     const fp = { ...generateFingerprint(), startUrl: "" };
     expect(profileFingerprintPayload(fp)).not.toHaveProperty("startUrl");
     expect(profileFingerprintPayload({ ...fp, startUrl: " https://example.com " }).startUrl).toBe("https://example.com");
-    expect(fingerprintError({ ...fp, deviceMemory: 0.5 })).toBeNull();
+    expect(fingerprintError({ ...fp, deviceMemory: 0.5 })).not.toBeNull();
     expect(fingerprintError({ ...fp, deviceMemory: 0.3 })).not.toBeNull();
     expect(fingerprintError({ ...fp, userAgent: "Windows NT 10.0" + "a".repeat(1024) })).not.toBeNull();
   });

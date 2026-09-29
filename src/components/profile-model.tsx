@@ -1,4 +1,5 @@
 import { windowsUserAgent, type Fingerprint } from "@/lib/fingerprint";
+import { isSupportedProfileMemory, PROFILE_MEMORY_ERROR } from "@/lib/fingerprint-memory";
 
 export type ProfileChanges = { folder?: string; tags?: string[]; notes?: string; proxyId?: string | null; fingerprint?: Fingerprint };
 export const splitTags = (value: string) => [...new Set(value.split(",").map((tag) => tag.trim()).filter(Boolean))];
@@ -19,7 +20,7 @@ export function fingerprintError(fp: Fingerprint): string | null {
   if (!Number.isInteger(fp.screen?.width) || fp.screen.width < 320 || fp.screen.width > 7680 ||
       !Number.isInteger(fp.screen?.height) || fp.screen.height < 240 || fp.screen.height > 4320) return "Размер экрана: 320–7680 × 240–4320.";
   if (!Number.isInteger(fp.hardwareConcurrency) || fp.hardwareConcurrency < 1 || fp.hardwareConcurrency > 128) return "Количество ядер: от 1 до 128.";
-  if (![0.25, 0.5, 1, 2, 4, 8].includes(fp.deviceMemory)) return "Выберите сообщаемую память: 0,25, 0,5, 1, 2, 4 или 8 ГБ.";
+  if (!isSupportedProfileMemory(fp.deviceMemory)) return PROFILE_MEMORY_ERROR;
   if (!fp.userAgent.trim() || fp.userAgent.length > 1024 || /[\r\n\0]/.test(fp.userAgent)) return "Укажите корректный User-Agent до 1024 символов без переносов строк.";
   if (fp.os === "macos") {
     if (fp.platform !== "MacIntel" || !fp.userAgent.includes("Macintosh; Intel Mac OS X")) return "Для macOS нужны платформа MacIntel и User-Agent Macintosh.";

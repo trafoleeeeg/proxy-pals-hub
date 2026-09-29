@@ -5,6 +5,7 @@ import type { Json } from "@/integrations/supabase/types";
 import { bulkCreateSchema, bulkDeleteSchema, bulkUpdateSchema, idSchema, importCookiesSchema, profileIdSchema, reorderProfilesSchema, saveProfileSchema, teamSchema } from "./server-validation";
 import { accessibleFolders, callServerRpc, requireFolderAccess, requirePermission, requireProfile, requireTeamAccess, requireTeamProxy, serverDb, writeAudit } from "./server-db";
 import { parseCookieImport } from "./server-cookies";
+import { isSupportedProfileMemory, PROFILE_MEMORY_ERROR } from "./fingerprint-memory";
 
 export type ProfileRow = {
   id: string;
@@ -171,6 +172,11 @@ export const cloneProfile = createServerFn({ method: "POST" })
       .eq("id", data.id)
       .single();
     if (error || !src) throw new Error("Профиль не найден");
+    const sourceFingerprint = src.fingerprint;
+    if (!sourceFingerprint || typeof sourceFingerprint !== "object" || Array.isArray(sourceFingerprint)
+      || !isSupportedProfileMemory(sourceFingerprint["deviceMemory"])) {
+      throw new Error(PROFILE_MEMORY_ERROR + " Сначала измените память исходного профиля в редакторе.");
+    }
     const { data: row, error: insErr } = await context.supabase
       .from("browser_profiles")
       .insert({ ...src, name: `${src.name.slice(0, 190)} (копия)`, created_by: context.userId })

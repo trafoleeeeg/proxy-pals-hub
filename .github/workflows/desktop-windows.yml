@@ -134,7 +134,8 @@ jobs:
           UMBRA_REQUIRE_NATIVE: "1"
           UMBRA_REQUIRE_DPAPI: "1"
           ELECTRON_OVERRIDE_DIST_PATH: ${{ github.workspace }}\desktop\.engine\unpacked
-        run: npm test
+        # Native browser and DPAPI fixtures contend for shared Windows resources.
+        run: node --test --test-concurrency=1 test/*.test.cjs
 
       - name: Build Windows app
         working-directory: desktop

@@ -61,73 +61,11 @@ function applyDocumentFingerprint(fp) {
     define(screenProto, "colorDepth", fp.screen.colorDepth);
     define(screenProto, "pixelDepth", fp.screen.colorDepth);
   }
-  for (const ctor of strict ? [globalThis.WebGLRenderingContext, globalThis.WebGL2RenderingContext] : []) {
-    if (!ctor) continue;
-    const original = ctor.prototype.getParameter;
-    ctor.prototype.getParameter = function (parameter) {
-      if (parameter === 37445 && fp.gpu.vendor) return fp.gpu.vendor;
-      if (parameter === 37446 && fp.gpu.renderer) return fp.gpu.renderer;
-      return original.call(this, parameter);
-    };
-  }
-  const delta = (seed, index) => {
-    let value = (seed ^ Math.imul(index + 1, 0x45d9f3b)) >>> 0;
-    value = Math.imul(value ^ (value >>> 16), 0x45d9f3b) >>> 0;
-    return (value & 1) ? 1 : -1;
-  };
-  if (strict && allowed("canvas") && fp.canvasNoise && globalThis.CanvasRenderingContext2D) {
-    const originalGet = CanvasRenderingContext2D.prototype.getImageData;
-    const perturb = (data, width, height) => {
-      // Fingerprint probes use small synthetic canvases. Never rewrite large
-      // canvases used by sites for photos, previews, maps or their interface:
-      // doing so creates visible stripes and can break image lazy-loading.
-      if (!width || !height || width * height > 262144) return;
-      for (let index = 0; index < data.length; index += 4093) {
-        data[index] = Math.max(0, Math.min(255, data[index] + delta(fp.canvasNoise ^ width ^ height, index)));
-      }
-    };
-    CanvasRenderingContext2D.prototype.getImageData = function (...args) {
-      const result = originalGet.apply(this, args);
-      perturb(result.data, result.width, result.height);
-      return result;
-    };
-    const copy = (canvas) => {
-      if (!canvas.width || !canvas.height || canvas.width * canvas.height > 262144) return canvas;
-      const cloned = document.createElement("canvas");
-      cloned.width = canvas.width; cloned.height = canvas.height;
-      if (canvas.width && canvas.height) {
-        const context = cloned.getContext("2d");
-        context.drawImage(canvas, 0, 0);
-        const pixels = originalGet.call(context, 0, 0, canvas.width, canvas.height);
-        perturb(pixels.data, pixels.width, pixels.height);
-        context.putImageData(pixels, 0, 0);
-      }
-      return cloned;
-    };
-    for (const method of ["toDataURL", "toBlob"]) {
-      const original = HTMLCanvasElement.prototype[method];
-      HTMLCanvasElement.prototype[method] = function (...args) { return original.apply(copy(this), args); };
-    }
-  }
-  if (strict && allowed("audio") && fp.audioNoise) {
-    const perturb = (data) => {
-      for (let index = 0; index < data.length; index += 97) if (Number.isFinite(data[index])) data[index] += delta(fp.audioNoise, index) * 1e-7;
-    };
-    if (globalThis.AudioBuffer) {
-      const original = AudioBuffer.prototype.copyFromChannel;
-      AudioBuffer.prototype.copyFromChannel = function (destination, ...args) {
-        const result = original.call(this, destination, ...args);
-        perturb(destination);
-        return result;
-      };
-    }
-    if (globalThis.AnalyserNode) {
-      for (const method of ["getFloatFrequencyData", "getFloatTimeDomainData"]) {
-        const original = AnalyserNode.prototype[method];
-        AnalyserNode.prototype[method] = function (destination) { const result = original.call(this, destination); perturb(destination); return result; };
-      }
-    }
-  }
+  // Allowed APIs stay native. The former partial Canvas/Audio noise disagreed
+  // with OffscreenCanvas, cropped readbacks and AudioBuffer.getChannelData;
+  // copyFromChannel even modified destination samples outside its copy range.
+  // Changing two WebGL labels did not change WebGPU, limits or rendered pixels.
+  // Compatibility consent permits native hardware exposure, not emulation.
   // Windows passkey prompts open a native dialog over the page and expose the
   // real device, so the profile reports no authenticator at all.
   define(globalThis, "PublicKeyCredential", undefined);

@@ -382,9 +382,20 @@ test("profile tabs apply fingerprint without a preliminary about:blank load", ()
   assert.match(source, /await Promise\.all\(plan\.slice\(1\)\.map/);
 });
 
-test("canvas fingerprint protection never rewrites large visual canvases", () => {
+test("allowed Canvas preserves pixels at both fingerprint and large visual sizes", () => {
   const source = require("node:fs").readFileSync(require.resolve("../fingerprint-preload.cjs"), "utf8");
-  assert.match(source, /width \* height > 262144/);
-  assert.match(source, /index \+= 4093/);
-  assert.ok(!source.includes("index += 128"), "плотный шум создаёт видимые полосы на содержимом сайтов");
+  class Context {
+    getImageData(_x, _y, width, height) { return { width, height, data: new Uint8ClampedArray(width * height * 4).fill(100) }; }
+  }
+  class Canvas { getContext() { return new Context(); } toDataURL() { return "data:image/png;base64,c3ludGhldGlj"; } }
+  const context = require("node:vm").createContext({ origin: "https://example.test", navigator: {},
+    CanvasRenderingContext2D: Context, HTMLCanvasElement: Canvas,
+    fp: { languages: ["en-US"], userAgent: "Synthetic fixture", aggressivePrivacyMode: true, canvasNoise: 17491,
+      hardwarePermissions: { "https://example.test": ["canvas"] } } });
+  require("node:vm").runInContext(source + "\napplyDocumentFingerprint(fp);", context);
+  for (const [width, height] of [[64, 32], [1024, 512]]) {
+    const pixels = new Canvas().getContext("2d").getImageData(0, 0, width, height);
+    assert.ok(pixels.data.every(value => value === 100), "разрешённый canvas не должен получать ни шум, ни визуальные полосы");
+  }
+  assert.equal(new Canvas().toDataURL(), "data:image/png;base64,c3ludGhldGlj");
 });

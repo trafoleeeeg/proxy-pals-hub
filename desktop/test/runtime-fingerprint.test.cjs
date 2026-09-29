@@ -241,3 +241,35 @@ test("document script blocks hardware APIs only in strict mode", async () => {
   assert.deepEqual(await probe(true), { gpuBlocked: true, canvasBlocked: true, audioBlocked: true, sharedBlocked: true, serviceBlocked: true });
   assert.deepEqual(await probe(false), { gpuBlocked: false, canvasBlocked: false, audioBlocked: false, sharedBlocked: false, serviceBlocked: false });
 });
+
+test("allowed rendering APIs preserve native methods despite legacy noise and GPU fields", async () => {
+  for (const aggressivePrivacyMode of [false, true]) {
+    for (const worker of [false, true]) {
+      const wc = webContents();
+      const fp = fingerprint({ aggressivePrivacyMode, canvasNoise: 17491, audioNoise: 27491,
+        gpu: { vendor: "legacy vendor", renderer: "legacy renderer" } });
+      fp.hardwarePermissions = { "https://example.test": ["gpu", "canvas", "audio", "fonts", "workers"] };
+      const report = await applyFingerprint(wc, fp);
+      assert.equal(report.gpuIdentity, "native-when-allowed-not-emulated");
+      assert.ok(report.unsupportedControls.includes("canvasNoise"));
+      const source = wc.commands.find(item => item.command === "Page.addScriptToEvaluateOnNewDocument").args.source;
+      class GL { getParameter() { return "native-test-renderer"; } }
+      class CanvasContext { getImageData() { return { data: new Uint8ClampedArray(4), width: 1, height: 1 }; } }
+      class Canvas { getContext() { return new CanvasContext(); } toDataURL() { return "data:,"; } toBlob() {} convertToBlob() {} }
+      class AudioBuffer { getChannelData() {} copyFromChannel() {} copyToChannel() {} }
+      class AnalyserNode { getFloatFrequencyData() {} getFloatTimeDomainData() {} }
+      const methods = [[GL.prototype, "getParameter"], [CanvasContext.prototype, "getImageData"],
+        [Canvas.prototype, "getContext"], [Canvas.prototype, "toDataURL"], [Canvas.prototype, "toBlob"],
+        [Canvas.prototype, "convertToBlob"], [AudioBuffer.prototype, "getChannelData"],
+        [AudioBuffer.prototype, "copyFromChannel"], [AudioBuffer.prototype, "copyToChannel"],
+        [AnalyserNode.prototype, "getFloatFrequencyData"], [AnalyserNode.prototype, "getFloatTimeDomainData"]];
+      const before = methods.map(([object, key]) => object[key]);
+      const context = vm.createContext({ origin: "https://example.test", navigator: {}, screen: {},
+        ...(!worker ? { HTMLCanvasElement: Canvas, CanvasRenderingContext2D: CanvasContext } : {}),
+        OffscreenCanvas: Canvas, OffscreenCanvasRenderingContext2D: CanvasContext,
+        WebGLRenderingContext: GL, WebGL2RenderingContext: GL, AudioBuffer, AnalyserNode });
+      vm.runInContext(source, context);
+      methods.forEach(([object, key], index) => assert.equal(object[key], before[index], `${key}: native implementation must remain unchanged`));
+    }
+  }
+});

@@ -250,9 +250,10 @@ async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
     hardwareConcurrency: fp.nativeHardwareMetrics ? "native-session-renderer" : "cdp-and-prototype",
     deviceMemory: fp.nativeHardwareMetrics ? "native-session-renderer-and-request-headers" : "prototype-and-request-headers",
     webRTCPolicy: wc.getWebRTCIPHandlingPolicy(),
-    canvasNoise: fp.aggressivePrivacyMode === false ? "disabled-in-normal-mode" : fp.canvasNoise ? "document-2d-readback-and-html-canvas-serialization-only" : "disabled",
-    audioNoise: fp.aggressivePrivacyMode === false ? "disabled-in-normal-mode" : fp.audioNoise ? "document-analyser-and-copyFromChannel-only" : "disabled",
-    unsupportedControls: ["fontsPreset", "webglNoise"],
+    canvasNoise: "disabled-incoherent-partial-override-removed",
+    audioNoise: "disabled-incoherent-partial-override-removed",
+    gpuIdentity: "native-when-allowed-not-emulated",
+    unsupportedControls: ["fontsPreset", "webglNoise", "canvasNoise", "audioNoise", "gpu.vendor", "gpu.renderer"],
     hardwarePolicy: fp.aggressivePrivacyMode === false ? "normal-native-hardware-apis" : "blocked-by-default-with-explicit-local-origin-exceptions",
     limitations: [fp.nativeScreenMetrics ? "Native screen isolation does not protect every hardware API or guarantee undetectability" : "No custom browser kernel or undetectability guarantee", backgroundProtected ? "Unexpected service-worker process loss stops the profile; reopen it to restore protection" : "Shared/service workers are not protected by the page debugger alone", "Normal mode and compatibility exceptions expose native GPU, audio, canvas and font characteristics", "Installed fonts can still affect CSS layout", "JavaScript privacy restrictions are observable", "Native WebRTC policy restricts non-proxied UDP", "Popup opener and form POST are unsupported", "Navigation history is not restored after restart"],
   };

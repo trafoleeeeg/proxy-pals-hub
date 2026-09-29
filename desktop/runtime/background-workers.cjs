@@ -64,7 +64,7 @@ async function configureWorker(params, parentSessionId, existing) {
     await protocol.send("Emulation.setUserAgentOverride", userAgentOverride(fp), id);
     await protocol.send("Emulation.setTimezoneOverride", { timezoneId: fp.timezone }, id);
     await applyLocale(protocol.send, fp.languages[0], id);
-    await protocol.send("Emulation.setHardwareConcurrencyOverride", { hardwareConcurrency: fp.hardwareConcurrency }, id);
+    if (!fp.nativeHardwareMetrics) await protocol.send("Emulation.setHardwareConcurrencyOverride", { hardwareConcurrency: fp.hardwareConcurrency }, id);
     const result = await protocol.send("Runtime.evaluate", { expression: `(${documentSource})(${JSON.stringify(fp)});`, returnByValue: true, disableBreaks: true }, id);
     if (result.exceptionDetails) throw new Error("Worker privacy setup failed");
     await protocol.send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true,

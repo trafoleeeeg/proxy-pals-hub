@@ -27,22 +27,24 @@ async function verifyRelease(directory = path.join(__dirname, "../dist")) {
   const archive = path.join(directory, "win-unpacked/resources/app.asar");
   const executable = path.join(directory, "win-unpacked/Umbra.exe");
   if (fs.existsSync(executable)) {
-    const marker = Buffer.from("setUmbraScreenMetrics");
+    const markers = ["setUmbraScreenMetrics", "setUmbraHardwareMetrics"].map(value => Buffer.from(value));
+    const markerLength = Math.max(...markers.map(marker => marker.length));
     const fd = fs.openSync(executable, "r");
-    let found = false;
+    const found = new Set();
     try {
-      const buffer = Buffer.allocUnsafe(1024 * 1024 + marker.length);
+      const buffer = Buffer.allocUnsafe(1024 * 1024 + markerLength);
       let overlap = 0;
       let read;
       while ((read = fs.readSync(fd, buffer, overlap, 1024 * 1024, null)) > 0) {
-        if (buffer.subarray(0, overlap + read).includes(marker)) { found = true; break; }
+        for (const marker of markers) if (buffer.subarray(0, overlap + read).includes(marker)) found.add(marker);
+        if (found.size === markers.length) break;
         const total = overlap + read;
-        const nextOverlap = Math.min(marker.length - 1, total);
+        const nextOverlap = Math.min(markerLength - 1, total);
         buffer.copyWithin(0, total - nextOverlap, total);
         overlap = nextOverlap;
       }
     } finally { fs.closeSync(fd); }
-    assert(found, "Packaged Umbra.exe does not contain the native screen API");
+    assert.equal(found.size, markers.length, "Packaged Umbra.exe must contain both native screen and hardware APIs");
   }
   if (fs.existsSync(archive)) {
     const asar = require("@electron/asar");

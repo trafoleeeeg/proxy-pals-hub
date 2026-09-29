@@ -25,6 +25,7 @@ function installSessionPrivacy(ses, fp, canSend = () => true) {
     if (!canSend()) { callback({ cancel: true }); return; }
     const headers = { ...details.requestHeaders };
     const offeredHints = [];
+    const memoryHints = new Set();
     for (const key of Object.keys(headers)) {
       const lower = key.toLowerCase();
       if (lower === "service-worker") {
@@ -32,12 +33,16 @@ function installSessionPrivacy(ses, fp, canSend = () => true) {
         if (!hasCapability(fp, origin, "workers")) { callback({ cancel: true }); return; }
       }
       if (lower.startsWith("sec-ch-ua")) { offeredHints.push(lower); delete headers[key]; }
+      // Both current and deprecated memory hints otherwise report the host's
+      // RAM from the browser process, independently of navigator.deviceMemory.
+      if (["device-memory", "sec-ch-device-memory"].includes(lower)) { memoryHints.add(lower); delete headers[key]; }
       if (["user-agent", "accept-language", "dnt"].includes(lower)) delete headers[key];
     }
     headers["User-Agent"] = fp.userAgent;
     headers["Accept-Language"] = fp.languages.map((language, i) => i ? `${language};q=${Math.max(0.1, 1 - i / 10).toFixed(1)}` : language).join(",");
     if (fp.doNotTrack) headers.DNT = "1";
     for (const key of offeredHints) if (hints[key]) headers[key] = hints[key];
+    for (const key of memoryHints) headers[key] = String(fp.deviceMemory);
     callback({ requestHeaders: headers });
   });
 }
@@ -106,6 +111,17 @@ function normalizeFingerprint(raw = {}, defaultUA, runtimeChrome = process.versi
     canvasNoise: integer(raw.canvasNoise ?? raw.canvas_noise, 0, 0, 2147483647),
     audioNoise: integer(raw.audioNoise ?? raw.audio_noise, 0, 0, 2147483647),
   };
+}
+
+function applyNativeHardwareMetrics(ses, fp, { required = false } = {}) {
+  if (typeof ses?.setUmbraHardwareMetrics !== "function") {
+    if (required) throw new Error("Native hardware reporting protection is unavailable");
+    return false;
+  }
+  try { ses.setUmbraHardwareMetrics({ hardwareConcurrency: fp.hardwareConcurrency, deviceMemory: fp.deviceMemory }); }
+  catch { throw new Error("Native hardware reporting could not be applied; restart Umbra before changing CPU or memory settings"); }
+  fp.nativeHardwareMetrics = true;
+  return true;
 }
 
 function applyNativeScreenMetrics(ses, fp, { required = false } = {}) {
@@ -183,7 +199,7 @@ async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
       await send("Page.enable", {}, id);
       await send("Emulation.setTimezoneOverride", { timezoneId: fp.timezone }, id);
       await applyLocale(send, fp.languages[0], id);
-      await send("Emulation.setHardwareConcurrencyOverride", { hardwareConcurrency: fp.hardwareConcurrency }, id);
+      if (!fp.nativeHardwareMetrics) await send("Emulation.setHardwareConcurrencyOverride", { hardwareConcurrency: fp.hardwareConcurrency }, id);
       // CDP rejects metrics on iframe targets. The native session policy covers
       // their CSS; stock Electron's JS fallback cannot cover OOPIF CSS.
       if (type === "page" && !fp.nativeScreenMetrics) await send("Emulation.setDeviceMetricsOverride", { width: 0, height: 0, deviceScaleFactor: fp.os === "macos" ? 2 : 1, mobile: false, screenWidth: fp.screen.width, screenHeight: fp.screen.height }, id);
@@ -211,7 +227,7 @@ async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
       send("Emulation.setUserAgentOverride", userAgentOverride(fp)),
       applyLocale(send, fp.languages[0]),
       send("Emulation.setTimezoneOverride", { timezoneId: fp.timezone }),
-      send("Emulation.setHardwareConcurrencyOverride", { hardwareConcurrency: fp.hardwareConcurrency }),
+      ...(fp.nativeHardwareMetrics ? [] : [send("Emulation.setHardwareConcurrencyOverride", { hardwareConcurrency: fp.hardwareConcurrency })]),
       // Stock Electron fallback preserves viewport size but only covers the
       // top-level target. Native sessions must not receive a second override.
       ...(fp.nativeScreenMetrics ? [] : [send("Emulation.setDeviceMetricsOverride", {
@@ -230,7 +246,9 @@ async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
     engine: fp.nativeScreenMetrics ? "umbra-screen-electron" : "stock-electron", chromiumVersion: process.versions.chrome || null,
     backgroundWorkers: backgroundProtected ? "browser-target-before-execution" : "unprotected",
     uaLocaleTimezone: "cdp", documentOverrides: "main-world-javascript",
-    screenMetrics: fp.nativeScreenMetrics ? "native-session-css-and-javascript" : "cdp-top-level-and-js-only-oopif", hardwareConcurrency: "cdp-and-prototype",
+    screenMetrics: fp.nativeScreenMetrics ? "native-session-css-and-javascript" : "cdp-top-level-and-js-only-oopif",
+    hardwareConcurrency: fp.nativeHardwareMetrics ? "native-session-renderer" : "cdp-and-prototype",
+    deviceMemory: fp.nativeHardwareMetrics ? "native-session-renderer-and-request-headers" : "prototype-and-request-headers",
     webRTCPolicy: wc.getWebRTCIPHandlingPolicy(),
     canvasNoise: fp.aggressivePrivacyMode === false ? "disabled-in-normal-mode" : fp.canvasNoise ? "document-2d-readback-and-html-canvas-serialization-only" : "disabled",
     audioNoise: fp.aggressivePrivacyMode === false ? "disabled-in-normal-mode" : fp.audioNoise ? "document-analyser-and-copyFromChannel-only" : "disabled",
@@ -254,4 +272,4 @@ async function applyLocale(send, locale, id) {
   }
 }
 
-module.exports = { normalizeFingerprint, applyNativeScreenMetrics, applyFingerprint, userAgentOverride, installSessionPrivacy, hasCapability, applyLocale };
+module.exports = { normalizeFingerprint, applyNativeScreenMetrics, applyNativeHardwareMetrics, applyFingerprint, userAgentOverride, installSessionPrivacy, hasCapability, applyLocale };

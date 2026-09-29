@@ -1,8 +1,8 @@
 diff --git a/shell/browser/api/electron_api_session.cc b/shell/browser/api/electron_api_session.cc
-index 84ad350..c7afa87 100644
+index 84ad350..192b248 100644
 --- a/shell/browser/api/electron_api_session.cc
 +++ b/shell/browser/api/electron_api_session.cc
-@@ -1038,6 +1038,38 @@ std::string Session::GetUserAgent() {
+@@ -1038,6 +1038,60 @@ std::string Session::GetUserAgent() {
    return browser_context_->GetUserAgent();
  }
  
@@ -38,39 +38,65 @@ index 84ad350..c7afa87 100644
 +  }
 +}
 +
++void Session::SetUmbraHardwareMetrics(gin_helper::ErrorThrower thrower,
++                                      const base::DictValue& options) {
++  const auto cores = options.FindInt("hardwareConcurrency");
++  const auto* memory = options.Find("deviceMemory");
++  if (!cores || !memory || (!memory->is_int() && !memory->is_double())) {
++    thrower.ThrowTypeError("Hardware metrics require both numeric fields");
++    return;
++  }
++  const double gib = memory->GetDouble();
++  if (*cores < 1 || *cores > 256 ||
++      !(gib == 0.25 || gib == 0.5 || gib == 1 || gib == 2 || gib == 4 ||
++        gib == 8)) {
++    thrower.ThrowRangeError("Hardware metrics are outside supported bounds");
++    return;
++  }
++  auto* preferences = SessionPreferences::FromBrowserContext(browser_context_);
++  if (!preferences || !preferences->SetHardwareMetrics({*cores, gib})) {
++    thrower.ThrowError(
++        "Hardware metrics must be configured before starting session renderers");
++  }
++}
++
  void Session::SetSSLConfig(network::mojom::SSLConfigPtr config) {
    browser_context_->SetSSLConfig(std::move(config));
  }
-@@ -1824,6 +1856,7 @@ void Session::FillObjectTemplate(v8::Isolate* isolate,
+@@ -1824,6 +1878,8 @@ void Session::FillObjectTemplate(v8::Isolate* isolate,
                   &Session::AllowNTLMCredentialsForDomains)
        .SetMethod("isPersistent", &Session::IsPersistent)
        .SetMethod("setUserAgent", &Session::SetUserAgent)
 +      .SetMethod("setUmbraScreenMetrics", &Session::SetUmbraScreenMetrics)
++      .SetMethod("setUmbraHardwareMetrics", &Session::SetUmbraHardwareMetrics)
        .SetMethod("getUserAgent", &Session::GetUserAgent)
        .SetMethod("setSSLConfig", &Session::SetSSLConfig)
        .SetMethod("getBlobData", &Session::GetBlobData)
 diff --git a/shell/browser/api/electron_api_session.h b/shell/browser/api/electron_api_session.h
-index 8bd1071..c68cd2a 100644
+index 8bd1071..d6b29d0 100644
 --- a/shell/browser/api/electron_api_session.h
 +++ b/shell/browser/api/electron_api_session.h
-@@ -141,6 +141,8 @@ class Session final : public gin::Wrappable<Session>,
+@@ -141,6 +141,10 @@ class Session final : public gin::Wrappable<Session>,
    void AllowNTLMCredentialsForDomains(const std::string& domains);
    void SetUserAgent(const std::string& user_agent, gin::Arguments* args);
    std::string GetUserAgent();
 +  void SetUmbraScreenMetrics(gin_helper::ErrorThrower thrower,
 +                             const base::DictValue& options);
++  void SetUmbraHardwareMetrics(gin_helper::ErrorThrower thrower,
++                              const base::DictValue& options);
    void SetSSLConfig(network::mojom::SSLConfigPtr config);
    bool IsPersistent();
    v8::Local<v8::Promise> GetBlobData(v8::Isolate* isolate,
 diff --git a/shell/browser/electron_browser_client.cc b/shell/browser/electron_browser_client.cc
-index 79e4150..96d1e95 100644
+index 79e4150..f86c817 100644
 --- a/shell/browser/electron_browser_client.cc
 +++ b/shell/browser/electron_browser_client.cc
-@@ -519,6 +519,21 @@ void ElectronBrowserClient::OverrideWebPreferences(
+@@ -519,6 +519,22 @@ void ElectronBrowserClient::OverrideWebPreferences(
    if (auto* web_preferences = WebContentsPreferences::From(web_contents)) {
      web_preferences->OverrideWebkitPrefs(prefs, renderer_prefs);
    }
 +
++  SessionPreferences::CreateForBrowserContext(web_contents->GetBrowserContext());
 +  if (auto* session_preferences = SessionPreferences::FromBrowserContext(
 +          web_contents->GetBrowserContext())) {
 +    // WebPreferences travel to every RenderView, including OOPIFs and newly
@@ -88,8 +114,52 @@ index 79e4150..96d1e95 100644
  }
  
  bool ElectronBrowserClient::WebPreferencesNeedUpdateForColorRelatedStateChanges(
+@@ -691,6 +707,28 @@ void ElectronBrowserClient::AppendExtraCommandLineSwitches(
+       command_line->AppendSwitch(switches::kEnableSandbox);
+     }
+ 
++    // Set after WebContents additionalArguments. Never inherit profile values
++    // from the browser command line or from another BrowserContext. Workers
++    // without a WebContents use the same renderer-launch path.
++    command_line->RemoveSwitch("umbra-hardware-concurrency");
++    command_line->RemoveSwitch("umbra-device-memory");
++    if (render_process_host) {
++      SessionPreferences::CreateForBrowserContext(
++          render_process_host->GetBrowserContext());
++      if (auto* preferences = SessionPreferences::FromBrowserContext(
++              render_process_host->GetBrowserContext())) {
++        preferences->MarkHardwareMetricsUsed();
++        if (const auto& hardware = preferences->hardware_metrics()) {
++          command_line->AppendSwitchASCII(
++              "umbra-hardware-concurrency",
++              base::NumberToString(hardware->hardware_concurrency));
++          command_line->AppendSwitchASCII(
++              "umbra-device-memory",
++              base::NumberToString(hardware->device_memory));
++        }
++      }
++    }
++
+     renderer_process_sandboxed_[unsafe_process_id] =
+         !command_line->HasSwitch(sandbox::policy::switches::kNoSandbox);
+   }
+diff --git a/shell/browser/session_preferences.cc b/shell/browser/session_preferences.cc
+index 5ef2350..3c44577 100644
+--- a/shell/browser/session_preferences.cc
++++ b/shell/browser/session_preferences.cc
+@@ -17,6 +17,10 @@ int SessionPreferences::kLocatorKey = 0;
+ void SessionPreferences::CreateForBrowserContext(
+     content::BrowserContext* context) {
+   DCHECK(context);
++  // Recreating a JavaScript Session wrapper must not discard immutable
++  // reporting policies or forget that the BrowserContext has run renderers.
++  if (FromBrowserContext(context))
++    return;
+   context->SetUserData(&kLocatorKey,
+                        base::WrapUnique(new SessionPreferences{}));
+ }
 diff --git a/shell/browser/session_preferences.h b/shell/browser/session_preferences.h
-index 3c03e70..f08b89f 100644
+index 3c03e70..9bd0913 100644
 --- a/shell/browser/session_preferences.h
 +++ b/shell/browser/session_preferences.h
 @@ -5,6 +5,7 @@
@@ -100,7 +170,7 @@ index 3c03e70..f08b89f 100644
  #include <vector>
  
  #include "base/files/file_path.h"
-@@ -17,6 +18,18 @@ class BrowserContext;
+@@ -17,6 +18,25 @@ class BrowserContext;
  
  namespace electron {
  
@@ -116,10 +186,17 @@ index 3c03e70..f08b89f 100644
 +  bool operator==(const UmbraScreenMetrics&) const = default;
 +};
 +
++// Web-visible reporting only; never changes CPU scheduling or heap limits.
++struct UmbraHardwareMetrics {
++  int hardware_concurrency;
++  double device_memory;
++  bool operator==(const UmbraHardwareMetrics&) const = default;
++};
++
  class SessionPreferences : public base::SupportsUserData::Data {
   public:
    static SessionPreferences* FromBrowserContext(
-@@ -30,6 +43,17 @@ class SessionPreferences : public base::SupportsUserData::Data {
+@@ -30,6 +50,28 @@ class SessionPreferences : public base::SupportsUserData::Data {
  
    bool HasServiceWorkerPreloadScript();
  
@@ -134,15 +211,60 @@ index 3c03e70..f08b89f 100644
 +  }
 +  void MarkScreenMetricsUsed() { screen_metrics_used_ = true; }
 +
++  const std::optional<UmbraHardwareMetrics>& hardware_metrics() const {
++    return hardware_metrics_;
++  }
++  bool SetHardwareMetrics(const UmbraHardwareMetrics& metrics) {
++    if (hardware_metrics_used_ && hardware_metrics_ != metrics)
++      return false;
++    hardware_metrics_ = metrics;
++    return true;
++  }
++  void MarkHardwareMetricsUsed() { hardware_metrics_used_ = true; }
++
   private:
    SessionPreferences();
  
-@@ -37,6 +61,8 @@ class SessionPreferences : public base::SupportsUserData::Data {
+@@ -37,6 +79,10 @@ class SessionPreferences : public base::SupportsUserData::Data {
    static int kLocatorKey;
  
    std::vector<PreloadScript> preload_scripts_;
 +  std::optional<UmbraScreenMetrics> screen_metrics_;
 +  bool screen_metrics_used_ = false;
++  std::optional<UmbraHardwareMetrics> hardware_metrics_;
++  bool hardware_metrics_used_ = false;
  };
  
  }  // namespace electron
+diff --git a/shell/browser/web_contents_preferences.cc b/shell/browser/web_contents_preferences.cc
+index 8cad0cd..7fce639 100644
+--- a/shell/browser/web_contents_preferences.cc
++++ b/shell/browser/web_contents_preferences.cc
+@@ -13,6 +13,7 @@
+ #include "base/command_line.h"
+ #include "base/containers/fixed_flat_map.h"
+ #include "base/memory/ptr_util.h"
++#include "base/strings/string_util.h"
+ #include "cc/base/switches.h"
+ #include "content/public/browser/render_process_host.h"
+ #include "content/public/browser/web_contents_user_data.h"
+@@ -145,9 +146,18 @@ void RendererProcessPreferences::AppendCommandLineSwitches(
+     command_line->AppendSwitch(switches::kScrollBounce);
+ #endif
+ 
+-  for (const auto& arg : custom_args)
++  for (const auto& arg : custom_args) {
++    // AppendArg bypasses CommandLine's switch map, so RemoveSwitch in the
++    // browser client cannot remove these when the child reparses its argv.
++    // Umbra reporting switches belong exclusively to BrowserContext policy.
++    const auto lower = base::ToLowerASCII(arg);
++    if (lower.starts_with("--umbra-") || lower.starts_with("-umbra-") ||
++        lower.starts_with("/umbra-")) {
++      continue;
++    }
+     if (!arg.empty())
+       command_line->AppendArg(arg);
++  }
+ 
+   if (enable_blink_features)
+     command_line->AppendSwitchASCII(::switches::kEnableBlinkFeatures,

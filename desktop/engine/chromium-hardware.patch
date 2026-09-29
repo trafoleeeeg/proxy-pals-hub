@@ -1,0 +1,56 @@
+diff --git a/third_party/blink/renderer/core/frame/navigator_concurrent_hardware.cc b/third_party/blink/renderer/core/frame/navigator_concurrent_hardware.cc
+index f5c0db2d1b..21f9d4c169 100644
+--- a/third_party/blink/renderer/core/frame/navigator_concurrent_hardware.cc
++++ b/third_party/blink/renderer/core/frame/navigator_concurrent_hardware.cc
+@@ -4,11 +4,22 @@
+ 
+ #include "third_party/blink/renderer/core/frame/navigator_concurrent_hardware.h"
+ 
++#include "base/command_line.h"
++#include "base/strings/string_number_conversions.h"
+ #include "base/system/sys_info.h"
+ 
+ namespace blink {
+ 
+ unsigned NavigatorConcurrentHardware::hardwareConcurrency() const {
++  // The browser supplies this immutable, BrowserContext-owned reporting value
++  // to each renderer, including those hosting only background workers.
++  int cores = 0;
++  if (base::StringToInt(base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
++                            "umbra-hardware-concurrency"),
++                        &cores) &&
++      cores >= 1 && cores <= 256) {
++    return static_cast<unsigned>(cores);
++  }
+   return static_cast<unsigned>(base::SysInfo::NumberOfProcessors());
+ }
+ 
+diff --git a/third_party/blink/renderer/core/frame/navigator_device_memory.cc b/third_party/blink/renderer/core/frame/navigator_device_memory.cc
+index 05fa33e456..9a03435377 100644
+--- a/third_party/blink/renderer/core/frame/navigator_device_memory.cc
++++ b/third_party/blink/renderer/core/frame/navigator_device_memory.cc
+@@ -4,6 +4,8 @@
+ 
+ #include "third_party/blink/renderer/core/frame/navigator_device_memory.h"
+ 
++#include "base/command_line.h"
++#include "base/strings/string_number_conversions.h"
+ #include "third_party/blink/public/common/device_memory/approximated_device_memory.h"
+ #include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-shared.h"
+ #include "third_party/blink/renderer/core/dom/document.h"
+@@ -12,6 +14,15 @@
+ namespace blink {
+ 
+ float NavigatorDeviceMemory::deviceMemory() const {
++  double memory = 0;
++  if (base::StringToDouble(
++          base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
++              "umbra-device-memory"),
++          &memory) &&
++      (memory == 0.25 || memory == 0.5 || memory == 1 || memory == 2 ||
++       memory == 4 || memory == 8)) {
++    return static_cast<float>(memory);
++  }
+   return ApproximatedDeviceMemory::GetApproximatedDeviceMemory();
+ }
+ 

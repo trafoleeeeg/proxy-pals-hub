@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const vm = require("node:vm");
-const { normalizeFingerprint, applyNativeScreenMetrics, applyFingerprint, userAgentOverride, applyLocale, installSessionPrivacy } = require("../runtime/fingerprint.cjs");
+const { normalizeFingerprint, applyNativeScreenMetrics, applyNativeHardwareMetrics, applyFingerprint, userAgentOverride, applyLocale, installSessionPrivacy } = require("../runtime/fingerprint.cjs");
 
 const WINDOWS_UA = "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
 const CHROME = "150.0.1234.56";
@@ -166,6 +166,30 @@ test("native session screen metrics are applied before navigation and stock pack
   applyNativeScreenMetrics({ setUmbraScreenMetrics: (metrics) => calls.push(metrics) }, mac);
   assert.deepEqual(calls[1], { width: 1512, height: 982, availableWidth: 1512, availableHeight: 957, colorDepth: 24, deviceScaleFactor: 2 });
   assert.throws(() => applyNativeScreenMetrics({ setUmbraScreenMetrics: () => { throw new Error("internal path"); } }, fingerprint()), /Native screen protection could not be applied/);
+});
+
+test("native hardware policy fails closed and preserves native getters instead of adding a second override", async () => {
+  const fp = fingerprint({ hardwareConcurrency: 3, deviceMemory: 0.5 });
+  assert.equal(applyNativeHardwareMetrics({}, fp), false);
+  assert.throws(() => applyNativeHardwareMetrics({}, fp, { required: true }), /unavailable/);
+  assert.throws(() => applyNativeHardwareMetrics({ setUmbraHardwareMetrics() { throw new Error("private internal path"); } }, fp), /Native hardware reporting could not be applied/);
+  assert.equal(fp.nativeHardwareMetrics, undefined);
+  let received;
+  assert.equal(applyNativeHardwareMetrics({ setUmbraHardwareMetrics(metrics) { received = metrics; } }, fp), true);
+  assert.deepEqual(received, { hardwareConcurrency: 3, deviceMemory: 0.5 });
+  const wc = webContents({ reject: "Emulation.setHardwareConcurrencyOverride" });
+  const report = await applyFingerprint(wc, fp);
+  assert.equal(report.hardwareConcurrency, "native-session-renderer");
+  assert.equal(wc.commands.some(item => item.command === "Emulation.setHardwareConcurrencyOverride"), false);
+  const source = wc.commands.find(item => item.command === "Page.addScriptToEvaluateOnNewDocument").args.source;
+  const navigator = {};
+  const cores = () => 3;
+  const memory = () => 0.5;
+  Object.defineProperty(navigator, "hardwareConcurrency", { get: cores });
+  Object.defineProperty(navigator, "deviceMemory", { get: memory });
+  vm.runInContext(source, vm.createContext({ navigator, screen: {} }));
+  assert.equal(Object.getOwnPropertyDescriptor(navigator, "hardwareConcurrency").get, cores);
+  assert.equal(Object.getOwnPropertyDescriptor(navigator, "deviceMemory").get, memory);
 });
 
 test("unsafe native WebRTC policy or failed CDP protection prevents navigation setup", async () => {

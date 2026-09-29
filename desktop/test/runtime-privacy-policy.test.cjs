@@ -78,6 +78,23 @@ test("Do Not Track agrees between navigator and outgoing requests", () => {
   assert.equal(withoutDnt.dnt, undefined);
 });
 
+test("negotiated device-memory hints use the profile bucket and are never added unsolicited", () => {
+  let listener;
+  const fp = normalizeFingerprint({ deviceMemory: 0.5, userAgent: "Chrome/152.0.0.0" });
+  installSessionPrivacy({ webRequest: { onBeforeSendHeaders: handler => { listener = handler; } } }, fp);
+  const request = requestHeaders => {
+    let result;
+    listener({ url: "https://example.test/", requestHeaders }, value => { result = value.requestHeaders; });
+    return result;
+  };
+  const result = request({ "Device-Memory": "8", "device-memory": "16", "sec-ch-device-memory": "8" });
+  assert.equal(result["device-memory"], "0.5");
+  assert.equal(result["Device-Memory"], undefined);
+  assert.equal(result["sec-ch-device-memory"], "0.5");
+  assert.equal(request({ "SEC-CH-DEVICE-MEMORY": "8" })["sec-ch-device-memory"], "0.5");
+  assert.equal(Object.keys(request({})).some(key => /device-memory/i.test(key)), false);
+});
+
 test("normal mode permits service workers without a per-origin exception while still rewriting host headers", () => {
   let listener;
   const ses = { webRequest: { onBeforeSendHeaders: (handler) => { listener = handler; } } };

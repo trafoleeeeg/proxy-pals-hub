@@ -17,12 +17,13 @@
     "commit": "955266bfdd854cd280dffd47548673914484e4c0"
   },
   "nativeScreenApi": "session.setUmbraScreenMetrics",
+  "nativeHardwareApi": "session.setUmbraHardwareMetrics",
   "appIntegrationEnabled": true,
   "distribution": {
     "windowsX64": {
-      "releaseTag": "umbra-engine-v44.4.5-screen3",
+      "releaseTag": "umbra-engine-v44.4.5-screen4",
       "asset": "dist.zip",
-      "sha256": "a920c3c4888a7da7756219b6255fcf0441e7dffb38a25be6cdcc9f9d95b9d660"
+      "sha256": "97a1fa26f3319867d97a2db208de52590c6d43a33a7b1730cf93178638833817"
     }
   }
 }

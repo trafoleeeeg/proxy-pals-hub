@@ -5,7 +5,7 @@ const { createRuntimeProxy, blockSession } = require("./proxy.cjs");
 const { createCookieStore, initializeCookies, canonicalCookies, parseCookieImport, applyImportedCookies } = require("./cookies.cjs");
 const { createTabStore, sanitizeTabs } = require("./tabs.cjs");
 const { createBookmarkStore, defaultBookmarks, sanitizeBookmarks } = require("./bookmarks.cjs");
-const { normalizeFingerprint, applyNativeScreenMetrics, applyFingerprint, installSessionPrivacy } = require("./fingerprint.cjs");
+const { normalizeFingerprint, applyNativeScreenMetrics, applyNativeHardwareMetrics, applyFingerprint, installSessionPrivacy } = require("./fingerprint.cjs");
 const { createPrivacyStore, privacyOrigin } = require("./privacy-policy.cjs");
 const { sanitizeBrowserSettings } = require("./browser-settings.cjs");
 const { SAFE_WEBRTC } = require("./leak-check.cjs");
@@ -22,6 +22,8 @@ const LAUNCH_ERROR_TEXT = [
   [/^Unable to apply fingerprint/i, "Не удалось применить отпечаток браузера"],
   [/^Native screen protection is unavailable/i, "В сборке браузера нет нативной защиты экрана; профиль не запущен"],
   [/^Native screen protection could not be applied/i, "Не удалось применить защиту экрана. После изменения размеров перезапустите Umbra"],
+  [/^Native hardware reporting protection is unavailable/i, "В сборке браузера нет нативной настройки CPU и памяти; обновите Umbra"],
+  [/^Native hardware reporting could not be applied/i, "Не удалось применить CPU и память профиля. После изменения этих параметров перезапустите Umbra"],
   [/^OS cookie encryption/i, "Шифрование Windows недоступно, профиль не запущен"],
   [/^Proxy setup/i, "Не удалось поднять прокси, трафик заблокирован"],
   [/^Profile is closing/i, "Профиль закрывается, повторите запуск"],
@@ -670,6 +672,9 @@ function createProfileRuntime(electron, options = {}) {
         entry.fp = normalizeFingerprint(payload.fingerprint || {}, defaultUA);
         applyNativeScreenMetrics(entry.ses, entry.fp, {
           required: process.env.UMBRA_REQUIRE_NATIVE_SCREEN === "1" || (process.platform === "win32" && electron.app?.isPackaged === true),
+        });
+        applyNativeHardwareMetrics(entry.ses, entry.fp, {
+          required: process.env.UMBRA_REQUIRE_NATIVE_HARDWARE === "1" || (process.platform === "win32" && electron.app?.isPackaged === true),
         });
         entry.fp.hardwarePermissions = await privacyStore().readPermissions(id);
         entry.backgroundWorkers = await configureBackgroundWorkers(entry.ses, entry.fp, { onFailure: (message) => {

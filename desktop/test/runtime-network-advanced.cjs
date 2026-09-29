@@ -142,7 +142,8 @@ async function auditAdvancedNetwork({ electron, plainPort, proxy, cleanups, allo
   const socks = await mockSocks(plainPort); cleanups.push(() => socks.close());
   const dns = await open(true, { protocol: "socks5", host: "127.0.0.1", port: socks.port, username: "fixture-user", password: "fixture-pass" });
   const prefix = `audit-${randomUUID()}`;
-  const names = [`${prefix}-fetch.invalid`, `${prefix}-hint.invalid`, `${prefix}-connect.invalid`, `${prefix}-frame.invalid`];
+  const labels = ['fetch', 'dns-prefetch', 'preconnect', 'iframe', 'meta-on', 'srcdoc', 'blank', 'blob', 'data', 'hover', 'parser-header'];
+  const names = labels.map(label => `${prefix}-${label}.invalid`);
   const controlName = `${prefix}-control.localhost`;
   const logPath = path.join(directory, "network-audit.json");
   await dns.ses.netLog.startLogging(logPath, { captureMode: "default" });
@@ -154,18 +155,44 @@ async function auditAdvancedNetwork({ electron, plainPort, proxy, cleanups, allo
       }
       await fetch('http://' + names[0] + ':${plainPort}/dns', {mode:'no-cors'});
       await new Promise(resolve => { const f = document.createElement('iframe'); f.onload = resolve; f.src = 'http://' + names[3] + ':${plainPort}/frame'; document.body.appendChild(f); });
+      const html = host => '<meta http-equiv="x-dns-prefetch-control" content="on"><link rel="dns-prefetch" href="http://' + host + '">';
+      const meta = document.createElement('meta'); meta.httpEquiv = 'x-dns-prefetch-control'; meta.content = 'on'; document.head.appendChild(meta);
+      const link = document.createElement('link'); link.rel = 'dns-prefetch'; link.href = 'http://' + names[4]; document.head.appendChild(link);
+      for (const [kind, host] of [['srcdoc',names[5]],['blank',names[6]],['blob',names[7]],['data',names[8]]]) {
+        await new Promise(resolve => {
+          const f = document.createElement('iframe'); f.onload = () => {
+            if (kind === 'blank') { f.onload = null; f.contentDocument.open(); f.contentDocument.write(html(host)); f.contentDocument.close(); }
+            resolve();
+          };
+          if (kind === 'srcdoc') f.srcdoc = html(host);
+          else if (kind === 'blob') f.src = URL.createObjectURL(new Blob([html(host)], {type:'text/html'}));
+          else if (kind === 'data') f.src = 'data:text/html,' + encodeURIComponent(html(host));
+          else f.src = 'about:blank';
+          document.body.appendChild(f);
+        });
+      }
+      await new Promise(resolve => { const f = document.createElement('iframe'); f.onload = resolve; f.src = 'http://localhost:${plainPort}/parser?dns-hint=' + names[10]; document.body.appendChild(f); });
+      const anchor = document.createElement('a'); anchor.id = 'dns-hover-probe'; anchor.href = 'http://' + names[9]; anchor.textContent = 'Local hover test';
+      anchor.style.cssText = 'position:fixed;left:10px;top:10px;width:180px;height:40px;z-index:2147483647;background:white;'; document.body.appendChild(anchor);
       await new Promise(resolve => setTimeout(resolve, 1500));
     })()`);
+    await dns.wc.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 20, y: 20 });
+    await new Promise(resolve => setTimeout(resolve, 500));
     await dns.ses.resolveHost(controlName);
   } finally { await dns.ses.netLog.stopLogging(); }
   const log = JSON.parse(await fs.readFile(logPath, "utf8"));
   assert.ok(resolverActivity(log, [controlName]).requests > 0, "NetLog must record the positive resolver control");
   const activity = resolverActivity(log, names);
-  // This is a diagnostic, not a release claim of zero DNS leaks. Keep a
-  // confirmed finding visible instead of hiding it behind a green suite.
   for (const [index, name] of names.entries()) {
     const detail = resolverActivity(log, [name]);
-    process.stdout.write(`ADVANCED_DNS_${detail.network.length ? 'EXPOSURE' : 'LOCAL_ONLY'} kind=${['fetch','dns-prefetch','preconnect','iframe'][index]} tasks=${[...new Set(detail.tasks)].join(',')} networkEvents=${detail.network.length}\n`);
+    process.stdout.write(`ADVANCED_DNS_${detail.network.length ? 'EXPOSURE' : 'LOCAL_ONLY'} kind=${labels[index]} tasks=${[...new Set(detail.tasks)].join(',')} networkEvents=${detail.network.length}\n`);
+  }
+  // Umbra currently distributes its patched engine on Windows only. Linux CI
+  // uses stock Electron: keep diagnostics there without claiming this fix.
+  if (process.platform === 'win32' || process.env.UMBRA_REQUIRE_NATIVE_DNS === '1') {
+    assert.deepEqual(activity.network, [], "Native engine must drop speculative DNS hints in every tested document context");
+  } else {
+    process.stdout.write("ADVANCED_DNS_UNSUPPORTED stock non-Windows engine; no native DNS protection claim\n");
   }
   for (const name of [names[0], names[3]]) assert.ok(socks.observations.destinations.some(item => item.host === name), "Actual fetch/frame must reach SOCKS by name");
   process.stdout.write(`ADVANCED_DNS_RESULT requests=${activity.requests} networkEvents=${activity.network.length} capture=Chromium-only\n`);

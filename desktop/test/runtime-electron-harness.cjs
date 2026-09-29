@@ -101,7 +101,16 @@ if (process.versions.electron) {
     const local = await listen(origin); cleanups.push(() => local.close());
     process.stdout.write("NATIVE_ORIGIN_READY\n");
     const httpHits = [];
-    const plainServer = http.createServer((req, res) => { httpHits.push(req.url); res.setHeader("Content-Type", "text/html"); res.end("<title>HTTP fixture</title><h1>HTTP through proxy</h1>"); });
+    const plainServer = http.createServer((req, res) => {
+      httpHits.push(req.url); res.setHeader("Content-Type", "text/html");
+      const hint = new URL(req.url, "http://localhost").searchParams.get("dns-hint");
+      if (mode === "network-advanced" && hint && /^audit-[a-z0-9-]+\.invalid$/.test(hint)) {
+        res.setHeader("X-DNS-Prefetch-Control", "on");
+        res.setHeader("Link", `<http://${hint}>; rel=dns-prefetch`);
+        return res.end(`<meta http-equiv="x-dns-prefetch-control" content="on"><link rel="dns-prefetch" href="http://${hint}"><title>Parser hint fixture</title>`);
+      }
+      res.end("<title>HTTP fixture</title><h1>HTTP through proxy</h1>");
+    });
     const plain = await listen(plainServer);
     cleanups.push(() => plain.close());
     const auth = { a: 0, b: 0, rejected: 0 };

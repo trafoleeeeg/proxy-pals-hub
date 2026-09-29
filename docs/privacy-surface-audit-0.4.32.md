@@ -106,7 +106,7 @@ Chromium с возможностями screen5. 16/32 не предлагают�
 | CAN-01 Canvas/SVG/OffscreenCanvas | Семантика простого readback проверена, hardware isolation отсутствует | Текст, SVG, пути, gradients, filters, image transfer, color management, WebGL readPixels |
 | AUD-01 Audio | Buffer semantics проверена, hardware isolation отсутствует | Реальное offline rendering, AudioWorklet, default sample rate, latency, output device, live/offline differences |
 | FONT-01 CSS/Canvas шрифты | Host lookup доступен без opt-in; opt-in ограничивает набор | Расширенная glyph coverage, fallback, emoji, downloadable fonts, PDF, печать; законность распространения набора |
-| NET-01 IPv4/IPv6/DNS | **Обнаружено сетевое DNS-разрешение для dns-prefetch при SOCKS**; обычные fetch/iframe используют только cache/hosts. IPv6 HTTP loopback проходит через прокси и блокируется при его отключении | Исправить DNS-prefetch; внешний DNS challenge/захват пакетов и внешний IPv6 пока отсутствуют |
+| NET-01 IPv4/IPv6/DNS | **В 0.4.32/screen5 обнаружен DNS-prefetch вне SOCKS**; исправление проверено в screen6, ещё не выпущено клиентам. Обычные fetch/iframe используют cache/hosts; IPv6 HTTP loopback fail-closed | Выпустить исправленный клиент; внешний DNS challenge/захват пакетов и внешний IPv6 пока отсутствуют |
 | NET-02 WebRTC/ICE/STUN/TURN | IPv4 STUN/UDP блокируется; локальные TURN TCP/TLS идут через HTTP-прокси и не обходят его отказ | TURN UDP6 непроверен: положительный контроль не сработал. Полный TURN relay/звонок и внешние маршруты не измерены |
 | NET-03 WebSocket/WebTransport/QUIC | WS/WSS: локальный тест на screen5 подтвердил отказ без прямого fallback при падении bridge и отключении upstream; WebTransport/QUIC не проверены | Внешний маршрут, другие прокси-протоколы и UDP-транспорты |
 | NET-04 LAN/loopback/port probing | Не проверено | Контролируемые локальные endpoints и DNS rebinding; отдельно с прокси и без; не сканировать реальную LAN |
@@ -197,7 +197,7 @@ DNS/IPv6/ICE-утечек или идентичного поведения пр�
 маршруты при VPN/смене сети и звонки в реальных сервисах. Runtime не менялся:
 в проверенных сценариях дополнительной утечки не обнаружено.
 
-## IPv6, TURN и DNS NetLog: найденная проблема
+## IPv6, TURN и DNS NetLog: найденная проблема (screen5, до исправления)
 
 `runtime-network-advanced.cjs`, опубликованный screen5, 30 сентября 2026:
 
@@ -232,6 +232,32 @@ DNS/VPN/firewall не изменялись. Для закрытия внешне
 Диагностический тест явно выводит `ADVANCED_DNS_EXPOSURE` и
 `ADVANCED_INCONCLUSIVE`: успешный запуск тестового стенда **не является** зелёным
 результатом безопасности DNS/IPv6. Релиз и production runtime не менялись.
+
+## Исправление DNS-prefetch в screen6
+
+Патч `desktop/engine/electron-dns-prefetch.patch` перекрывает `PrefetchDNS` на
+browser-side Mojo-границе Electron. Нативный обработчик не создаёт resolver job
+для спекулятивных renderer hints. Это не JavaScript-подмена и не удаление HTML;
+обычные навигации, запросы, прокси и явный `session.resolveHost` сохраняются.
+Предварительный DNS отключён во всех сессиях этого движка, в том числе direct;
+возможен небольшой проигрыш в скорости первого подключения без предзагрузки DNS.
+
+Регрессионный тест расширен: динамический link, meta on, srcdoc, about:blank,
+blob/data, реальное наведение через CDP, parser link и HTTP Link header в iframe.
+На старом screen5 все эти пути воспроизводят сетевые DNS-задачи. Для нового
+Windows-движка теперь обязательно `networkEvents=0`; успешное выполнение
+диагностики уже не позволяет пропустить этот конкретный дефект. Linux CI с
+stock Electron остаётся только диагностикой и явно сообщает об отсутствии патча.
+
+Архив нового движка закреплён SHA-256, бинарник после распаковки сравнивается
+с собранным. Исходники и тесты не изменяют установленный клиент 0.4.32: для
+пользователей нужен отдельный релиз приложения. Внешний IPv6, TURN UDP6 и
+полный медиасеанс по-прежнему не считаются проверенными.
+
+Результат на распакованном screen6: `networkEvents=0` во всех 11 группах
+(8 воспроизводивших дефект + fetch/preconnect/iframe), 143/143 desktop-теста,
+screen/hardware/fonts по два запуска и rendering audit в трёх режимах прошли.
+SHA-256 ZIP совпал с digest загруженного GitHub asset. Миграций БД нет.
 
 ## Воспроизведение
 

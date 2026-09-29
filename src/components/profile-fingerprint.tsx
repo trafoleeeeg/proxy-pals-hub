@@ -1,6 +1,6 @@
 import { useId } from "react";
 import { RefreshCw } from "lucide-react";
-import { generateFingerprint, type Fingerprint, type FingerprintOS } from "@/lib/fingerprint";
+import { generateFingerprint, WINDOWS_CONFIGURATIONS, windowsConfigurationId, applyWindowsConfiguration, windowsUserAgent, type Fingerprint, type FingerprintOS } from "@/lib/fingerprint";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,7 +28,16 @@ export function ProfileFingerprint({ value, onChange, disabled = false, country,
         <RefreshCw className="size-4" /> Новый отпечаток
       </Button>
     </div>
-    <p className="text-xs text-muted-foreground">User-Agent и Client Hints согласуются с ОС профиля и установленным Chromium в странице, dedicated worker и iframe. Подмена шрифтов и шум WebGL не поддерживаются. Отпечаток macOS на Windows не эмулирует настоящее устройство Mac и не гарантирует нераспознаваемость.</p>
+    <p className="text-xs text-muted-foreground">Обновлённый клиент согласует User-Agent и Client Hints с ОС профиля и установленным Chromium, включая фоновые workers. Подмена шрифтов и шум WebGL не поддерживаются. Отпечаток macOS на Windows не эмулирует настоящее устройство Mac и не гарантирует нераспознаваемость.</p>
+    <p role="note" className="text-xs text-warning">Ограничение экрана: CSS-запросы внутри сторонних iframe могут раскрывать реальные размеры и DPI. Подмена screen в JavaScript не закрывает этот канал, в том числе в строгом режиме.</p>
+    {value.os === "windows" && <div className="grid gap-2 rounded-md border border-border p-3">
+      <Label htmlFor="windows-configuration">Набор параметров Windows</Label>
+      <Select disabled={disabled} value={windowsConfigurationId(value)} onValueChange={(id) => onChange(applyWindowsConfiguration(value, id))}>
+        <SelectTrigger id="windows-configuration"><SelectValue /></SelectTrigger>
+        <SelectContent><SelectItem value="custom">Свои параметры</SelectItem>{WINDOWS_CONFIGURATIONS.map((item) => <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>)}</SelectContent>
+      </Select>
+      <p className="text-xs text-muted-foreground">Набор связывает ОС, экран, логические потоки и сообщаемую память (не более 8 ГБ). Это не эмуляция модели компьютера или GPU. Язык, пояс, cookies и настройки защиты при выборе набора не меняются.</p>
+    </div>}
     {country && !proxyTimezone && <p className="text-xs text-muted-foreground">Часовой пояс IP пока не подтверждён свежей проверкой прокси. Проверьте прокси перед созданием профиля; пояс можно указать вручную.</p>}
     {proxyTimezone && value.timezone !== proxyTimezone && <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-warning/50 p-3 text-xs text-warning">
       <span>Часовой пояс профиля {value.timezone} отличается от геолокации проверенного IP{proxyIp ? ` ${proxyIp}` : ""}: {proxyTimezone}. Геолокация может быть неточной; смена пояса у действующего профиля может повлиять на сессии.</span>
@@ -54,12 +63,15 @@ export function ProfileFingerprint({ value, onChange, disabled = false, country,
       <Label className="grid gap-2">Основной язык<Input value={value.language} onChange={(e) => onChange({ ...value, language: e.target.value, languages: [e.target.value, ...value.languages.filter((lang) => lang !== value.language && lang !== e.target.value)] })} placeholder="de-DE" /></Label>
       <Label className="grid gap-2">Ширина экрана<Input type="number" min={320} max={7680} value={value.screen?.width ?? ""} onChange={(e) => onChange({ ...value, screen: { ...value.screen, width: Number(e.target.value) } })} /></Label>
       <Label className="grid gap-2">Высота экрана<Input type="number" min={240} max={4320} value={value.screen?.height ?? ""} onChange={(e) => onChange({ ...value, screen: { ...value.screen, height: Number(e.target.value) } })} /></Label>
-      <Label className="grid gap-2">Ядра процессора<Input type="number" min={1} max={128} value={value.hardwareConcurrency} onChange={(e) => onChange({ ...value, hardwareConcurrency: Number(e.target.value) })} /></Label>
+      <Label className="grid gap-2">Логические потоки процессора<Input type="number" min={1} max={128} value={value.hardwareConcurrency} onChange={(e) => onChange({ ...value, hardwareConcurrency: Number(e.target.value) })} /></Label>
       <div className="grid gap-2"><Label htmlFor="profile-memory">Память, ГБ</Label><Select disabled={disabled} value={String(value.deviceMemory)} onValueChange={(memory) => onChange({ ...value, deviceMemory: Number(memory) })}>
-        <SelectTrigger id="profile-memory"><SelectValue /></SelectTrigger><SelectContent>{[1, 2, 4, 8].map((memory) => <SelectItem key={memory} value={String(memory)}>{memory}</SelectItem>)}</SelectContent>
+        <SelectTrigger id="profile-memory"><SelectValue /></SelectTrigger><SelectContent>{[0.25, 0.5, 1, 2, 4, 8].map((memory) => <SelectItem key={memory} value={String(memory)}>{memory}</SelectItem>)}</SelectContent>
       </Select></div>
     </div>
-    <Label className="grid gap-2">User-Agent<Input value={value.userAgent} maxLength={1024} onChange={(e) => onChange({ ...value, userAgent: e.target.value })} className="font-mono text-xs" /></Label>
+    <Label className="grid gap-2">User-Agent{value.os === "windows"
+      ? <Input value={windowsUserAgent(value.chromeVersion)} readOnly className="font-mono text-xs" />
+      : <Input value={value.userAgent} maxLength={1024} onChange={(e) => onChange({ ...value, userAgent: e.target.value })} className="font-mono text-xs" />}</Label>
+    {value.os === "windows" && <p className="text-xs text-muted-foreground">Предпросмотр по сохранённой версии. При запуске версия берётся из установленного Chromium: в User-Agent только основная, в Client Hints — полная. Произвольная строка Windows UA больше не применяется.</p>}
     <Label className="grid gap-2">Стартовый адрес<Input type="url" value={value.startUrl ?? ""} onChange={(e) => onChange({ ...value, startUrl: e.target.value })} placeholder="https://example.com" /></Label>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
   </fieldset>;

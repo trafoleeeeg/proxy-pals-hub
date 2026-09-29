@@ -220,7 +220,7 @@ if (process.versions.electron) {
     assert.equal(await runtime.refreshExtensions(), 0);
     assert.equal(runtime.getRunningProfile(ID).diagnostics.extensions.loaded, 1);
     const first = await win.webContents.executeJavaScript("firstDocument");
-    assert.ok(first.ua.includes(`Chrome/${process.versions.chrome}`));
+    assert.ok(first.ua.includes(`Chrome/${process.versions.chrome.split(".")[0]}.0.0.0`));
     assert.ok(first.ua.includes("Windows NT 10.0"));
     assert.equal(first.language, "de-DE"); assert.equal(first.timezone, "Asia/Tokyo"); assert.equal(first.offset, -540);
     assert.equal(first.cores, 6); assert.equal(first.width, 1920); assert.equal(first.node, "undefined"); assert.equal(first.bridge, "undefined");
@@ -228,6 +228,9 @@ if (process.versions.electron) {
     assert.equal(hints.fullVersionList.find((brand) => brand.brand === "Chromium").version, process.versions.chrome);
     assert.equal(hints.platformVersion, "13.0.0");
     assert.equal(await win.webContents.executeJavaScript("matchMedia('(device-width: 1920px)').matches"), true);
+    const shellBounds = shell.getBounds();
+    assert.ok(shellBounds.width > 0 && shellBounds.width <= 1920 && shellBounds.height > 0 && shellBounds.height <= 1040,
+      "hidden Windows profile shell must stay within its advertised work area");
     assert.equal(await win.webContents.executeJavaScript("navigator.mediaDevices.enumerateDevices().then(devices => devices.length)"), 0);
     const macSession = session.fromPartition(`persist:profile-${SECOND}`);
     const macView = profileTabs(macSession).find((view) => view.webContents.getURL().endsWith(SECOND));
@@ -244,6 +247,11 @@ if (process.versions.electron) {
     assert.equal(macIdentity.hints.platformVersion, "15.0.0");
     assert.equal(macIdentity.hints.architecture, "arm");
     assert.equal(macIdentity.screenMatch, true);
+    const macShellBounds = profileShell(macSession).getBounds();
+    assert.deepEqual({ widthPositive: macShellBounds.width > 0, widthFits: macShellBounds.width <= 1512,
+      heightPositive: macShellBounds.height > 0, heightFits: macShellBounds.height <= 957 },
+    { widthPositive: true, widthFits: true, heightPositive: true, heightFits: true },
+      "hidden second profile shell must stay within its separate work area");
     assert.equal(macIdentity.webrtc, "undefined");
     assert.equal(macIdentity.geolocation, 1);
     const firstRequest = hits.find((hit) => hit.path === `/${ID}`);

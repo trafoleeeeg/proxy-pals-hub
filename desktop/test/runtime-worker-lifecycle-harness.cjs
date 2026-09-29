@@ -21,7 +21,7 @@ setTimeout(() => { console.error("WORKER_LIFECYCLE_TIMEOUT"); finish(1); }, 4500
 async function identity() {
   // Capture synchronous properties before the script yields even once.
   const result = {
-    ua: navigator.userAgent, platform: navigator.platform, languages: [...navigator.languages],
+    ua: navigator.userAgent, appVersion: navigator.appVersion, platform: navigator.platform, languages: [...navigator.languages],
     cores: navigator.hardwareConcurrency, memory: navigator.deviceMemory,
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     locale: Intl.DateTimeFormat().resolvedOptions().locale,
@@ -42,7 +42,7 @@ const fpA = fingerprint("fr-CA", "America/Toronto", 6, 4);
 const fpB = fingerprint("de-DE", "Asia/Tokyo", 10, 2);
 const fpReopened = fingerprint("es-ES", "Europe/Madrid", 2, 8);
 function check(value, fp, label) {
-  for (const [field, expected] of Object.entries({ ua: fp.userAgent, platform: fp.platform, languages: fp.languages, cores: fp.hardwareConcurrency, memory: fp.deviceMemory, timezone: fp.timezone, locale: fp.languages[0] })) {
+  for (const [field, expected] of Object.entries({ ua: fp.userAgent, appVersion: fp.userAgent.replace(/^Mozilla\//, ""), platform: fp.platform, languages: fp.languages, cores: fp.hardwareConcurrency, memory: fp.deviceMemory, timezone: fp.timezone, locale: fp.languages[0] })) {
     assert.ok(JSON.stringify(value[field]) === JSON.stringify(expected), `${label}: ${field} must match this profile`);
   }
   const offsets = fp.timezone === "America/Toronto" ? [300, 240] : fp.timezone === "Asia/Tokyo" ? [-540, -540] : [-60, -120];

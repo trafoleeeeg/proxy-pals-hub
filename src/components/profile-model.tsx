@@ -1,4 +1,4 @@
-import type { Fingerprint } from "@/lib/fingerprint";
+import { windowsUserAgent, type Fingerprint } from "@/lib/fingerprint";
 
 export type ProfileChanges = { folder?: string; tags?: string[]; notes?: string; proxyId?: string | null; fingerprint?: Fingerprint };
 export const splitTags = (value: string) => [...new Set(value.split(",").map((tag) => tag.trim()).filter(Boolean))];
@@ -19,11 +19,11 @@ export function fingerprintError(fp: Fingerprint): string | null {
   if (!Number.isInteger(fp.screen?.width) || fp.screen.width < 320 || fp.screen.width > 7680 ||
       !Number.isInteger(fp.screen?.height) || fp.screen.height < 240 || fp.screen.height > 4320) return "Размер экрана: 320–7680 × 240–4320.";
   if (!Number.isInteger(fp.hardwareConcurrency) || fp.hardwareConcurrency < 1 || fp.hardwareConcurrency > 128) return "Количество ядер: от 1 до 128.";
-  if (![1, 2, 4, 8].includes(fp.deviceMemory)) return "Выберите объём памяти: 1, 2, 4 или 8 ГБ.";
+  if (![0.25, 0.5, 1, 2, 4, 8].includes(fp.deviceMemory)) return "Выберите сообщаемую память: 0,25, 0,5, 1, 2, 4 или 8 ГБ.";
   if (!fp.userAgent.trim() || fp.userAgent.length > 1024 || /[\r\n\0]/.test(fp.userAgent)) return "Укажите корректный User-Agent до 1024 символов без переносов строк.";
   if (fp.os === "macos") {
     if (fp.platform !== "MacIntel" || !fp.userAgent.includes("Macintosh; Intel Mac OS X")) return "Для macOS нужны платформа MacIntel и User-Agent Macintosh.";
-  } else if (fp.platform !== "Win32" || !fp.userAgent.includes("Windows NT 10.0")) return "Для Windows 10 и 11 нужны платформа Win32 и User-Agent Windows NT 10.0.";
+  } else if (fp.platform !== "Win32") return "Для Windows нужна платформа Win32. Выберите набор параметров Windows.";
   if (fp.startUrl) {
     try { const url = new URL(fp.startUrl); if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) return "Стартовый адрес: HTTP или HTTPS без учётных данных."; }
     catch { return "Укажите полный стартовый адрес HTTP или HTTPS."; }
@@ -33,7 +33,7 @@ export function fingerprintError(fp: Fingerprint): string | null {
 
 export function profileFingerprintPayload(fp: Fingerprint): Fingerprint {
   const { startUrl, ...settings } = fp;
-  const normalized = { ...settings, aggressivePrivacyMode: settings.aggressivePrivacyMode ?? true };
+  const normalized = { ...settings, ...(settings.os === "windows" ? { userAgent: windowsUserAgent(settings.chromeVersion) } : {}), aggressivePrivacyMode: settings.aggressivePrivacyMode ?? true };
   return startUrl?.trim() ? { ...normalized, startUrl: startUrl.trim() } : normalized;
 }
 

@@ -20,7 +20,10 @@ describe("profile UI data", () => {
     expect(fingerprintError({ ...fp, screen: { ...fp.screen, width: -1 } })).not.toBeNull();
     expect(fingerprintError({ ...fp, hardwareConcurrency: 0 })).not.toBeNull();
     expect(fingerprintError({ ...fp, deviceMemory: 16 })).not.toBeNull();
-    expect(fingerprintError({ ...fp, userAgent: "Windows NT 11.0" })).not.toBeNull();
+    // Windows UA is now generated, not editable; legacy labels are repaired in
+    // the payload instead of leaving an old profile impossible to save.
+    expect(fingerprintError({ ...fp, userAgent: "Windows NT 11.0" })).toBeNull();
+    expect(profileFingerprintPayload({ ...fp, userAgent: "Windows NT 11.0" }).userAgent).toContain("Windows NT 10.0; Win64; x64");
   });
   test("start URL cannot execute scripts, access files, or contain credentials", () => {
     const fp = { ...generateFingerprint(), deviceMemory: 8, userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" };
@@ -31,7 +34,8 @@ describe("profile UI data", () => {
     const fp = { ...generateFingerprint(), startUrl: "" };
     expect(profileFingerprintPayload(fp)).not.toHaveProperty("startUrl");
     expect(profileFingerprintPayload({ ...fp, startUrl: " https://example.com " }).startUrl).toBe("https://example.com");
-    expect(fingerprintError({ ...fp, deviceMemory: 0.5 })).not.toBeNull();
+    expect(fingerprintError({ ...fp, deviceMemory: 0.5 })).toBeNull();
+    expect(fingerprintError({ ...fp, deviceMemory: 0.3 })).not.toBeNull();
     expect(fingerprintError({ ...fp, userAgent: "Windows NT 10.0" + "a".repeat(1024) })).not.toBeNull();
   });
   test("new profiles save normal mode while legacy profiles preserve strict mode", () => {

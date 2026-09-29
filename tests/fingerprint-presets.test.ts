@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { generateFingerprint, describeFingerprint, verifiedProxyTimezone } from "../src/lib/fingerprint";
+import { generateFingerprint, describeFingerprint, verifiedProxyTimezone, WINDOWS_CONFIGURATIONS, windowsConfigurationId, applyWindowsConfiguration, windowsUserAgent } from "../src/lib/fingerprint";
 import { fingerprintSchema } from "../src/lib/server-validation";
-import { fingerprintError } from "../src/components/profile-model";
+import { fingerprintError, profileFingerprintPayload } from "../src/components/profile-model";
 
 describe("desktop fingerprint presets", () => {
   for (const os of ["windows", "macos"] as const) {
@@ -22,6 +22,8 @@ describe("desktop fingerprint presets", () => {
           expect(fp.gpu.renderer).not.toContain("Direct3D");
           expect(describeFingerprint(fp)).toStartWith("macOS");
         } else {
+          expect(windowsConfigurationId(fp)).not.toBe("custom");
+          expect(fp.gpu).toEqual({ vendor: "", renderer: "" });
           expect(fp.platform).toBe("Win32");
           expect(fp.userAgent).toContain("Windows NT 10.0");
           expect(describeFingerprint(fp)).toStartWith("Windows");
@@ -29,6 +31,26 @@ describe("desktop fingerprint presets", () => {
       }
     });
   }
+  test("explicit Windows bundles preserve locale, start URL and privacy settings without mutating the source", () => {
+    const source = { ...generateFingerprint("FR"), doNotTrack: true, aggressivePrivacyMode: true, startUrl: "https://example.test" };
+    const before = structuredClone(source);
+    for (const config of WINDOWS_CONFIGURATIONS) {
+      const fp = applyWindowsConfiguration(source, config.id);
+      expect(windowsConfigurationId(fp)).toBe(config.id);
+      expect(fingerprintSchema.parse(fp)).toEqual(fp);
+      expect(fingerprintError(fp)).toBeNull();
+      expect(fp.languages).toEqual(source.languages);
+      expect(fp.timezone).toBe(source.timezone);
+      expect(fp.startUrl).toBe(source.startUrl);
+      expect(fp.aggressivePrivacyMode).toBe(true);
+      expect(fp.doNotTrack).toBe(true);
+      expect(fp.userAgent).toBe(windowsUserAgent(fp.chromeVersion));
+      expect(windowsConfigurationId({ ...fp, hardwareConcurrency: 3 })).toBe("custom");
+    }
+    expect(source).toEqual(before);
+    expect(describeFingerprint({ ...source, osVersion: "11.0.0" })).toStartWith("Windows 11");
+    expect(profileFingerprintPayload({ ...source, userAgent: "Windows NT 11.0 Chrome/99 Electron/10" }).userAgent).toBe(windowsUserAgent(source.chromeVersion));
+  });
   test("older Windows profiles without architecture or privacy mode stay valid", () => {
     const { architecture: _, aggressivePrivacyMode: __, ...fp } = generateFingerprint();
     expect(fingerprintSchema.parse(fp).aggressivePrivacyMode).toBe(true);

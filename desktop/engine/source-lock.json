@@ -1,0 +1,28 @@
+{
+  "status": "release-approved",
+  "electron": {
+    "repository": "https://github.com/electron/electron.git",
+    "tag": "v44.4.5",
+    "commit": "694f45852a0f1726cd23bfd379854de489cccb65"
+  },
+  "chromium": {
+    "repository": "https://chromium.googlesource.com/chromium/src.git",
+    "mirror": "https://github.com/chromium/chromium.git",
+    "tag": "152.0.7977.130",
+    "commit": "2c592105bbcd9490a9894df48d0fe59b2c512651"
+  },
+  "node": {
+    "repository": "https://github.com/nodejs/node.git",
+    "tag": "v24.21.0",
+    "commit": "955266bfdd854cd280dffd47548673914484e4c0"
+  },
+  "nativeScreenApi": "session.setUmbraScreenMetrics",
+  "appIntegrationEnabled": true,
+  "distribution": {
+    "windowsX64": {
+      "releaseTag": "umbra-engine-v44.4.5-screen1",
+      "asset": "dist.zip",
+      "sha256": "85c03ec0f8df7c79c46900b949d59b0ed8c32c7613cb18dafb04744d7e9f16c6"
+    }
+  }
+}

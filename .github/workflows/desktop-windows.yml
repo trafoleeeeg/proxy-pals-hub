@@ -109,13 +109,33 @@ jobs:
           npm ci
           node node_modules/electron/install.js
 
+      - name: Download and verify pinned Windows engine
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $spec = (Get-Content desktop/engine/source-lock.json -Raw | ConvertFrom-Json).distribution.windowsX64
+          New-Item -ItemType Directory -Path desktop/.engine -Force | Out-Null
+          gh release download $spec.releaseTag --repo $env:GITHUB_REPOSITORY --pattern $spec.asset --dir desktop/.engine --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned custom Electron download failed' }
+          if ('${{ startsWith(github.ref, 'refs/tags/') }}' -eq 'true') {
+            node desktop/scripts/verify-engine.cjs --release
+          } else {
+            node desktop/scripts/verify-engine.cjs
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned custom Electron verification failed' }
+          Expand-Archive -LiteralPath desktop/.engine/dist.zip -DestinationPath desktop/.engine/unpacked -Force
+          if (-not (Test-Path desktop/.engine/unpacked/electron.exe)) { throw 'Custom Electron executable is missing' }
+
       - name: Test Windows sandbox and encrypted restart
         working-directory: desktop
         timeout-minutes: 5
         env:
           UMBRA_REQUIRE_NATIVE: "1"
           UMBRA_REQUIRE_DPAPI: "1"
-        run: npm test
+          ELECTRON_OVERRIDE_DIST_PATH: ${{ github.workspace }}\desktop\.engine\unpacked
+        # Native browser and DPAPI fixtures contend for shared Windows resources.
+        run: node --test --test-concurrency=1 test/*.test.cjs
 
       - name: Build Windows app
         working-directory: desktop

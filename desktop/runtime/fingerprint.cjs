@@ -56,7 +56,8 @@ function normalizeFingerprint(raw = {}, defaultUA, runtimeChrome = process.versi
   if (typeof userAgent !== "string" || !userAgent || userAgent.length > 1024 || /[\r\n\0]/.test(userAgent)) throw new Error("Invalid user agent");
   const os = raw.os ?? (raw.platform === "MacIntel" || /Macintosh/.test(userAgent) ? "macos" : "windows");
   if (!["windows", "macos"].includes(os)) throw new Error("Invalid fingerprint operating system");
-  const windows11 = os === "windows" && (/^(?:Windows\s+)?11(?:\.|$)/i.test(raw.osVersion || "") || /Windows NT 11/.test(userAgent));
+  const explicitWindows10 = /^(?:Windows\s+)?10(?:\.|$)/i.test(raw.osVersion || "");
+  const windows11 = os === "windows" && !explicitWindows10 && (/^(?:Windows\s+)?11(?:\.|$)/i.test(raw.osVersion || "") || /Windows NT 11/.test(userAgent));
   // Earlier clients accepted arbitrary Windows version labels. Preserve those
   // profiles by deriving a canonical version rather than rejecting old data.
   const osVersion = os === "windows" ? (windows11 ? "11.0.0" : "10.0.0") : (raw.osVersion ?? "14.0.0");
@@ -68,8 +69,15 @@ function normalizeFingerprint(raw = {}, defaultUA, runtimeChrome = process.versi
   const osToken = os === "macos" ? "Macintosh; Intel Mac OS X 10_15_7" : "Windows NT 10.0; Win64; x64";
   userAgent = userAgent.replace(/\((?:Windows NT|Macintosh)[^)]*\)/, `(${osToken})`);
   if (runtimeChrome) userAgent = userAgent.replace(/Chrome\/[\d.]+/g, `Chrome/${runtimeChrome}`);
+  const chromeVersion = runtimeChrome || raw.chromeVersion || raw.chrome_version || /Chrome\/([\d.]+)/.exec(userAgent)?.[1];
+  if (os === "windows") {
+    if (typeof chromeVersion !== "string" || !/^\d+(?:\.\d+){0,3}$/.test(chromeVersion)) throw new Error("Invalid fingerprint Chromium version");
+    // Match Chrome UA reduction; the real full runtime version lives in UA-CH.
+    // Never preserve conflicting Firefox/Edge/Electron suffixes from old data.
+    userAgent = `Mozilla/5.0 (${osToken}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion.split(".")[0]}.0.0.0 Safari/537.36`;
+  }
   let languages;
-  try { languages = Intl.getCanonicalLocales(raw.languages ?? [raw.language ?? "en-US", "en"]); }
+  try { languages = Intl.getCanonicalLocales(raw.language ? [raw.language, ...(raw.languages ?? [])] : (raw.languages ?? ["en-US", "en"])); }
   catch { throw new Error("Invalid fingerprint languages"); }
   if (!languages.length || languages.length > 10) throw new Error("Invalid fingerprint languages");
   const timezone = raw.timezone ?? "UTC";
@@ -79,6 +87,8 @@ function normalizeFingerprint(raw = {}, defaultUA, runtimeChrome = process.versi
   const vendor = raw.gpu?.vendor ?? raw.webgl_vendor;
   const renderer = raw.gpu?.renderer ?? raw.webgl_renderer;
   if ([vendor, renderer].some((value) => value != null && (typeof value !== "string" || value.length > 1024))) throw new Error("Invalid fingerprint GPU");
+  const memory = raw.deviceMemory ?? raw.device_memory ?? 8;
+  if (typeof memory !== "number" || !Number.isFinite(memory) || memory < 0.25 || memory > 256) throw new Error("Invalid fingerprint memory");
   return {
     userAgent, platform, os, osVersion, architecture, languages, timezone, aggressivePrivacyMode,
     screen: {
@@ -88,14 +98,33 @@ function normalizeFingerprint(raw = {}, defaultUA, runtimeChrome = process.versi
     },
     hardwareConcurrency: integer(raw.hardwareConcurrency ?? raw.hardware_concurrency, 8, 1, 256),
     // Chromium exposes coarse memory buckets with an 8 GiB upper bound.
-    deviceMemory: Math.min(8, 2 ** Math.floor(Math.log2(integer(raw.deviceMemory ?? raw.device_memory, 8, 1, 256)))),
+    deviceMemory: Math.min(8, 2 ** Math.floor(Math.log2(memory))),
     gpu: { vendor, renderer }, doNotTrack: !!(raw.doNotTrack ?? raw.do_not_track),
     webrtc: raw.webrtc === "disabled" ? "disabled" : "proxy",
-    chromeVersion: runtimeChrome || raw.chromeVersion || raw.chrome_version,
+    chromeVersion,
     windows11,
     canvasNoise: integer(raw.canvasNoise ?? raw.canvas_noise, 0, 0, 2147483647),
     audioNoise: integer(raw.audioNoise ?? raw.audio_noise, 0, 0, 2147483647),
   };
+}
+
+function applyNativeScreenMetrics(ses, fp, { required = false } = {}) {
+  if (typeof ses?.setUmbraScreenMetrics !== "function") {
+    if (required) throw new Error("Native screen protection is unavailable");
+    return false;
+  }
+  const metrics = {
+    width: fp.screen.width,
+    height: fp.screen.height,
+    availableWidth: fp.screen.width,
+    availableHeight: Math.max(1, fp.screen.height - (fp.os === "macos" ? 25 : 40)),
+    colorDepth: fp.screen.colorDepth,
+    deviceScaleFactor: fp.os === "macos" ? 2 : 1,
+  };
+  try { ses.setUmbraScreenMetrics(metrics); }
+  catch { throw new Error("Native screen protection could not be applied; restart Umbra before changing screen settings"); }
+  fp.nativeScreenMetrics = true;
+  return true;
 }
 
 function userAgentOverride(fp) {
@@ -155,9 +184,9 @@ async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
       await send("Emulation.setTimezoneOverride", { timezoneId: fp.timezone }, id);
       await applyLocale(send, fp.languages[0], id);
       await send("Emulation.setHardwareConcurrencyOverride", { hardwareConcurrency: fp.hardwareConcurrency }, id);
-      // OOPIFs inherit top-level device metrics. CDP rejects this method on
-      // iframe targets; Screen prototypes cover their JavaScript accessors.
-      if (type === "page") await send("Emulation.setDeviceMetricsOverride", { width: 0, height: 0, deviceScaleFactor: fp.os === "macos" ? 2 : 1, mobile: false, screenWidth: fp.screen.width, screenHeight: fp.screen.height }, id);
+      // CDP rejects metrics on iframe targets. The native session policy covers
+      // their CSS; stock Electron's JS fallback cannot cover OOPIF CSS.
+      if (type === "page" && !fp.nativeScreenMetrics) await send("Emulation.setDeviceMetricsOverride", { width: 0, height: 0, deviceScaleFactor: fp.os === "macos" ? 2 : 1, mobile: false, screenWidth: fp.screen.width, screenHeight: fp.screen.height }, id);
       await send("Page.addScriptToEvaluateOnNewDocument", { source, runImmediately: true }, id);
     } else {
       const evaluated = await send("Runtime.evaluate", { expression: source, returnByValue: true }, id);
@@ -183,11 +212,12 @@ async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
       applyLocale(send, fp.languages[0]),
       send("Emulation.setTimezoneOverride", { timezoneId: fp.timezone }),
       send("Emulation.setHardwareConcurrencyOverride", { hardwareConcurrency: fp.hardwareConcurrency }),
-      // Preserve viewport size, but do not expose the physical host's DPI.
-      send("Emulation.setDeviceMetricsOverride", {
+      // Stock Electron fallback preserves viewport size but only covers the
+      // top-level target. Native sessions must not receive a second override.
+      ...(fp.nativeScreenMetrics ? [] : [send("Emulation.setDeviceMetricsOverride", {
         width: 0, height: 0, deviceScaleFactor: fp.os === "macos" ? 2 : 1, mobile: false,
         screenWidth: fp.screen.width, screenHeight: fp.screen.height,
-      }),
+      })]),
       send("Page.addScriptToEvaluateOnNewDocument", { source }),
     ]);
   } catch {
@@ -197,16 +227,16 @@ async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
   }
   const backgroundProtected = require("./background-workers.cjs").backgroundWorkersProtected(wc.session);
   return {
-    engine: "stock-electron", chromiumVersion: process.versions.chrome || null,
+    engine: fp.nativeScreenMetrics ? "umbra-screen-electron" : "stock-electron", chromiumVersion: process.versions.chrome || null,
     backgroundWorkers: backgroundProtected ? "browser-target-before-execution" : "unprotected",
     uaLocaleTimezone: "cdp", documentOverrides: "main-world-javascript",
-    screenMetrics: "cdp-screen-and-dpr", hardwareConcurrency: "cdp-and-prototype",
+    screenMetrics: fp.nativeScreenMetrics ? "native-session-css-and-javascript" : "cdp-top-level-and-js-only-oopif", hardwareConcurrency: "cdp-and-prototype",
     webRTCPolicy: wc.getWebRTCIPHandlingPolicy(),
     canvasNoise: fp.aggressivePrivacyMode === false ? "disabled-in-normal-mode" : fp.canvasNoise ? "document-2d-readback-and-html-canvas-serialization-only" : "disabled",
     audioNoise: fp.aggressivePrivacyMode === false ? "disabled-in-normal-mode" : fp.audioNoise ? "document-analyser-and-copyFromChannel-only" : "disabled",
     unsupportedControls: ["fontsPreset", "webglNoise"],
     hardwarePolicy: fp.aggressivePrivacyMode === false ? "normal-native-hardware-apis" : "blocked-by-default-with-explicit-local-origin-exceptions",
-    limitations: ["No custom browser kernel or undetectability guarantee", backgroundProtected ? "Unexpected service-worker process loss stops the profile; reopen it to restore protection" : "Shared/service workers are not protected by the page debugger alone", "Normal mode and compatibility exceptions expose native GPU, audio, canvas and font characteristics", "Installed fonts can still affect CSS layout", "JavaScript privacy restrictions are observable", "Native WebRTC policy restricts non-proxied UDP", "Popup opener and form POST are unsupported", "Navigation history is not restored after restart"],
+    limitations: [fp.nativeScreenMetrics ? "Native screen isolation does not protect every hardware API or guarantee undetectability" : "No custom browser kernel or undetectability guarantee", backgroundProtected ? "Unexpected service-worker process loss stops the profile; reopen it to restore protection" : "Shared/service workers are not protected by the page debugger alone", "Normal mode and compatibility exceptions expose native GPU, audio, canvas and font characteristics", "Installed fonts can still affect CSS layout", "JavaScript privacy restrictions are observable", "Native WebRTC policy restricts non-proxied UDP", "Popup opener and form POST are unsupported", "Navigation history is not restored after restart"],
   };
 }
 
@@ -224,4 +254,4 @@ async function applyLocale(send, locale, id) {
   }
 }
 
-module.exports = { normalizeFingerprint, applyFingerprint, userAgentOverride, installSessionPrivacy, hasCapability, applyLocale };
+module.exports = { normalizeFingerprint, applyNativeScreenMetrics, applyFingerprint, userAgentOverride, installSessionPrivacy, hasCapability, applyLocale };

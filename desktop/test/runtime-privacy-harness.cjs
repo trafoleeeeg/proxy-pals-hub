@@ -7,6 +7,7 @@ const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 const { applyFingerprint, applyNativeScreenMetrics, normalizeFingerprint, installSessionPrivacy } = require("../runtime/fingerprint.cjs");
 const { initializeBackgroundWorkers, protectBackgroundWorkers } = require("../runtime/background-workers.cjs");
+const requireWindowsScreenEngine = process.platform === "win32" && process.env.UMBRA_REQUIRE_NATIVE === "1";
 assert.ok(process.env.UMBRA_PRIVACY_TEST_DIR);
 app.setPath("userData", path.join(process.env.UMBRA_PRIVACY_TEST_DIR, "user"));
 app.setPath("sessionData", path.join(process.env.UMBRA_PRIVACY_TEST_DIR, "sessions"));
@@ -92,7 +93,7 @@ app.whenReady().then(async () => {
     const ses = session.fromPartition("privacy-fixture-" + randomUUID());
     // This must precede protectBackgroundWorkers: it creates a session-owned
     // guard view, after which the native screen policy cannot be installed.
-    applyNativeScreenMetrics(ses, identity, { required: process.env.UMBRA_REQUIRE_NATIVE === "1" });
+    applyNativeScreenMetrics(ses, identity, { required: requireWindowsScreenEngine });
     ses.webRequest.onBeforeRequest((details, callback) => {
       const url = new URL(details.url);
       callback({ cancel: !["about:", "data:", "blob:"].includes(url.protocol) && !["localhost", "127.0.0.1"].includes(url.hostname) });
@@ -185,7 +186,7 @@ app.whenReady().then(async () => {
       assert.equal(result.firstScript.screenWidth, 1600, "first inline script screen width");
       assert.equal(result.firstScript.screenHeight, 900, "first inline script screen height");
       assert.equal(result.firstScript.dpr, 1, "first inline script DPR");
-      if (process.env.UMBRA_REQUIRE_NATIVE === "1") {
+      if (requireWindowsScreenEngine) {
         assert.equal(result.firstScript.cssWidth, true, "first inline script CSS screen width");
         assert.equal(result.firstScript.cssHeight, true, "first inline script CSS screen height");
         assert.equal(result.firstScript.cssDpr, true, "first inline script CSS DPR");
@@ -221,7 +222,7 @@ app.whenReady().then(async () => {
   const oopifCssCoherent = Object.values(windowsFrame.screenCss).every(Boolean);
   // Stock Electron remains a documented limitation. The packaged test engine
   // must prove that real OOPIF CSS agrees with the document's JS values.
-  if (process.env.UMBRA_REQUIRE_NATIVE === "1") assert.equal(oopifCssCoherent, true, "native OOPIF CSS and JS screen must agree");
+  if (requireWindowsScreenEngine) assert.equal(oopifCssCoherent, true, "native OOPIF CSS and JS screen must agree");
   console.log(`UMBRA_SCREEN_IDENTITY_AUDIT: main=true oopif=${oopifCssCoherent}`);
   const workerIdentityMatches = (result) => result.userAgent === windowsFp.userAgent && result.platform === "Win32" &&
     result.language === "fr-CA" && result.timezone === "America/Toronto" &&

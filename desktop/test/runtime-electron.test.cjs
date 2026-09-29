@@ -48,6 +48,9 @@ async function runNativeHarness(t, storageMode = "native") {
     }
     assert.equal(result.code, 0, `Electron ${phase} failed: ${result.output}`);
     assert.match(result.output, /UMBRA_NATIVE_TEST_OK/);
+    if (storageMode === "network-advanced") for (const line of result.output.split(/\r?\n/)) {
+      if (line.startsWith("ADVANCED_")) t.diagnostic(line);
+    }
   }
 }
 

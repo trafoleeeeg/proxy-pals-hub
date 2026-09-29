@@ -6,4 +6,5 @@ const { runNativeHarness } = require("./runtime-electron.test.cjs");
 test("native Electron HTTP/SOCKS5 authentication and fail-closed network", { timeout: 90000 }, (t) => runNativeHarness(t, "network"));
 
 test("native Electron local STUN policy and SOCKS target-name forwarding", { timeout: 90000 }, (t) => runNativeHarness(t, "network-privacy"));
+test("native Electron IPv6 TURN transport and DNS exposure diagnostic (not a zero-leak gate)", { timeout: 90000 }, (t) => runNativeHarness(t, "network-advanced"));
 test("native Electron fingerprint and toolbar (memory cookie store; no DPAPI coverage)", { timeout: 90000 }, (t) => runNativeHarness(t, "memory"));

@@ -106,8 +106,8 @@ Chromium с возможностями screen5. 16/32 не предлагают�
 | CAN-01 Canvas/SVG/OffscreenCanvas | Семантика простого readback проверена, hardware isolation отсутствует | Текст, SVG, пути, gradients, filters, image transfer, color management, WebGL readPixels |
 | AUD-01 Audio | Buffer semantics проверена, hardware isolation отсутствует | Реальное offline rendering, AudioWorklet, default sample rate, latency, output device, live/offline differences |
 | FONT-01 CSS/Canvas шрифты | Host lookup доступен без opt-in; opt-in ограничивает набор | Расширенная glyph coverage, fallback, emoji, downloadable fonts, PDF, печать; законность распространения набора |
-| NET-01 IPv4/IPv6/DNS | SOCKS получает неразрешённое имя `.invalid` и доставляет запрос; отсутствие фоновых DNS/IPv6-утечек не доказано | Собственный внешний DNS/HTTPS challenge и захват пакетов: HTTP/SOCKS, сбой/смена прокси, VPN on/off |
-| NET-02 WebRTC/ICE/STUN/TURN | Локальный IPv4 STUN: контроль доставляет пакеты, защищённые main и cross-origin iframe не доставляют и не выдают ICE-кандидатов | Внешние ICE-маршруты, TCP/UDP/TURN/IPv6, смена сети; локальная проверка не равна полному сетевому аудиту |
+| NET-01 IPv4/IPv6/DNS | **Обнаружено сетевое DNS-разрешение для dns-prefetch при SOCKS**; обычные fetch/iframe используют только cache/hosts. IPv6 HTTP loopback проходит через прокси и блокируется при его отключении | Исправить DNS-prefetch; внешний DNS challenge/захват пакетов и внешний IPv6 пока отсутствуют |
+| NET-02 WebRTC/ICE/STUN/TURN | IPv4 STUN/UDP блокируется; локальные TURN TCP/TLS идут через HTTP-прокси и не обходят его отказ | TURN UDP6 непроверен: положительный контроль не сработал. Полный TURN relay/звонок и внешние маршруты не измерены |
 | NET-03 WebSocket/WebTransport/QUIC | WS/WSS: локальный тест на screen5 подтвердил отказ без прямого fallback при падении bridge и отключении upstream; WebTransport/QUIC не проверены | Внешний маршрут, другие прокси-протоколы и UDP-транспорты |
 | NET-04 LAN/loopback/port probing | Не проверено | Контролируемые локальные endpoints и DNS rebinding; отдельно с прокси и без; не сканировать реальную LAN |
 | TLS-01 TLS/HTTP2/TCP | Не проверено | Контролируемый сервер; определить, что формирует клиент, а что прокси. Общий TLS hash не обязательно дефект |
@@ -197,6 +197,42 @@ DNS/IPv6/ICE-утечек или идентичного поведения пр�
 маршруты при VPN/смене сети и звонки в реальных сервисах. Runtime не менялся:
 в проверенных сценариях дополнительной утечки не обнаружено.
 
+## IPv6, TURN и DNS NetLog: найденная проблема
+
+`runtime-network-advanced.cjs`, опубликованный screen5, 30 сентября 2026:
+
+| Проверка | Наблюдение | Граница результата |
+| --- | --- | --- |
+| HTTP к `[::1]` | Успешно через аутентифицированный прокси; после отключения bridge запрос отклонён, сервер не получил его; direct-контроль работает | Loopback IPv6, не внешний IPv6 |
+| TURN UDP4 | Контроль доставляет Allocate; защищённая сессия — 0 | Проверка начала обмена, не полноценного relay |
+| TURN UDP6 | Контроль не доставляет Allocate | **Непроверено**, не успешная защита |
+| TURN TCP/TLS | По одному входящему соединению и аутентифицированному проходу через прокси; отказ upstream не вызывает direct fallback | TLS-соединение не означает успешную проверку сертификата или медиасеанс |
+| DNS fetch/iframe | Вызов resolver использует только TaskType 4/9: CACHE_LOOKUP/HOSTS | Проверка кэша не является DNS-утечкой |
+| DNS-prefetch | TaskType 1/0: DNS/SYSTEM, создание resolver job и событие DNS_TRANSACTION для уникального тестового имени | **Проблема в текущем runtime**, не исправлена этим диагностическим изменением |
+| preconnect | Для тестового имени сетевого resolver job не было | Не доказывает безопасность всех вариантов preconnect |
+
+DNS-воспроизведение: временная обычная сессия с SOCKS5, HTTP-страница, вставка
+`<link rel="dns-prefetch" href="http://<unique>.invalid">`. NetLog фиксирует
+сетевую задачу разрешения этого имени, хотя HTTP-fetch в той же сессии доставляет
+имя SOCKS-серверу. Положительный контроль `resolveHost(<unique>.localhost)`
+подтверждает, что логирование resolver работает. Анализатор отличает cache/hosts
+от сетевых задач; отдельные unit-тесты проверяют это различие и повторные source ID.
+
+Это подтверждение запуска DNS-разрешения вне целевого SOCKS-маршрута, но не
+пакетный захват доставки конкретному внешнему DNS-серверу. Рабочие профили,
+их cookies/прокси и реальные посещаемые домены не использовались. Сырой NetLog
+остаётся только во временном каталоге теста и удаляется стандартным cleanup;
+в отчёт/CI попадают только типы событий и счётчики.
+
+На проверяемом ПК внешний default IPv6 route не найден. PktMon возвращает
+«Отказано в доступе»; системный захват не запускался, настройки адаптеров,
+DNS/VPN/firewall не изменялись. Для закрытия внешней проверки нужны IPv6-связность
+и контролируемый внешний DNS/TURN endpoint либо согласованный захват пакетов.
+
+Диагностический тест явно выводит `ADVANCED_DNS_EXPOSURE` и
+`ADVANCED_INCONCLUSIVE`: успешный запуск тестового стенда **не является** зелёным
+результатом безопасности DNS/IPv6. Релиз и production runtime не менялись.
+
 ## Воспроизведение
 
 Из корня репозитория, передавая абсолютный путь к распакованному screen5:
@@ -209,6 +245,7 @@ $env:ELECTRON_OVERRIDE_DIST_PATH = '<absolute-directory-containing-electron.exe>
 $env:UMBRA_REQUIRE_NATIVE = '1'
 node --test --test-name-pattern 'HTTP/SOCKS5' desktop/test/runtime-native-smoke.test.cjs
 node --test --test-name-pattern 'local STUN' desktop/test/runtime-native-smoke.test.cjs
+node --test --test-name-pattern 'IPv6 TURN' desktop/test/runtime-native-smoke.test.cjs
 ```
 
 Первый runner теперь включает третий режим `font-isolated` и проверяет отсутствие

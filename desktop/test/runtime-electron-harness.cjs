@@ -39,7 +39,7 @@ if (process.versions.electron) {
   app.commandLine.appendSwitch("disable-component-update");
   // Chromium's own WebRTC tests enable loopback enumeration. This isolated
   // harness uses it only to make its local STUN positive control meaningful.
-  if (process.env.UMBRA_RUNTIME_TEST_STORAGE === "network-privacy") app.commandLine.appendSwitch("allow-loopback-in-peer-connection");
+  if (["network-privacy", "network-advanced"].includes(process.env.UMBRA_RUNTIME_TEST_STORAGE)) app.commandLine.appendSwitch("allow-loopback-in-peer-connection");
   app.on("web-contents-created", (_event, wc) => {
     process.stdout.write(`NATIVE_CONTENT_CREATED ${wc.id}\n`);
     wc.on("did-finish-load", () => process.stdout.write(`NATIVE_CONTENT_LOADED ${wc.id}\n`));
@@ -105,12 +105,15 @@ if (process.versions.electron) {
     const plain = await listen(plainServer);
     cleanups.push(() => plain.close());
     const auth = { a: 0, b: 0, rejected: 0 };
+    const allowedPorts = new Set([local.port, plain.port]);
+    const proxyDestinations = [];
     const credentials = ({ username, password, hostname, port }) => {
       // A browser component request can race the fixture's first request.
       // Never let the synthetic HTTP upstream resolve or contact the internet.
-      if (!["127.0.0.1", "localhost"].includes(hostname) || ![local.port, plain.port].includes(port)) return { requestAuthentication: true };
+      if (!["127.0.0.1", "localhost", "::1", "[::1]"].includes(hostname) || !allowedPorts.has(port)) return { requestAuthentication: true };
       const valid = (username === "a" && password === "a-pass") || (username === "b" && password === "b-pass");
       if (valid) auth[username]++; else auth.rejected++;
+      if (valid) proxyDestinations.push({ hostname, port });
       return { requestAuthentication: !valid };
     };
     const upstream = new Server({ host: "127.0.0.1", port: 0, prepareRequestFunction: credentials });
@@ -124,6 +127,10 @@ if (process.versions.electron) {
     });
     if (mode === "network-privacy") {
       await require("./runtime-network-privacy.cjs").auditNetworkPrivacy({ electron, plainPort: plain.port, proxy: payload().proxy, cleanups });
+      return;
+    }
+    if (mode === "network-advanced") {
+      await require("./runtime-network-advanced.cjs").auditAdvancedNetwork({ electron, plainPort: plain.port, proxy: payload().proxy, cleanups, allowedPorts, proxyDestinations, directory, certificate });
       return;
     }
     if (mode === "network") {

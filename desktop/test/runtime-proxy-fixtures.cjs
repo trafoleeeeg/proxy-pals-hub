@@ -20,8 +20,8 @@ function testCertificate(directory) {
   return { key: fs.readFileSync(keyFile), cert: fs.readFileSync(certFile), certFile };
 }
 
-async function listen(server) {
-  await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+async function listen(server, host = "127.0.0.1") {
+  await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, host, resolve); });
   const sockets = new Set();
   server.on("connection", (socket) => { sockets.add(socket); socket.on("close", () => sockets.delete(socket)); });
   return { port: server.address().port, sockets, async close() { for (const socket of sockets) socket.destroy(); await new Promise((resolve) => server.close(resolve)); } };

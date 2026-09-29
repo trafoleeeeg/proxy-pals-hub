@@ -19,12 +19,13 @@
   "nativeScreenApi": "session.setUmbraScreenMetrics",
   "nativeHardwareApi": "session.setUmbraHardwareMetrics",
   "nativeFontApi": "session.setUmbraFontIsolation",
+  "nativeDnsPolicy": "drop-renderer-speculative-dns",
   "appIntegrationEnabled": true,
   "distribution": {
     "windowsX64": {
-      "releaseTag": "umbra-engine-v44.4.5-screen5",
+      "releaseTag": "umbra-engine-v44.4.5-screen6",
       "asset": "dist.zip",
-      "sha256": "7f0a308d9a9ec6f58849a1faa8e3e8d4ccf73fede85b11d56aad144b9568f5d3"
+      "sha256": "ad21d98dae6f2905a783c71dbdcdeea4f16b9a6cd051812acb1b8a719799b3eb"
     }
   }
 }

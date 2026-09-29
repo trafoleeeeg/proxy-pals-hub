@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isSupportedProfileMemory, PROFILE_MEMORY_ERROR } from "./fingerprint-memory";
 
 export const uuidSchema = z.string().uuid();
 const text = (max: number) => z.string().max(max).regex(/^[^\0]*$/, "Invalid text");
@@ -44,12 +45,17 @@ export const fingerprintSchema = z.object({
 }).strict();
 
 const folder = text(200).trim();
+// Keep fingerprintSchema permissive for reading/launching stored profiles.
+// New writes require an explicitly supported value; never rewrite old data.
+const writableFingerprintSchema = fingerprintSchema.extend({
+  deviceMemory: z.number().refine(isSupportedProfileMemory, PROFILE_MEMORY_ERROR),
+});
 const tags = z.array(text(80).trim().min(1)).max(50);
 const notes = text(20000);
 const customFields = z.record(uuidSchema, text(2000)).refine((value) => Object.keys(value).length <= 50, "Too many custom fields");
 export const saveProfileSchema = z.object({
   id: uuidSchema.optional(), teamId: uuidSchema, name: text(200).trim().min(1),
-  folder, tags, notes, proxyId: uuidSchema.nullable(), fingerprint: fingerprintSchema,
+  folder, tags, notes, proxyId: uuidSchema.nullable(), fingerprint: writableFingerprintSchema,
   statusId: uuidSchema.nullable().optional(), customFields: customFields.optional(),
   cookies: z.string().max(5_000_000).optional(),
 }).strict().superRefine((data, context) => {
@@ -57,12 +63,12 @@ export const saveProfileSchema = z.object({
 });
 export const bulkCreateSchema = z.object({
   teamId: uuidSchema, prefix: text(180).trim().min(1), count: z.number().int().min(1).max(200),
-  folder, fingerprints: z.array(fingerprintSchema).min(1).max(200),
+  folder, fingerprints: z.array(writableFingerprintSchema).min(1).max(200),
 }).strict().refine((d) => d.count === d.fingerprints.length, "Fingerprint count must match count");
 export const bulkUpdateSchema = z.object({
   teamId: uuidSchema, ids: profileIdsSchema,
   changes: z.object({ folder: folder.optional(), tags: tags.optional(), notes: notes.optional(),
-    proxyId: uuidSchema.nullable().optional(), fingerprint: fingerprintSchema.partial().strict().optional(),
+    proxyId: uuidSchema.nullable().optional(), fingerprint: writableFingerprintSchema.partial().strict().optional(),
   }).strict().refine((d) => Object.values(d).some((v) => v !== undefined), "No changes"),
 }).strict();
 export const bulkDeleteSchema = z.object({ teamId: uuidSchema, ids: profileIdsSchema }).strict();

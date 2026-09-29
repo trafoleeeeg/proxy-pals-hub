@@ -1,5 +1,32 @@
 # Нативный движок Umbra
 
+## DNS-prefetch: исправление после аудита 0.4.32
+
+`electron-dns-prefetch.patch` добавляет override `NetworkHintsHandlerImpl::PrefetchDNS`
+в browser process: запросы спекулятивного DNS из renderer не передаются в
+`ResolveHost`. Это покрывает link/HTTP Link hints, hover, meta on и вложенные
+документы, включая srcdoc/about:blank/blob/data. Обычная загрузка сайта и
+явный resolver API не отключаются; DOM и JavaScript API сайтов не подменяются.
+Защита применяется ко всем сессиям этого движка, включая панель и direct mode;
+компромисс — отсутствие оптимизации предварительного DNS-разрешения.
+
+Проверка `IPv6 TURN` в desktop-тестах теперь требует отсутствия сетевых DNS-задач
+для всех указанных контекстов в Windows. На прежнем screen5 тест воспроизводимо
+падает; Linux CI с stock Electron выводит явное предупреждение о неподдерживаемой
+нативной защите. Это не доказательство отсутствия других DNS/IPv6-утечек.
+Стабильный клиент 0.4.32 сам по себе от изменения исходников не обновляется.
+Новый архив `screen6` закреплён SHA-256 в `source-lock.json`. Владелец согласовал
+его выпуск в клиенте 0.4.33 после зелёного CI; статус — `release-approved`.
+Сам технический prerelease движка не меняет `latest.yml` и не обновляет
+установленные клиенты: обновление доставляет отдельный релиз приложения.
+
+На распакованном screen6 прошли 143/143 desktop-теста, два запуска screen/hardware
+и font fixtures, а также rendering audit normal/strict-exception/font-isolated.
+Во всех 8 ранее уязвимых сценариях DNS-prefetch сетевых resolver-событий нет;
+обычные fetch/iframe и явный resolver-control продолжают работать.
+
+## История выпуска 0.4.32 (screen5)
+
 Владелец согласовал выпуск 0.4.32 с уже проверенными доработками.
 Новый архив screen5 содержит экран/CPU/RAM и изоляцию шрифтов. SHA-256 закреплён
 в source-lock.json. Перед публикацией обязательны проверки распакованного
@@ -287,7 +314,7 @@ OffscreenCanvas/worker media evaluation и события при смене мо
 3. Проверить и применить `chromium-screen.patch`, `chromium-hardware.patch`
    и экспериментальный `chromium-fonts.patch`
    относительно корня Chromium;
-   `electron-screen.patch` — относительно каталога Electron.
+   `electron-screen.patch` и `electron-dns-prefetch.patch` — относительно каталога Electron.
    Патч Chromium подготовлен на выбранных исходных файлах тега; совместимость
    со всеми штатными патчами Electron должна быть проверена на полном дереве.
 4. Собрать тестовый Electron x64 с sandbox и site isolation. Не отключать

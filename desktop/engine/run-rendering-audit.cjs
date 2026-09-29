@@ -34,6 +34,7 @@ const assert = require('node:assert/strict');
           for (const key of ['copyMatches', 'offsetMatches', 'untouchedTail']) assert.equal(report.audio[key], true, `${mode}/${frame}/audio/${key}`);
           for (const [key, passed] of Object.entries(report.worker)) assert.equal(passed, true, `${mode}/${frame}/worker/${key}`);
           assert.equal(report.fonts.localEnumerationEmptyOrDenied, true, `${mode}/${frame}/font enumeration must not return host fonts`);
+          if (mode === 'font-isolated') assert.equal(report.fonts.localFontAvailable, false, `${mode}/${frame}/CSS local(Arial) must not access the host font`);
           if (report.webgl) {
             assert.equal(report.webgl.syntheticLabel, false, 'Do not report a GPU that the renderer does not emulate');
             assert.equal(report.webgl.nativeGetter, true, 'Allowed WebGL parameters must stay native');

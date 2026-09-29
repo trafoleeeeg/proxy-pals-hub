@@ -1,0 +1,37 @@
+diff --git a/shell/browser/network_hints_handler_impl.cc b/shell/browser/network_hints_handler_impl.cc
+--- a/shell/browser/network_hints_handler_impl.cc
++++ b/shell/browser/network_hints_handler_impl.cc
+@@ -25,6 +25,13 @@ NetworkHintsHandlerImpl::NetworkHintsHandlerImpl(
+ 
+ NetworkHintsHandlerImpl::~NetworkHintsHandlerImpl() = default;
+ 
++void NetworkHintsHandlerImpl::PrefetchDNS(
++    const std::vector<url::SchemeHostPort>&) {
++  // Umbra: renderer DNS hints bypass the session proxy via ResolveHost.
++  // Drop speculation at the browser boundary, including link/header hints,
++  // hover, and subframes. Actual navigations still use the session proxy.
++}
++
+ void NetworkHintsHandlerImpl::Preconnect(const url::SchemeHostPort& url,
+                                          bool allow_credentials) {
+   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+diff --git a/shell/browser/network_hints_handler_impl.h b/shell/browser/network_hints_handler_impl.h
+--- a/shell/browser/network_hints_handler_impl.h
++++ b/shell/browser/network_hints_handler_impl.h
+@@ -5,6 +5,8 @@
+ #ifndef ELECTRON_SHELL_BROWSER_NETWORK_HINTS_HANDLER_IMPL_H_
+ #define ELECTRON_SHELL_BROWSER_NETWORK_HINTS_HANDLER_IMPL_H_
+ 
++#include <vector>
++
+ #include "base/memory/raw_ptr.h"
+ #include "components/network_hints/browser/simple_network_hints_handler_impl.h"
+ #include "content/public/browser/global_routing_id.h"
+@@ -29,6 +31,7 @@ class NetworkHintsHandlerImpl
+           receiver);
+ 
+   // network_hints::mojom::NetworkHintsHandler:
++  void PrefetchDNS(const std::vector<url::SchemeHostPort>& urls) override;
+   void Preconnect(const url::SchemeHostPort& url,
+                   bool allow_credentials) override;
+ 

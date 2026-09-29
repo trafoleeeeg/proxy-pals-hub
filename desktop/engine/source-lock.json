@@ -1,5 +1,5 @@
 {
-  "status": "experimental-tested-do-not-release",
+  "status": "release-approved",
   "electron": {
     "repository": "https://github.com/electron/electron.git",
     "tag": "v44.4.5",
@@ -18,12 +18,13 @@
   },
   "nativeScreenApi": "session.setUmbraScreenMetrics",
   "nativeHardwareApi": "session.setUmbraHardwareMetrics",
+  "nativeFontApi": "session.setUmbraFontIsolation",
   "appIntegrationEnabled": true,
   "distribution": {
     "windowsX64": {
-      "releaseTag": "umbra-engine-v44.4.5-screen4",
+      "releaseTag": "umbra-engine-v44.4.5-screen5",
       "asset": "dist.zip",
-      "sha256": "97a1fa26f3319867d97a2db208de52590c6d43a33a7b1730cf93178638833817"
+      "sha256": "7f0a308d9a9ec6f58849a1faa8e3e8d4ccf73fede85b11d56aad144b9568f5d3"
     }
   }
 }

@@ -11,10 +11,14 @@ const { sanitizeBrowserSettings } = require("./browser-settings.cjs");
 const { SAFE_WEBRTC } = require("./leak-check.cjs");
 const { createFaviconLoader } = require("./favicons.cjs");
 const { protectBackgroundWorkers } = require("./background-workers.cjs");
+const { applyFontIsolation } = require("./font-isolation.cjs");
 
 // Сообщения об ошибках запуска показываются пользователю, поэтому они переводятся
 // на русский язык на границе клиента, без утечки URL и значений cookies.
 const LAUNCH_ERROR_TEXT = [
+  [/^Font isolation requires/i, "Для изоляции шрифтов нужен обновлённый движок Umbra; профиль не запущен"],
+  [/^Font isolation bundle/i, "Комплект изолированных шрифтов отсутствует или повреждён; профиль не запущен"],
+  [/^Font isolation/i, "Не удалось применить изоляцию шрифтов. После изменения режима перезапустите Umbra"],
   [/^Unable to restore imported cookies/i, "Ни один сохранённый cookie не удалось установить: проверьте срок действия и формат импорта. Облачные данные сохранены"],
   [/^Unable to (?:restore|read encrypted|decrypt) cookie/i, "Не удалось восстановить cookies профиля"],
   [/^Unable to save encrypted/i, "Не удалось сохранить cookies профиля"],
@@ -208,10 +212,12 @@ function createProfileRuntime(electron, options = {}) {
         if (entry.fp.aggressivePrivacyMode === false) {
           return { origin, mode: "normal", allowed: true, permissions: ["gpu", "canvas", "audio", "workers"] };
         }
-        const permissions = origin ? entry.fp.hardwarePermissions?.[origin] || [] : [];
+        const permissions = (origin ? entry.fp.hardwarePermissions?.[origin] || [] : [])
+          .filter((permission) => !entry.fp.fontIsolation || permission !== "fonts");
         return { origin, mode: "strict", allowed: permissions.length > 0, permissions };
       },
       setPrivacy: async (origin, permissions) => {
+        if (entry.fp.fontIsolation && permissions.includes("fonts")) throw new Error("Изоляция шрифтов запрещает доступ к шрифтам ПК. Режим меняется в настройках профиля с перезапуском Umbra");
         if (entry.fp.aggressivePrivacyMode === false) throw new Error("В обычном режиме аппаратные API уже доступны. Режим меняется в настройках профиля");
         if (!origin || privacyOrigin(origin) !== origin) throw new Error("Откройте сайт для настройки защиты");
         const rules = { ...entry.fp.hardwarePermissions };
@@ -658,7 +664,7 @@ function createProfileRuntime(electron, options = {}) {
         // Install guards before opening the proxy gate: service workers from
         // an existing partition must never inherit default device permissions.
         const localFontsAllowed = (permission, url) => {
-          if (permission !== "local-fonts" || entry.fp?.aggressivePrivacyMode === false) return false;
+          if (permission !== "local-fonts" || entry.fp?.fontIsolation || entry.fp?.aggressivePrivacyMode === false) return false;
           const origin = privacyOrigin(url);
           return !!origin && entry.fp?.hardwarePermissions?.[origin]?.includes("fonts") === true;
         };
@@ -670,6 +676,7 @@ function createProfileRuntime(electron, options = {}) {
         for (const extension of extensionApi.getAllExtensions?.() || []) extensionApi.removeExtension(extension.id);
         const defaultUA = entry.ses.getUserAgent().replace(/\s(?:Electron|Umbra)\/[^ ]+/g, "");
         entry.fp = normalizeFingerprint(payload.fingerprint || {}, defaultUA);
+        await applyFontIsolation(entry.ses, entry.fp, { app });
         applyNativeScreenMetrics(entry.ses, entry.fp, {
           required: process.env.UMBRA_REQUIRE_NATIVE_SCREEN === "1" || (process.platform === "win32" && electron.app?.isPackaged === true),
         });

@@ -165,6 +165,9 @@ handle("umbra:open-external", async (url) => {
   return { ok: true };
 });
 handle("umbra:app-version", () => app.getVersion());
+handle("umbra:runtime-capabilities", () => ({
+  fontIsolation: process.platform === "win32" && typeof session.defaultSession.setUmbraFontIsolation === "function",
+}));
 handle("umbra:check-engine-versions", async () => ({ ok: true, ...(await checkEngineVersions()) }));
 handle("umbra:update-state", () => updates?.getState() || { state: "none" });
 handle("umbra:check-update", () => updates.check());

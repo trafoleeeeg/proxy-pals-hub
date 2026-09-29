@@ -1,0 +1,16 @@
+Umbra fixed font bundle v1 (experimental)
+
+Arimo, Tinos and Cousine — Regular, Bold, Italic and BoldItalic.
+Digitized data copyright (c) 2010-2012 Google Corporation.
+The TTF files are unmodified; embedded notices remain intact.
+See LICENSE.txt for the applicable Apache License, Version 2.0.
+
+Source: Chromium third_party/test_fonts, commit
+2c592105bbcd9490a9894df48d0fe59b2c512651.
+The archive is pinned by Chromium DEPS:
+https://storage.googleapis.com/chromium-fonts/9c07d19d9c5ee1ff94f717e6fb17e0c8c354e6f9
+SHA-256: f0e9628f9e43e3f3476cde06a1849058de460e0e037b7449ce0d42b9a73c37d5
+
+This is a separate redistributable font set, not the Windows system font set.
+Glyph coverage is limited; missing glyphs must not fall back to host fonts.
+No font is installed into the operating system by Umbra.

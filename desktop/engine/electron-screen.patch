@@ -1,8 +1,40 @@
+diff --git a/BUILD.gn b/BUILD.gn
+index 0612847..990498b 100644
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -803,6 +803,7 @@ source_set("electron_lib") {
+       "//components/app_launch_prefetch",
+       "//components/crash/core/app:crash_export_thunks",
+       "//components/os_crypt/async/browser:dpapi_key_provider",
++      "//components/services/font_data:lib",
+       "//third_party/libxml:xml_writer",
+       "//ui/wm",
+       "//ui/wm/public",
 diff --git a/shell/browser/api/electron_api_session.cc b/shell/browser/api/electron_api_session.cc
-index 84ad350..192b248 100644
+index 84ad350..f1471e2 100644
 --- a/shell/browser/api/electron_api_session.cc
 +++ b/shell/browser/api/electron_api_session.cc
-@@ -1038,6 +1038,60 @@ std::string Session::GetUserAgent() {
+@@ -4,6 +4,11 @@
+ 
+ #include "shell/browser/api/electron_api_session.h"
+ 
++#if BUILDFLAG(IS_WIN)
++#include "components/services/font_data/isolated_font_data_service.h"
++#include "content/common/features.h"  // nogncheck
++#endif
++
+ #include <algorithm>
+ #include <memory>
+ #include <set>
+@@ -22,6 +27,7 @@
+ #include "base/strings/string_util.h"
+ #include "base/types/pass_key.h"
+ #include "base/uuid.h"
++#include "base/task/thread_pool.h"
+ #include "chrome/browser/browser_process.h"
+ #include "chrome/browser/predictors/predictors_traffic_annotations.h"  // nogncheck
+ #include "chrome/common/chrome_switches.h"
+@@ -1038,10 +1044,118 @@ std::string Session::GetUserAgent() {
    return browser_context_->GetUserAgent();
  }
  
@@ -63,20 +95,79 @@ index 84ad350..192b248 100644
  void Session::SetSSLConfig(network::mojom::SSLConfigPtr config) {
    browser_context_->SetSSLConfig(std::move(config));
  }
-@@ -1824,6 +1878,8 @@ void Session::FillObjectTemplate(v8::Isolate* isolate,
+ 
++v8::Local<v8::Promise> Session::SetUmbraFontIsolation(
++    v8::Isolate* isolate, const std::vector<base::FilePath>& files) {
++  gin_helper::Promise<void> promise(isolate);
++  auto handle = promise.GetHandle();
++#if BUILDFLAG(IS_WIN)
++  auto* preferences = SessionPreferences::FromBrowserContext(browser_context_);
++  if (preferences && preferences->isolated_fonts() &&
++      preferences->isolated_font_paths() == files) {
++    promise.Resolve();
++    return handle;
++  }
++  if (!preferences || preferences->fonts_used() || preferences->fonts_loading()) {
++    promise.RejectWithErrorMessage("Font isolation must be configured once before starting session renderers");
++    return handle;
++  }
++  if (!features::IsFontDataServiceEnabled() ||
++      base::CommandLine::ForCurrentProcess()->HasSwitch("no-sandbox") ||
++      base::CommandLine::ForCurrentProcess()->HasSwitch("single-process")) {
++    promise.RejectWithErrorMessage("Font isolation requires the sandboxed FontDataService backend");
++    return handle;
++  }
++  preferences->SetFontsLoading(true);
++  // File IO and typeface parsing must not block the browser UI sequence. The
++  // caller must await the promise before creating pages or starting workers.
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_BLOCKING},
++      base::BindOnce(&font_data_service::LoadIsolatedFontBundle, files),
++      base::BindOnce(
++          [](base::WeakPtr<ElectronBrowserContext> context,
++             std::vector<base::FilePath> paths, gin_helper::Promise<void> result,
++             std::shared_ptr<const font_data_service::IsolatedFontBundle> bundle) {
++            auto* prefs = context ? SessionPreferences::FromBrowserContext(context.get()) : nullptr;
++            if (!prefs) {
++              result.RejectWithErrorMessage("Font isolation session was destroyed");
++              return;
++            }
++            prefs->SetFontsLoading(false);
++            if (prefs->fonts_used()) {
++              result.RejectWithErrorMessage("Font isolation must finish before starting session renderers");
++              return;
++            }
++            if (!bundle) {
++              result.RejectWithErrorMessage("Invalid isolated font bundle: static Arimo, Tinos and Cousine regular fonts are required");
++              return;
++            }
++            prefs->SetIsolatedFonts(std::move(paths), std::move(bundle));
++            result.Resolve();
++          }, browser_context()->GetWeakPtr(), files, std::move(promise)));
++#else
++  promise.RejectWithErrorMessage("Font isolation is available only in the Windows experimental engine");
++#endif
++  return handle;
++}
++
+ bool Session::IsPersistent() {
+   return !browser_context_->IsOffTheRecord();
+ }
+@@ -1824,6 +1938,9 @@ void Session::FillObjectTemplate(v8::Isolate* isolate,
                   &Session::AllowNTLMCredentialsForDomains)
        .SetMethod("isPersistent", &Session::IsPersistent)
        .SetMethod("setUserAgent", &Session::SetUserAgent)
 +      .SetMethod("setUmbraScreenMetrics", &Session::SetUmbraScreenMetrics)
 +      .SetMethod("setUmbraHardwareMetrics", &Session::SetUmbraHardwareMetrics)
++      .SetMethod("setUmbraFontIsolation", &Session::SetUmbraFontIsolation)
        .SetMethod("getUserAgent", &Session::GetUserAgent)
        .SetMethod("setSSLConfig", &Session::SetSSLConfig)
        .SetMethod("getBlobData", &Session::GetBlobData)
 diff --git a/shell/browser/api/electron_api_session.h b/shell/browser/api/electron_api_session.h
-index 8bd1071..d6b29d0 100644
+index 8bd1071..b55e9c8 100644
 --- a/shell/browser/api/electron_api_session.h
 +++ b/shell/browser/api/electron_api_session.h
-@@ -141,6 +141,10 @@ class Session final : public gin::Wrappable<Session>,
+@@ -141,7 +141,13 @@ class Session final : public gin::Wrappable<Session>,
    void AllowNTLMCredentialsForDomains(const std::string& domains);
    void SetUserAgent(const std::string& user_agent, gin::Arguments* args);
    std::string GetUserAgent();
@@ -85,13 +176,26 @@ index 8bd1071..d6b29d0 100644
 +  void SetUmbraHardwareMetrics(gin_helper::ErrorThrower thrower,
 +                              const base::DictValue& options);
    void SetSSLConfig(network::mojom::SSLConfigPtr config);
++  v8::Local<v8::Promise> SetUmbraFontIsolation(
++      v8::Isolate* isolate, const std::vector<base::FilePath>& files);
    bool IsPersistent();
    v8::Local<v8::Promise> GetBlobData(v8::Isolate* isolate,
+                                      const std::string& uuid);
 diff --git a/shell/browser/electron_browser_client.cc b/shell/browser/electron_browser_client.cc
-index 79e4150..f86c817 100644
+index 79e4150..d3057c2 100644
 --- a/shell/browser/electron_browser_client.cc
 +++ b/shell/browser/electron_browser_client.cc
-@@ -519,6 +519,22 @@ void ElectronBrowserClient::OverrideWebPreferences(
+@@ -6,6 +6,9 @@
+ 
+ #if BUILDFLAG(IS_WIN)
+ #include <shlobj.h>
++#include "components/services/font_data/isolated_font_data_service.h"
++#include "services/service_manager/public/cpp/binder_registry.h"
++#include "third_party/blink/public/mojom/dwrite_font_proxy/dwrite_font_proxy.mojom.h"
+ #endif
+ 
+ #include <memory>
+@@ -519,6 +522,32 @@ void ElectronBrowserClient::OverrideWebPreferences(
    if (auto* web_preferences = WebContentsPreferences::From(web_contents)) {
      web_preferences->OverrideWebkitPrefs(prefs, renderer_prefs);
    }
@@ -102,6 +206,16 @@ index 79e4150..f86c817 100644
 +    // WebPreferences travel to every RenderView, including OOPIFs and newly
 +    // created renderers. Do not mutate physical ScreenInfo/VisualProperties.
 +    session_preferences->MarkScreenMetricsUsed();
++    session_preferences->MarkFontsUsed();
++    if (session_preferences->isolated_fonts() || session_preferences->fonts_loading()) {
++      prefs->standard_font_family_map = {{"Zyyy", u"Tinos"}};
++      prefs->serif_font_family_map = {{"Zyyy", u"Tinos"}};
++      prefs->sans_serif_font_family_map = {{"Zyyy", u"Arimo"}};
++      prefs->fixed_font_family_map = {{"Zyyy", u"Cousine"}};
++      prefs->cursive_font_family_map = {{"Zyyy", u"Arimo"}};
++      prefs->fantasy_font_family_map = {{"Zyyy", u"Arimo"}};
++      prefs->math_font_family_map = {{"Zyyy", u"Tinos"}};
++    }
 +    if (const auto& screen = session_preferences->screen_metrics()) {
 +      prefs->umbra_screen_width = screen->width;
 +      prefs->umbra_screen_height = screen->height;
@@ -114,7 +228,7 @@ index 79e4150..f86c817 100644
  }
  
  bool ElectronBrowserClient::WebPreferencesNeedUpdateForColorRelatedStateChanges(
-@@ -691,6 +707,28 @@ void ElectronBrowserClient::AppendExtraCommandLineSwitches(
+@@ -691,6 +720,32 @@ void ElectronBrowserClient::AppendExtraCommandLineSwitches(
        command_line->AppendSwitch(switches::kEnableSandbox);
      }
  
@@ -123,12 +237,16 @@ index 79e4150..f86c817 100644
 +    // without a WebContents use the same renderer-launch path.
 +    command_line->RemoveSwitch("umbra-hardware-concurrency");
 +    command_line->RemoveSwitch("umbra-device-memory");
++    command_line->RemoveSwitch("umbra-isolate-fonts");
 +    if (render_process_host) {
 +      SessionPreferences::CreateForBrowserContext(
 +          render_process_host->GetBrowserContext());
 +      if (auto* preferences = SessionPreferences::FromBrowserContext(
 +              render_process_host->GetBrowserContext())) {
 +        preferences->MarkHardwareMetricsUsed();
++        preferences->MarkFontsUsed();
++        if (preferences->isolated_fonts() || preferences->fonts_loading())
++          command_line->AppendSwitch("umbra-isolate-fonts");
 +        if (const auto& hardware = preferences->hardware_metrics()) {
 +          command_line->AppendSwitchASCII(
 +              "umbra-hardware-concurrency",
@@ -143,6 +261,32 @@ index 79e4150..f86c817 100644
      renderer_process_sandboxed_[unsafe_process_id] =
          !command_line->HasSwitch(sandbox::policy::switches::kNoSandbox);
    }
+@@ -1948,6 +2003,25 @@ void ElectronBrowserClient::ExposeInterfacesToRenderer(
+     service_manager::BinderRegistry* registry,
+     blink::AssociatedInterfaceRegistry* associated_registry,
+     content::RenderProcessHost* render_process_host) {
++#if BUILDFLAG(IS_WIN)
++  SessionPreferences::CreateForBrowserContext(render_process_host->GetBrowserContext());
++  auto* preferences = SessionPreferences::FromBrowserContext(render_process_host->GetBrowserContext());
++  preferences->MarkFontsUsed();
++  auto bundle = preferences->isolated_fonts();
++  // A renderer unexpectedly started during loading must never receive host
++  // fonts. An empty isolated service fails closed; the pending API rejects as
++  // soon as it observes fonts_used(), and the caller must abort the launch.
++  if (!bundle && preferences->fonts_loading())
++    bundle = std::make_shared<const font_data_service::IsolatedFontBundle>();
++  if (bundle) {
++    registry->AddInterface(base::BindRepeating(
++        &font_data_service::ConnectToIsolatedFontService, std::move(bundle)));
++    // CSS local() uses FontDataService in an isolated renderer. Never leave the
++    // legacy system-font IPC callable as an alternate route.
++    registry->AddInterface(base::BindRepeating(
++        [](mojo::PendingReceiver<blink::mojom::DWriteFontProxy> receiver) {}));
++  }
++#endif
+ #if BUILDFLAG(ENABLE_ELECTRON_EXTENSIONS)
+   associated_registry->AddInterface<extensions::mojom::RendererHost>(
+       base::BindRepeating(&extensions::RendererStartupHelper::BindForRenderer,
 diff --git a/shell/browser/session_preferences.cc b/shell/browser/session_preferences.cc
 index 5ef2350..3c44577 100644
 --- a/shell/browser/session_preferences.cc
@@ -159,19 +303,26 @@ index 5ef2350..3c44577 100644
                         base::WrapUnique(new SessionPreferences{}));
  }
 diff --git a/shell/browser/session_preferences.h b/shell/browser/session_preferences.h
-index 3c03e70..9bd0913 100644
+index 3c03e70..59b0e1f 100644
 --- a/shell/browser/session_preferences.h
 +++ b/shell/browser/session_preferences.h
-@@ -5,6 +5,7 @@
+@@ -5,6 +5,8 @@
  #ifndef ELECTRON_SHELL_BROWSER_SESSION_PREFERENCES_H_
  #define ELECTRON_SHELL_BROWSER_SESSION_PREFERENCES_H_
  
 +#include <optional>
++#include <memory>
  #include <vector>
  
  #include "base/files/file_path.h"
-@@ -17,6 +18,25 @@ class BrowserContext;
+@@ -15,8 +17,31 @@ namespace content {
+ class BrowserContext;
+ }
  
++namespace font_data_service {
++struct IsolatedFontBundle;
++}
++
  namespace electron {
  
 +// A reporting policy, not a physical display or compositor configuration.
@@ -196,7 +347,7 @@ index 3c03e70..9bd0913 100644
  class SessionPreferences : public base::SupportsUserData::Data {
   public:
    static SessionPreferences* FromBrowserContext(
-@@ -30,6 +50,28 @@ class SessionPreferences : public base::SupportsUserData::Data {
+@@ -30,6 +55,40 @@ class SessionPreferences : public base::SupportsUserData::Data {
  
    bool HasServiceWorkerPreloadScript();
  
@@ -222,10 +373,22 @@ index 3c03e70..9bd0913 100644
 +  }
 +  void MarkHardwareMetricsUsed() { hardware_metrics_used_ = true; }
 +
++  const auto& isolated_fonts() const { return isolated_fonts_; }
++  const auto& isolated_font_paths() const { return isolated_font_paths_; }
++  bool fonts_used() const { return fonts_used_; }
++  bool fonts_loading() const { return fonts_loading_; }
++  void SetFontsLoading(bool loading) { fonts_loading_ = loading; }
++  void MarkFontsUsed() { fonts_used_ = true; }
++  void SetIsolatedFonts(std::vector<base::FilePath> paths,
++      std::shared_ptr<const font_data_service::IsolatedFontBundle> bundle) {
++    isolated_font_paths_ = std::move(paths);
++    isolated_fonts_ = std::move(bundle);
++  }
++
   private:
    SessionPreferences();
  
-@@ -37,6 +79,10 @@ class SessionPreferences : public base::SupportsUserData::Data {
+@@ -37,6 +96,14 @@ class SessionPreferences : public base::SupportsUserData::Data {
    static int kLocatorKey;
  
    std::vector<PreloadScript> preload_scripts_;
@@ -233,6 +396,10 @@ index 3c03e70..9bd0913 100644
 +  bool screen_metrics_used_ = false;
 +  std::optional<UmbraHardwareMetrics> hardware_metrics_;
 +  bool hardware_metrics_used_ = false;
++  std::vector<base::FilePath> isolated_font_paths_;
++  std::shared_ptr<const font_data_service::IsolatedFontBundle> isolated_fonts_;
++  bool fonts_used_ = false;
++  bool fonts_loading_ = false;
  };
  
  }  // namespace electron

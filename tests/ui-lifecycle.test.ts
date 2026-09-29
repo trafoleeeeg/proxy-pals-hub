@@ -37,6 +37,21 @@ function fixture(running: RunningProfile[] = []) {
 }
 
 describe("desktop profile lifecycle", () => {
+  test("font-isolated profiles refuse old engines and release the acquired lease without cookies", async () => {
+    for (const supported of [undefined, false, true]) {
+      const f = fixture();
+      f.api.launch = async (id) => ({ ...payload(id), fingerprint: { fontIsolation: true } });
+      if (supported !== undefined) f.bridge.runtimeCapabilities = async () => ({ fontIsolation: supported });
+      if (supported) {
+        await f.controller.start("a");
+        expect(f.state.launches).toHaveLength(1);
+      } else {
+        await expect(f.controller.start("a")).rejects.toThrow("изоляцию шрифтов");
+        expect(f.state.launches).toHaveLength(0);
+        expect(f.state.closeCalls).toEqual([{ profileId: "a", lockToken: "lease-a" }]);
+      }
+    }
+  });
   for (const failure of ["No profile access", "Session lease lost; reopen the profile"]) {
     test(`confirmed terminal failure stops the native profile: ${failure}`, async () => {
       const f = fixture([{ profileId: "a", name: "A", lockToken: "lease-a" }]);

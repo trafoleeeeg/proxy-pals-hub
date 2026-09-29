@@ -33,7 +33,7 @@ export function fingerprintError(fp: Fingerprint): string | null {
 
 export function profileFingerprintPayload(fp: Fingerprint): Fingerprint {
   const { startUrl, ...settings } = fp;
-  const normalized = { ...settings, ...(settings.os === "windows" ? { userAgent: windowsUserAgent(settings.chromeVersion) } : {}), aggressivePrivacyMode: settings.aggressivePrivacyMode ?? true };
+  const normalized = { ...settings, ...(settings.os === "windows" ? { userAgent: windowsUserAgent(settings.chromeVersion) } : {}), aggressivePrivacyMode: settings.aggressivePrivacyMode ?? true, fontIsolation: settings.fontIsolation ?? false };
   return startUrl?.trim() ? { ...normalized, startUrl: startUrl.trim() } : normalized;
 }
 

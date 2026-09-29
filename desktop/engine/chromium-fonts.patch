@@ -1,0 +1,529 @@
+diff --git a/components/services/font_data/BUILD.gn b/components/services/font_data/BUILD.gn
+index 2305b75361..2c7d2358ca 100644
+--- a/components/services/font_data/BUILD.gn
++++ b/components/services/font_data/BUILD.gn
+@@ -16,6 +16,8 @@ source_set("lib") {
+     sources += [
+       "dwrite_local_font_matcher.cc",
+       "dwrite_local_font_matcher.h",
++      "isolated_font_data_service.cc",
++      "isolated_font_data_service.h",
+     ]
+   }
+ 
+diff --git a/content/browser/renderer_host/render_process_host_impl_receiver_bindings.cc b/content/browser/renderer_host/render_process_host_impl_receiver_bindings.cc
+index 490eed63f5..855d9cb0ea 100644
+--- a/content/browser/renderer_host/render_process_host_impl_receiver_bindings.cc
++++ b/content/browser/renderer_host/render_process_host_impl_receiver_bindings.cc
+@@ -352,6 +352,14 @@ void RenderProcessHostImpl::IOThreadHostImpl::BindHostReceiver(
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+   if (features::IsFontDataServiceEnabled()) {
++    // Allow an embedder's BrowserContext-scoped font service before the global
++    // system service. The registry is populated before any renderer request.
++    if (receiver.interface_name() == font_data_service::mojom::FontDataService::Name_) {
++      const std::string name = *receiver.interface_name();
++      auto pipe = receiver.PassPipe();
++      if (binders_->TryBindInterface(name, &pipe)) return;
++      receiver = mojo::GenericPendingReceiver(name, std::move(pipe));
++    }
+     if (auto font_data_receiver =
+             receiver.As<font_data_service::mojom::FontDataService>()) {
+       font_data_service::FontDataServiceImpl::ConnectToFontService(
+diff --git a/third_party/blink/renderer/platform/fonts/generic_font_family_settings.cc b/third_party/blink/renderer/platform/fonts/generic_font_family_settings.cc
+index 483208663c..96f32f9c39 100644
+--- a/third_party/blink/renderer/platform/fonts/generic_font_family_settings.cc
++++ b/third_party/blink/renderer/platform/fonts/generic_font_family_settings.cc
+@@ -31,6 +31,7 @@
+ #include "third_party/blink/renderer/platform/fonts/generic_font_family_settings.h"
+ 
+ #include <memory>
++#include "base/command_line.h"
+ 
+ #include "third_party/blink/renderer/platform/fonts/font_cache.h"
+ 
+@@ -131,6 +132,12 @@ bool GenericFontFamilySettings::ShouldUpdateFontFamily(
+ 
+ const AtomicString& GenericFontFamilySettings::Standard(
+     UScriptCode script) const {
++#if BUILDFLAG(IS_WIN)
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch("umbra-isolate-fonts")) {
++    DEFINE_THREAD_SAFE_STATIC_LOCAL(AtomicString, isolated_family, ("Tinos"));
++    return isolated_family;
++  }
++#endif
+   return GenericFontFamilyForScript(standard_font_family_map_, script);
+ }
+ 
+@@ -145,6 +152,12 @@ bool GenericFontFamilySettings::UpdateStandard(const AtomicString& family,
+ }
+ 
+ const AtomicString& GenericFontFamilySettings::Fixed(UScriptCode script) const {
++#if BUILDFLAG(IS_WIN)
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch("umbra-isolate-fonts")) {
++    DEFINE_THREAD_SAFE_STATIC_LOCAL(AtomicString, isolated_family, ("Cousine"));
++    return isolated_family;
++  }
++#endif
+   const AtomicString& fixed_font =
+       GenericFontFamilyForScript(fixed_font_family_map_, script);
+ #if BUILDFLAG(IS_MAC)
+@@ -168,6 +181,12 @@ bool GenericFontFamilySettings::UpdateFixed(const AtomicString& family,
+ }
+ 
+ const AtomicString& GenericFontFamilySettings::Serif(UScriptCode script) const {
++#if BUILDFLAG(IS_WIN)
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch("umbra-isolate-fonts")) {
++    DEFINE_THREAD_SAFE_STATIC_LOCAL(AtomicString, isolated_family, ("Tinos"));
++    return isolated_family;
++  }
++#endif
+   return GenericFontFamilyForScript(serif_font_family_map_, script);
+ }
+ 
+@@ -183,6 +202,12 @@ bool GenericFontFamilySettings::UpdateSerif(const AtomicString& family,
+ 
+ const AtomicString& GenericFontFamilySettings::SansSerif(
+     UScriptCode script) const {
++#if BUILDFLAG(IS_WIN)
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch("umbra-isolate-fonts")) {
++    DEFINE_THREAD_SAFE_STATIC_LOCAL(AtomicString, isolated_family, ("Arimo"));
++    return isolated_family;
++  }
++#endif
+   return GenericFontFamilyForScript(sans_serif_font_family_map_, script);
+ }
+ 
+@@ -198,6 +223,12 @@ bool GenericFontFamilySettings::UpdateSansSerif(const AtomicString& family,
+ 
+ const AtomicString& GenericFontFamilySettings::Cursive(
+     UScriptCode script) const {
++#if BUILDFLAG(IS_WIN)
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch("umbra-isolate-fonts")) {
++    DEFINE_THREAD_SAFE_STATIC_LOCAL(AtomicString, isolated_family, ("Arimo"));
++    return isolated_family;
++  }
++#endif
+   return GenericFontFamilyForScript(cursive_font_family_map_, script);
+ }
+ 
+@@ -213,6 +244,12 @@ bool GenericFontFamilySettings::UpdateCursive(const AtomicString& family,
+ 
+ const AtomicString& GenericFontFamilySettings::Fantasy(
+     UScriptCode script) const {
++#if BUILDFLAG(IS_WIN)
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch("umbra-isolate-fonts")) {
++    DEFINE_THREAD_SAFE_STATIC_LOCAL(AtomicString, isolated_family, ("Arimo"));
++    return isolated_family;
++  }
++#endif
+   return GenericFontFamilyForScript(fantasy_font_family_map_, script);
+ }
+ 
+@@ -227,6 +264,12 @@ bool GenericFontFamilySettings::UpdateFantasy(const AtomicString& family,
+ }
+ 
+ const AtomicString& GenericFontFamilySettings::Math(UScriptCode script) const {
++#if BUILDFLAG(IS_WIN)
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch("umbra-isolate-fonts")) {
++    DEFINE_THREAD_SAFE_STATIC_LOCAL(AtomicString, isolated_family, ("Tinos"));
++    return isolated_family;
++  }
++#endif
+   return GenericFontFamilyForScript(math_font_family_map_, script);
+ }
+ 
+diff --git a/third_party/blink/renderer/platform/fonts/win/font_cache_skia_win.cc b/third_party/blink/renderer/platform/fonts/win/font_cache_skia_win.cc
+index e00bd96c6e..51847a1273 100644
+--- a/third_party/blink/renderer/platform/fonts/win/font_cache_skia_win.cc
++++ b/third_party/blink/renderer/platform/fonts/win/font_cache_skia_win.cc
+@@ -38,6 +38,7 @@
+ #include <utility>
+ 
+ #include "base/debug/alias.h"
++#include "base/command_line.h"
+ #include "base/feature_list.h"
+ #include "base/metrics/histogram_functions.h"
+ #include "base/trace_event/trace_event.h"
+@@ -74,6 +75,7 @@ int32_t FontCache::status_font_height_ = 0;
+ namespace {
+ 
+ int32_t EnsureMinimumFontHeightIfNeeded(int32_t font_height) {
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch("umbra-isolate-fonts")) return 13;
+   // Adjustment for codepage 936 to make the fonts more legible in Simplified
+   // Chinese.  Please refer to LayoutThemeFontProviderWin.cpp for more
+   // information.
+@@ -134,21 +136,24 @@ const AtomicString& FontCache::SystemFontFamily() {
+ // static
+ void FontCache::SetMenuFontMetrics(const AtomicString& family_name,
+                                    int32_t font_height) {
+-  menu_font_family_name_ = new AtomicString(family_name);
++  menu_font_family_name_ = new AtomicString(
++      base::CommandLine::ForCurrentProcess()->HasSwitch("umbra-isolate-fonts") ? AtomicString("Arimo") : family_name);
+   menu_font_height_ = EnsureMinimumFontHeightIfNeeded(font_height);
+ }
+ 
+ // static
+ void FontCache::SetSmallCaptionFontMetrics(const AtomicString& family_name,
+                                            int32_t font_height) {
+-  small_caption_font_family_name_ = new AtomicString(family_name);
++  small_caption_font_family_name_ = new AtomicString(
++      base::CommandLine::ForCurrentProcess()->HasSwitch("umbra-isolate-fonts") ? AtomicString("Arimo") : family_name);
+   small_caption_font_height_ = EnsureMinimumFontHeightIfNeeded(font_height);
+ }
+ 
+ // static
+ void FontCache::SetStatusFontMetrics(const AtomicString& family_name,
+                                      int32_t font_height) {
+-  status_font_family_name_ = new AtomicString(family_name);
++  status_font_family_name_ = new AtomicString(
++      base::CommandLine::ForCurrentProcess()->HasSwitch("umbra-isolate-fonts") ? AtomicString("Arimo") : family_name);
+   status_font_height_ = EnsureMinimumFontHeightIfNeeded(font_height);
+ }
+ 
+diff --git a/third_party/blink/renderer/platform/fonts/win/font_unique_name_lookup_win.cc b/third_party/blink/renderer/platform/fonts/win/font_unique_name_lookup_win.cc
+index 3cf47aa4e1..8765367d65 100644
+--- a/third_party/blink/renderer/platform/fonts/win/font_unique_name_lookup_win.cc
++++ b/third_party/blink/renderer/platform/fonts/win/font_unique_name_lookup_win.cc
+@@ -6,6 +6,7 @@
+ 
+ #include <memory>
+ #include <utility>
++#include "base/command_line.h"
+ 
+ #include "base/files/file_path.h"
+ #include "base/files/file_util.h"
+@@ -32,6 +33,8 @@ FontUniqueNameLookupWin::~FontUniqueNameLookupWin() = default;
+ 
+ sk_sp<SkTypeface> FontUniqueNameLookupWin::MatchUniqueName(
+     const String& font_unique_name) {
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch("umbra-isolate-fonts"))
++    return MatchUniqueNameViaFontDataService(font_unique_name);
+   if (RuntimeEnabledFeatures::FontDataServiceForCSSLocalFontsEnabled()) {
+     return MatchUniqueNameViaFontDataService(font_unique_name);
+   }
+@@ -70,6 +73,10 @@ sk_sp<SkTypeface> FontUniqueNameLookupWin::InstantiateFromFileAndTtcIndex(
+ }
+ 
+ bool FontUniqueNameLookupWin::IsFontUniqueNameLookupReadyForSyncLookup() {
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch("umbra-isolate-fonts")) {
++    EnsureFontDataServiceConnected();
++    return true;
++  }
+   if (RuntimeEnabledFeatures::FontDataServiceForCSSLocalFontsEnabled()) {
+     EnsureFontDataServiceConnected();
+   } else {
+@@ -165,6 +172,10 @@ sk_sp<SkTypeface> FontUniqueNameLookupWin::InstantiateFromMatchResult(
+ }
+ 
+ void FontUniqueNameLookupWin::Init() {
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch("umbra-isolate-fonts")) {
++    EnsureFontDataServiceConnected();
++    return;
++  }
+   if (RuntimeEnabledFeatures::FontDataServiceForCSSLocalFontsEnabled()) {
+     EnsureFontDataServiceConnected();
+     return;
+diff --git a/components/services/font_data/isolated_font_data_service.h b/components/services/font_data/isolated_font_data_service.h
+new file mode 100644
+--- /dev/null
++++ b/components/services/font_data/isolated_font_data_service.h
+@@ -0,0 +1,30 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++#ifndef COMPONENTS_SERVICES_FONT_DATA_ISOLATED_FONT_DATA_SERVICE_H_
++#define COMPONENTS_SERVICES_FONT_DATA_ISOLATED_FONT_DATA_SERVICE_H_
++#include <memory>
++#include <vector>
++
++#include "base/files/file_path.h"
++#include "base/memory/read_only_shared_memory_region.h"
++#include "components/services/font_data/public/mojom/font_data_service.mojom.h"
++#include "third_party/skia/include/core/SkTypeface.h"
++namespace font_data_service {
++// Parsed, immutable bytes. Never an allowlist of installed system fonts.
++struct IsolatedFontBundle {
++  struct Face {
++    sk_sp<SkTypeface> typeface;
++    base::ReadOnlySharedMemoryRegion data;
++    std::string family;
++    std::vector<std::string> local_names;
++  };
++  std::vector<Face> faces;
++};
++std::shared_ptr<const IsolatedFontBundle> LoadIsolatedFontBundle(
++    const std::vector<base::FilePath>& files);
++void ConnectToIsolatedFontService(
++    std::shared_ptr<const IsolatedFontBundle> bundle,
++    mojo::PendingReceiver<mojom::FontDataService> receiver);
++}  // namespace font_data_service
++#endif
+diff --git a/components/services/font_data/isolated_font_data_service.cc b/components/services/font_data/isolated_font_data_service.cc
+new file mode 100644
+--- /dev/null
++++ b/components/services/font_data/isolated_font_data_service.cc
+@@ -0,0 +1,263 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++#include "components/services/font_data/isolated_font_data_service.h"
++
++#include <algorithm>
++#include <utility>
++
++#include "base/files/file_util.h"
++#include "base/strings/string_util.h"
++#include "base/strings/utf_string_conversions.h"
++#include "base/task/thread_pool.h"
++#include "mojo/public/cpp/bindings/self_owned_receiver.h"
++#include "skia/ext/font_utils.h"
++#include "third_party/skia/include/core/SkData.h"
++#include "third_party/skia/include/core/SkFontMgr.h"
++#include "third_party/skia/include/core/SkString.h"
++
++namespace font_data_service {
++namespace {
++using Face = IsolatedFontBundle::Face;
++
++// Full and PostScript names from the bounded SFNT table, never the host
++// registry.
++std::vector<std::string> LocalNames(SkTypeface& face) {
++  auto table = face.copyTableData(SkSetFourByteTag('n', 'a', 'm', 'e'));
++  std::vector<std::string> result;
++  if (!table || table->size() < 6) {
++    return result;
++  }
++  // SAFETY: SkData owns exactly size() immutable bytes for this entire scope.
++  auto bytes = UNSAFE_BUFFERS(
++      base::span(static_cast<const uint8_t*>(table->data()), table->size()));
++  auto word = [&bytes](size_t at) -> uint16_t {
++    return (static_cast<uint16_t>(bytes[at]) << 8) | bytes[at + 1];
++  };
++  size_t count = word(2), strings = word(4);
++  if (count > (bytes.size() - 6) / 12 || strings > bytes.size()) {
++    return result;
++  }
++  for (size_t n = 0; n < count; ++n) {
++    size_t at = 6 + n * 12;
++    uint16_t platform = word(at), encoding = word(at + 2), id = word(at + 6);
++    if ((id != 4 && id != 6) ||
++        !(platform == 0 ||
++          (platform == 3 && (encoding == 1 || encoding == 10)))) {
++      continue;
++    }
++    size_t length = word(at + 8), offset = word(at + 10);
++    if (length % 2 || offset > bytes.size() - strings ||
++        length > bytes.size() - strings - offset) {
++      continue;
++    }
++    std::u16string name;
++    for (size_t j = 0; j < length; j += 2) {
++      name.push_back(word(strings + offset + j));
++    }
++    result.push_back(base::UTF16ToUTF8(name));
++  }
++  return result;
++}
++
++class StyleSet final : public SkFontStyleSet {
++ public:
++  explicit StyleSet(std::vector<sk_sp<SkTypeface>> faces)
++      : faces_(std::move(faces)) {}
++  int count() override { return static_cast<int>(faces_.size()); }
++  void getStyle(int index, SkFontStyle* style, SkString* name) override {
++    if (style) {
++      *style = faces_[index]->fontStyle();
++    }
++    if (name) {
++      name->reset();
++    }
++  }
++  sk_sp<SkTypeface> createTypeface(int index) override { return faces_[index]; }
++  sk_sp<SkTypeface> matchStyle(const SkFontStyle& style) override {
++    return matchStyleCSS3(style);
++  }
++
++ private:
++  std::vector<sk_sp<SkTypeface>> faces_;
++};
++
++SkFontStyle Style(const mojom::TypefaceStyle& style) {
++  SkFontStyle::Slant slant = SkFontStyle::kUpright_Slant;
++  if (style.slant == mojom::TypefaceSlant::kItalic) {
++    slant = SkFontStyle::kItalic_Slant;
++  }
++  if (style.slant == mojom::TypefaceSlant::kOblique) {
++    slant = SkFontStyle::kOblique_Slant;
++  }
++  return SkFontStyle(style.weight, style.width, slant);
++}
++
++class IsolatedFontService final : public mojom::FontDataService {
++ public:
++  explicit IsolatedFontService(std::shared_ptr<const IsolatedFontBundle> bundle)
++      : bundle_(std::move(bundle)) {}
++  void MatchFamilyName(const std::string& family,
++                       mojom::TypefaceStylePtr style,
++                       MatchFamilyNameCallback callback) override {
++    std::move(callback).Run(Result(Match(family, Style(*style))));
++  }
++  void MatchFamilyNameCharacter(
++      const std::string& family,
++      mojom::TypefaceStylePtr style,
++      const std::vector<std::string>& languages,
++      int32_t character,
++      MatchFamilyNameCharacterCallback callback) override {
++    const Face* match = Match(family, Style(*style), character);
++    if (!match) {
++      // Fixed fallback only. Missing glyphs must never query the host.
++      for (const auto& face : bundle_->faces) {
++        match = Match(face.family, Style(*style), character);
++        if (match) {
++          break;
++        }
++      }
++    }
++    std::move(callback).Run(Result(match));
++  }
++  void GetAllFamilyNames(GetAllFamilyNamesCallback callback) override {
++    std::vector<std::string> names;
++    for (const auto& face : bundle_->faces) {
++      if (std::ranges::find(names, face.family) == names.end()) {
++        names.push_back(face.family);
++      }
++    }
++    std::move(callback).Run(std::move(names));
++  }
++  void LegacyMakeTypeface(const std::optional<std::string>& family,
++                          mojom::TypefaceStylePtr style,
++                          LegacyMakeTypefaceCallback callback) override {
++    const Face* match = Match(family.value_or(""), Style(*style));
++    if (!match) {
++      match = Match("Arimo", Style(*style));
++    }
++    std::move(callback).Run(Result(match));
++  }
++  void MatchLocalFont(const std::string& name,
++                      MatchLocalFontCallback callback) override {
++    for (const auto& face : bundle_->faces) {
++      for (const auto& local : face.local_names) {
++        if (base::EqualsCaseInsensitiveASCII(name, local)) {
++          std::move(callback).Run(Result(&face));
++          return;
++        }
++      }
++    }
++    std::move(callback).Run(nullptr);
++  }
++
++ private:
++  const Face* Match(const std::string& requested,
++                    const SkFontStyle& style,
++                    std::optional<int32_t> character = std::nullopt) const {
++    const std::string family = requested.empty() ? "Arimo" : requested;
++    std::vector<sk_sp<SkTypeface>> faces;
++    for (const auto& face : bundle_->faces) {
++      if (base::EqualsCaseInsensitiveASCII(face.family, family) &&
++          (!character || face.typeface->unicharToGlyph(*character))) {
++        faces.push_back(face.typeface);
++      }
++    }
++    if (faces.empty()) {
++      return nullptr;
++    }
++    auto selected = sk_make_sp<StyleSet>(std::move(faces))->matchStyle(style);
++    for (const auto& face : bundle_->faces) {
++      if (face.typeface == selected) {
++        return &face;
++      }
++    }
++    return nullptr;
++  }
++  mojom::MatchFamilyNameResultPtr Result(const Face* face) const {
++    if (!face) {
++      return nullptr;
++    }
++    auto region = face->data.Duplicate();
++    if (!region.IsValid()) {
++      return nullptr;
++    }
++    auto result = mojom::MatchFamilyNameResult::New();
++    result->ttc_index = 0;
++    result->typeface_data = mojom::TypefaceData::NewRegion(std::move(region));
++    return result;
++  }
++  std::shared_ptr<const IsolatedFontBundle> bundle_;
++};
++}  // namespace
++
++std::shared_ptr<const IsolatedFontBundle> LoadIsolatedFontBundle(
++    const std::vector<base::FilePath>& files) {
++  if (files.empty() || files.size() > 32) {
++    return nullptr;
++  }
++  auto bundle = std::make_shared<IsolatedFontBundle>();
++  size_t total = 0;
++  for (const auto& path : files) {
++    if (!path.IsAbsolute() || path.ReferencesParent()) {
++      return nullptr;
++    }
++    std::string bytes;
++    if (!base::ReadFileToStringWithMaxSize(path, &bytes, 16 * 1024 * 1024)) {
++      return nullptr;
++    }
++    total += bytes.size();
++    if (bytes.empty() || total > 32 * 1024 * 1024) {
++      return nullptr;
++    }
++    auto data = SkData::MakeWithCopy(bytes.data(), bytes.size());
++    auto typeface = skia::DefaultFontMgr()->makeFromData(std::move(data), 0);
++    if (!typeface || typeface->getVariationDesignParameters({}) > 0) {
++      return nullptr;
++    }
++    // v1: only static TTF/OTF. Reject collections/variable fonts explicitly.
++    if (bytes.size() >= 4 && bytes.compare(0, 4, "ttcf") == 0) {
++      return nullptr;
++    }
++    auto shared = base::ReadOnlySharedMemoryRegion::Create(bytes.size());
++    if (!shared.IsValid()) {
++      return nullptr;
++    }
++    shared.mapping.GetMemoryAsSpan<uint8_t>().copy_from(base::as_byte_span(bytes));
++    SkString family;
++    typeface->getFamilyName(&family);
++    auto names = LocalNames(*typeface);
++    if (family.isEmpty() || names.empty()) {
++      return nullptr;
++    }
++    bundle->faces.push_back({std::move(typeface), std::move(shared.region),
++                             family.c_str(), std::move(names)});
++  }
++  for (const auto* required : {"Arimo", "Tinos", "Cousine"}) {
++    if (!std::ranges::any_of(bundle->faces, [required](const Face& face) {
++          return face.family == required &&
++                 face.typeface->fontStyle() == SkFontStyle::Normal();
++        })) {
++      return nullptr;
++    }
++  }
++  return bundle;
++}
++
++void ConnectToIsolatedFontService(
++    std::shared_ptr<const IsolatedFontBundle> bundle,
++    mojo::PendingReceiver<mojom::FontDataService> receiver) {
++  auto task_runner = base::ThreadPool::CreateSequencedTaskRunner(
++      {base::MayBlock(), base::TaskPriority::USER_BLOCKING});
++  task_runner->PostTask(
++      FROM_HERE,
++      base::BindOnce(
++          [](std::shared_ptr<const IsolatedFontBundle> fonts,
++             mojo::PendingReceiver<mojom::FontDataService> pending) {
++            mojo::MakeSelfOwnedReceiver(
++                std::make_unique<IsolatedFontService>(std::move(fonts)),
++                std::move(pending));
++          },
++          std::move(bundle), std::move(receiver)));
++}
++}  // namespace font_data_service

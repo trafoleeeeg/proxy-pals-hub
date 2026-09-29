@@ -21,6 +21,7 @@ export type Fingerprint = {
   doNotTrack: boolean;
   // Older profiles have no setting and continue using the strict mode.
   aggressivePrivacyMode?: boolean;
+  fontIsolation?: boolean;
   startUrl?: string;
 };
 
@@ -133,6 +134,7 @@ export function generateFingerprint(country?: string | null, os: FingerprintOS =
     webrtc: "proxy",
     doNotTrack: false,
     aggressivePrivacyMode: false,
+    fontIsolation: false,
   };
 }
 

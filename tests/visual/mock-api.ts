@@ -108,6 +108,8 @@ export const saveProfileSession = api("saveProfileSession", () => ({ ok: true })
 
 const bridge: UmbraBridge = {
   isDesktop: true, platform: "win32",
+  pushBrowserSettings: async () => ({ ok: true }),
+  onBrowserSettingsChanged: () => () => {},
   launchProfile: async (payload) => { fixture.running.push({ profileId: payload.profileId, name: payload.name, lockToken: payload.lockToken }); return { ok: true }; },
   closeProfile: async (id) => {
     const { snapshotId: _snapshotId, ...snapshot } = fixture.emitClosed(id);

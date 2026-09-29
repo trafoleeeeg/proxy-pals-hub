@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useEffect, useId, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { generateFingerprint, WINDOWS_CONFIGURATIONS, windowsConfigurationId, applyWindowsConfiguration, windowsUserAgent, type Fingerprint, type FingerprintOS } from "@/lib/fingerprint";
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { fingerprintError } from "./profile-model";
+import { desktop } from "@/lib/desktop";
 
 export function ProfileFingerprint({ value, onChange, disabled = false, country, proxyTimezone, proxyIp }: {
   value: Fingerprint; onChange: (fp: Fingerprint) => void; disabled?: boolean; country?: string | null | undefined;
@@ -14,21 +15,31 @@ export function ProfileFingerprint({ value, onChange, disabled = false, country,
 }) {
   const error = fingerprintError(value);
   const privacyModeId = useId();
+  const fontModeId = useId();
+  const [fontIsolationAvailable, setFontIsolationAvailable] = useState(false);
+  const fontIsolation = value.fontIsolation ?? false;
+  useEffect(() => {
+    let cancelled = false;
+    void desktop()?.runtimeCapabilities?.().then((capabilities) => {
+      if (!cancelled) setFontIsolationAvailable(capabilities.fontIsolation === true);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
   const aggressivePrivacyMode = value.aggressivePrivacyMode ?? true;
   function changeOS(os: FingerprintOS) {
     if (os === value.os) return;
     onChange({ ...generateFingerprint(country, os), language: value.language, languages: value.languages,
       timezone: value.timezone, ...(value.startUrl ? { startUrl: value.startUrl } : {}), webrtc: value.webrtc, doNotTrack: value.doNotTrack,
-      aggressivePrivacyMode });
+      aggressivePrivacyMode, fontIsolation });
   }
   return <fieldset disabled={disabled} className="min-w-0 space-y-3 border-t border-border pt-4">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <h3 className="text-sm font-medium">Отпечаток {value.os === "macos" ? "macOS" : "Windows"}</h3>
-      <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => onChange({ ...generateFingerprint(country, value.os), ...(proxyTimezone ? { timezone: proxyTimezone } : {}), ...(value.startUrl ? { startUrl: value.startUrl } : {}), webrtc: value.webrtc, aggressivePrivacyMode })}>
+      <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => onChange({ ...generateFingerprint(country, value.os), ...(proxyTimezone ? { timezone: proxyTimezone } : {}), ...(value.startUrl ? { startUrl: value.startUrl } : {}), webrtc: value.webrtc, aggressivePrivacyMode, fontIsolation })}>
         <RefreshCw className="size-4" /> Новый отпечаток
       </Button>
     </div>
-    <p className="text-xs text-muted-foreground">Обновлённый клиент согласует User-Agent и Client Hints с ОС профиля и установленным Chromium, включая фоновые workers. Подмена шрифтов и шум WebGL не поддерживаются. Отпечаток macOS на Windows не эмулирует настоящее устройство Mac и не гарантирует нераспознаваемость.</p>
+    <p className="text-xs text-muted-foreground">Обновлённый клиент согласует User-Agent и Client Hints с ОС профиля и установленным Chromium, включая фоновые workers. Имитация системного набора шрифтов и шум WebGL не поддерживаются. Отпечаток macOS на Windows не эмулирует настоящее устройство Mac и не гарантирует нераспознаваемость.</p>
     <p role="note" className="text-xs text-warning">На Windows обновлённый движок согласует размеры, DPI и ориентацию экрана с CSS в сторонних iframe. Цветовые параметры экрана проверяются отдельно. GPU, Canvas, аудио и установленные шрифты в обычном режиме могут раскрывать устройство; полная нераспознаваемость не гарантируется.</p>
     {value.os === "windows" && <div className="grid gap-2 rounded-md border border-border p-3">
       <Label htmlFor="windows-configuration">Набор параметров Windows</Label>
@@ -51,6 +62,16 @@ export function ProfileFingerprint({ value, onChange, disabled = false, country,
       <p className="text-xs text-muted-foreground">{aggressivePrivacyMode
         ? "Строгий режим ограничивает аппаратные API. Сайты могут заметить недоступность функций."
         : "Обычный режим снимает агрессивную блокировку API. GPU, Canvas, аудио и шрифты могут раскрывать реальное оборудование. Защита фоновых процессов требует обновлённого настольного клиента; при потере защиты профиль останавливается с сохранением данных."}</p>
+    </div>
+    <div className="space-y-2 rounded-md border border-border p-3">
+      <div className="flex items-center justify-between gap-3">
+        <Label htmlFor={fontModeId}>Изоляция шрифтов · экспериментально</Label>
+        <Switch id={fontModeId} checked={fontIsolation}
+          disabled={disabled || (!fontIsolationAvailable && !fontIsolation)}
+          onCheckedChange={(checked) => onChange({ ...value, fontIsolation: checked })} />
+      </div>
+      <p className="text-xs text-muted-foreground">Отдельный фиксированный набор Arimo, Tinos и Cousine вместо шрифтов ПК. Это не стандартный набор Windows: вид сайтов изменится, часть символов и emoji может отсутствовать. Web-шрифты сайтов работают; доступ к списку шрифтов ПК запрещён даже с исключением сайта. После смены режима перезапустите Umbra.</p>
+      {!fontIsolationAvailable && <p role="status" className="text-xs text-warning">Для включения и запуска изолированного профиля нужен настольный клиент с поддержкой нового движка. Текущий клиент её не подтвердил.</p>}
     </div>
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       <div className="grid gap-2"><Label htmlFor="profile-os">Операционная система</Label><Select disabled={disabled} value={value.os} onValueChange={(os) => changeOS(os as FingerprintOS)}>

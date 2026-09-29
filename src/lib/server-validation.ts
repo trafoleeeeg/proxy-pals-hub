@@ -39,6 +39,7 @@ export const fingerprintSchema = z.object({
   webrtc: z.enum(["disabled", "proxy"]),
   doNotTrack: z.boolean(),
   aggressivePrivacyMode: z.boolean().default(true),
+  fontIsolation: z.boolean().default(false),
   startUrl: startUrl.optional(),
 }).strict();
 

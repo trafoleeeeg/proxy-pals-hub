@@ -4,7 +4,7 @@ const { EventEmitter } = require("node:events");
 const { createProfileBrowser, CHROME_HEIGHT } = require("../runtime/browser.cjs");
 const { browserUrl } = require("../runtime/browser-ui.cjs");
 
-function harness() {
+function harness(workAreaSize = { width: 1920, height: 1040 }, windowWorkAreaSize = workAreaSize) {
   let handler;
   const stateEvents = [];
   const views = [];
@@ -36,10 +36,12 @@ function harness() {
     send(channel, state) { if (channel === "umbra-runtime:state") stateEvents.push(state); }
   }
   class Shell extends EventEmitter {
-    constructor() { super(); this.webContents = new Contents(); this.contentView = { addChildView(view) { views.push(view); }, removeChildView() {} }; }
-    maximize() {}
+    constructor(options) { super(); this.options = options; this.webContents = new Contents(); this.contentView = { addChildView(view) { views.push(view); }, removeChildView() {} }; }
+    maximize() { this.maximized = true; }
     async loadURL() {}
     isDestroyed() { return false; }
+    isVisible() { return true; }
+    getBounds() { return { x: 0, y: 0, width: this.options.width, height: this.options.height }; }
     getContentBounds() { return { width: 1200, height: 800 }; }
     focus() {}
     destroy() { this.emit("closed"); }
@@ -48,6 +50,7 @@ function harness() {
   const ipcMain = { handle(_channel, callback) { handler = callback; }, removeHandler() {} };
   const electron = {
     BrowserWindow: Shell, WebContentsView: View, ipcMain,
+    screen: { getPrimaryDisplay: () => ({ workAreaSize }), getDisplayMatching: () => ({ workAreaSize: windowWorkAreaSize }) },
     session: { fromPartition: () => ({ webRequest: { onBeforeRequest() {} }, setPermissionRequestHandler() {}, setPermissionCheckHandler() {} }) },
   };
   let browser;
@@ -58,10 +61,10 @@ function harness() {
     await tab.loadURL(url);
     return tab;
   };
-  const start = async ({ withHome = false, privacy = {} } = {}) => {
+  const start = async ({ withHome = false, privacy = {}, fp = { screen: { width: 1280, height: 720 } }, show = false } = {}) => {
     browser = await createProfileBrowser(electron, {
-      name: "Тест", fp: { screen: { width: 1280, height: 720 } }, partition: "persist:test",
-      openTab, closeProfile: async () => {}, show: false, onTabsChanged: () => changed.push(true),
+      name: "Тест", fp, partition: "persist:test",
+      openTab, closeProfile: async () => {}, show, onTabsChanged: () => changed.push(true),
       getBookmarks: () => bookmarks,
       getExtensions: () => extensions,
       ...privacy,
@@ -82,6 +85,25 @@ function harness() {
   };
   return { start };
 }
+
+test("profile window cannot outgrow its advertised screen or work area", async () => {
+  const largerHost = await harness({ width: 1920, height: 1040 }).start({ show: true });
+  assert.equal(largerHost.browser.shell.maximized, undefined);
+  assert.deepEqual({ width: largerHost.browser.shell.options.width, height: largerHost.browser.shell.options.height,
+    maxWidth: largerHost.browser.shell.options.maxWidth, maxHeight: largerHost.browser.shell.options.maxHeight },
+  { width: 1278, height: 678, maxWidth: 1278, maxHeight: 678 });
+  largerHost.browser.destroy();
+
+  const smallerHost = await harness({ width: 1200, height: 640 }).start({ show: true });
+  assert.equal(smallerHost.browser.shell.maximized, true, "a physical work area inside the profile still opens maximized");
+  assert.equal(smallerHost.browser.shell.options.width, 1200);
+  assert.equal(smallerHost.browser.shell.options.height, 640);
+  smallerHost.browser.destroy();
+
+  const otherMonitor = await harness({ width: 1200, height: 640 }, { width: 1920, height: 1040 }).start({ show: true });
+  assert.equal(otherMonitor.browser.shell.maximized, undefined, "a larger secondary monitor must not override the profile cap");
+  otherMonitor.browser.destroy();
+});
 
 test("privacy consent is bound to the actual selected tab and origin", async () => {
   const calls = [];

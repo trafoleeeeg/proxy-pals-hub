@@ -45,15 +45,28 @@ async function createProfileBrowser(electron, {
   shellSession.webRequest.onBeforeRequest({ urls: ["http://*/*", "https://*/*", "ws://*/*", "wss://*/*", "file://*/*"] }, (_details, callback) => callback({ cancel: true }));
   shellSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
   shellSession.setPermissionCheckHandler(() => false);
+  // A maximized host-sized shell can expose outerWidth/outerHeight larger than
+  // the profile's native screen. Keep even user-initiated resize within the
+  // advertised work area; maximize only when the physical work area fits.
+  const profileWorkHeight = Math.max(1, fp.screen.height - (fp.os === "macos" ? 25 : 40));
+  // Windows converts DIP bounds through the host display's scale factor and
+  // can round the resulting outer size up by one pixel. Reserve a small edge.
+  const windowMaxWidth = Math.max(1, fp.screen.width - 2);
+  const windowMaxHeight = Math.max(1, profileWorkHeight - 2);
+  const hostWorkArea = electron.screen?.getPrimaryDisplay?.()?.workAreaSize;
+  const hostWidth = Number.isFinite(hostWorkArea?.width) && hostWorkArea.width > 0 ? hostWorkArea.width : 1600;
+  const hostHeight = Number.isFinite(hostWorkArea?.height) && hostWorkArea.height > 0 ? hostWorkArea.height : 1108;
   const shell = new BrowserWindow({
-    width: Math.min(fp.screen.width, 1600), height: Math.min(fp.screen.height + CHROME_HEIGHT, 1108),
-    minWidth: 600, minHeight: 400, title: name, backgroundColor: "#111317", show: false, autoHideMenuBar: true,
+    width: Math.min(windowMaxWidth, hostWidth), height: Math.min(windowMaxHeight, hostHeight),
+    minWidth: Math.min(600, windowMaxWidth), minHeight: Math.min(400, windowMaxHeight),
+    maxWidth: windowMaxWidth, maxHeight: windowMaxHeight,
+    title: name, backgroundColor: "#111317", show: false, autoHideMenuBar: true,
     webPreferences: { session: shellSession, preload: path.join(__dirname, "browser-preload.cjs"), contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, devTools: false },
   });
-  // Разворачиваем скрытое окно заранее, чтобы профиль появился сразу на весь
-  // рабочий экран без заметного скачка из начального размера. В фоновом режиме
-  // maximize пропускается: некоторые Linux window manager отображают окно.
-  if (show) shell.maximize();
+  // В фоновом режиме maximize пропускается: некоторые Linux window manager
+  // отображают окно. На большем мониторе не раскрываем физический размер.
+  const currentWorkArea = (shell.getBounds && electron.screen?.getDisplayMatching?.(shell.getBounds())?.workAreaSize) || hostWorkArea;
+  if (show && currentWorkArea && currentWorkArea.width <= windowMaxWidth && currentWorkArea.height <= windowMaxHeight) shell.maximize();
   // На Windows каждое окно профиля должно жить в панели задач отдельной иконкой,
   // а не группироваться со вторым окном Umbra. Для этого задаём окну собственный
   // AppUserModelID — проводник считает его самостоятельным приложением.

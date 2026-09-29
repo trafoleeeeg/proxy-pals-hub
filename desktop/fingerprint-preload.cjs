@@ -5,8 +5,10 @@ function applyDocumentFingerprint(fp) {
     Object.defineProperty(object, key, { get: () => value, configurable: true });
   };
   const nav = globalThis.Navigator?.prototype || globalThis.WorkerNavigator?.prototype || navigator;
-  define(nav, "hardwareConcurrency", fp.hardwareConcurrency);
-  define(nav, "deviceMemory", fp.deviceMemory);
+  if (!fp.nativeHardwareMetrics) {
+    define(nav, "hardwareConcurrency", fp.hardwareConcurrency);
+    define(nav, "deviceMemory", fp.deviceMemory);
+  }
   define(nav, "doNotTrack", fp.doNotTrack ? "1" : null);
   define(nav, "languages", Object.freeze([...fp.languages]));
   define(nav, "language", fp.languages[0]);

@@ -5,7 +5,7 @@ const assert = require("node:assert/strict");
 const http = require("node:http");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
-const { applyFingerprint, applyNativeScreenMetrics, normalizeFingerprint, installSessionPrivacy } = require("../runtime/fingerprint.cjs");
+const { applyFingerprint, applyNativeScreenMetrics, applyNativeHardwareMetrics, normalizeFingerprint, installSessionPrivacy } = require("../runtime/fingerprint.cjs");
 const { initializeBackgroundWorkers, protectBackgroundWorkers } = require("../runtime/background-workers.cjs");
 const requireWindowsScreenEngine = process.platform === "win32" && process.env.UMBRA_REQUIRE_NATIVE === "1";
 assert.ok(process.env.UMBRA_PRIVACY_TEST_DIR);
@@ -36,6 +36,7 @@ async function probe() {
     hardwareConcurrency: navigator.hardwareConcurrency, doNotTrack: navigator.doNotTrack,
     hints: hints && { brands: hints.brands, mobile: hints.mobile, platform: hints.platform, architecture: hints.architecture, bitness: hints.bitness, platformVersion: hints.platformVersion, uaFullVersion: hints.uaFullVersion, fullVersionList: hints.fullVersionList },
     prototypeMemory: Object.getOwnPropertyDescriptor(prototype, "deviceMemory").get.call(navigator),
+    nativeHardwareGetters: ["hardwareConcurrency", "deviceMemory"].every(key => Function.prototype.toString.call(Object.getOwnPropertyDescriptor(prototype, key).get).includes("[native code]")),
     gpuBlocked: gpuCanvas.getContext("webgl") === null, webgpuBlocked: navigator.gpu === undefined, canvasBlocked,
     audioBlocked: typeof AudioContext === "undefined", sharedBlocked: typeof SharedWorker === "undefined", serviceBlocked: navigator.serviceWorker === undefined,
     dpr: globalThis.devicePixelRatio, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -74,8 +75,10 @@ const firstScript = `<script>globalThis.firstIdentity={
 app.whenReady().then(async () => {
   await initializeBackgroundWorkers();
   server = http.createServer((req, res) => {
+    res.setHeader("Accept-CH", "Device-Memory, Sec-CH-Device-Memory");
     if (req.url === "/headers") { res.setHeader("Content-Type", "application/json"); return res.end(JSON.stringify({ ua: req.headers["user-agent"], language: req.headers["accept-language"], dnt: req.headers.dnt || null,
-      brands: req.headers["sec-ch-ua"] || null, platform: req.headers["sec-ch-ua-platform"] || null, mobile: req.headers["sec-ch-ua-mobile"] || null })); }
+      brands: req.headers["sec-ch-ua"] || null, platform: req.headers["sec-ch-ua-platform"] || null, mobile: req.headers["sec-ch-ua-mobile"] || null,
+      memory: req.headers["device-memory"] || null, modernMemory: req.headers["sec-ch-device-memory"] || null })); }
     if (req.url === "/worker.js") { res.setHeader("Content-Type", "text/javascript"); return res.end(`${probeSource}.then(result => postMessage(result));`); }
     if (req.url === "/shared.js") { res.setHeader("Content-Type", "text/javascript"); return res.end(`const first=${workerIdentitySource};onconnect=e=>{first.then(result=>e.ports[0].postMessage(result));};`); }
     if (req.url === "/sw.js") { res.setHeader("Content-Type", "text/javascript"); return res.end(`const first=${workerIdentitySource};self.addEventListener('install',()=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('message',e=>{first.then(result=>e.ports[0].postMessage(result));});`); }
@@ -94,6 +97,7 @@ app.whenReady().then(async () => {
     // This must precede protectBackgroundWorkers: it creates a session-owned
     // guard view, after which the native screen policy cannot be installed.
     applyNativeScreenMetrics(ses, identity, { required: requireWindowsScreenEngine });
+    applyNativeHardwareMetrics(ses, identity, { required: requireWindowsScreenEngine });
     ses.webRequest.onBeforeRequest((details, callback) => {
       const url = new URL(details.url);
       callback({ cancel: !["about:", "data:", "blob:"].includes(url.protocol) && !["localhost", "127.0.0.1"].includes(url.hostname) });
@@ -114,10 +118,12 @@ app.whenReady().then(async () => {
   const strict = await open();
   const check = (result, frame = false) => {
     assert.equal(result.platform, "MacIntel"); assert.equal(result.memory, 2); assert.equal(result.prototypeMemory, 2);
+    if (requireWindowsScreenEngine) assert.equal(result.nativeHardwareGetters, true, "client must preserve native CPU/RAM getters");
     assert.equal(result.language, "de-DE"); assert.equal(result.timezone, "Asia/Tokyo");
     assert.equal(result.gpuBlocked, true); assert.equal(result.webgpuBlocked, true); assert.equal(result.canvasBlocked, true);
     assert.equal(result.audioBlocked, true); assert.equal(result.sharedBlocked, true); assert.equal(result.serviceBlocked, true);
     assert.equal(result.headers.ua, fp.userAgent); assert.match(result.headers.language, /^de-DE/);
+    for (const field of ["memory", "modernMemory"]) if (result.headers[field] !== null) assert.equal(result.headers[field], "2", "HTTP memory hint must match navigator");
     if (frame) assert.equal(result.dpr, 2);
   };
   check(await strict.executeJavaScript(probeSource), true);
@@ -161,6 +167,13 @@ app.whenReady().then(async () => {
     deviceMemory: 4, screen: { width: 1600, height: 900 }, doNotTrack: true,
   });
   const windowsProfile = await open([], null, false, windowsFp);
+  // Electron may not negotiate optional hints on loopback HTTP. Exercise the
+  // actual session network guard with synthetic pre-existing header values.
+  const memoryHeaders = await windowsProfile.session.fetch(`${origin}/headers`, {
+    headers: { "Device-Memory": "8", "Sec-CH-Device-Memory": "8" },
+  }).then(response => response.json());
+  assert.equal(memoryHeaders.memory, "4", "legacy memory hint must be rewritten before leaving the session");
+  assert.equal(memoryHeaders.modernMemory, "4", "modern memory hint must be rewritten before leaving the session");
   const windowsMain = await windowsProfile.executeJavaScript(probeSource);
   const checkWindows = (result) => {
     assert.equal(result.platform, "Win32");
@@ -176,6 +189,7 @@ app.whenReady().then(async () => {
     assert.equal(result.headers.ua, windowsFp.userAgent);
     assert.match(result.headers.language, /^fr-CA/);
     assert.equal(result.headers.dnt, "1");
+    for (const field of ["memory", "modernMemory"]) if (result.headers[field] !== null) assert.equal(result.headers[field], "4", "HTTP memory hint must match Windows profile");
     if (result.firstScript) {
       assert.equal(result.firstScript.userAgent, windowsFp.userAgent, "first inline script UA");
       assert.equal(result.firstScript.platform, "Win32", "first inline script OS");

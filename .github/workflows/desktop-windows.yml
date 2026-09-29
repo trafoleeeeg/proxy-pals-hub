@@ -132,6 +132,13 @@ jobs:
         timeout-minutes: 5
         run: node engine/run-screen-native.cjs "$env:GITHUB_WORKSPACE\desktop\.engine\unpacked\electron.exe"
 
+      - name: Test native CPU and memory across profiles and workers
+        # CPU/RAM reporting must also cover workers with no page debugger.
+        # This is separate from screen emulation and uses two full launches.
+        working-directory: desktop
+        timeout-minutes: 5
+        run: node engine/run-screen-native.cjs "$env:GITHUB_WORKSPACE\desktop\.engine\unpacked\electron.exe" hardware
+
       - name: Test Windows sandbox and encrypted restart
         working-directory: desktop
         timeout-minutes: 5

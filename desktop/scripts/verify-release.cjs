@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 const yaml = require("js-yaml");
 const pkg = require("../package.json");
 const { verifyEngine } = require("./verify-engine.cjs");
+const { verifyFontBundle } = require("../runtime/font-isolation.cjs");
 
 async function verifyRelease(directory = path.join(__dirname, "../dist")) {
   await verifyEngine();
@@ -27,7 +28,7 @@ async function verifyRelease(directory = path.join(__dirname, "../dist")) {
   const archive = path.join(directory, "win-unpacked/resources/app.asar");
   const executable = path.join(directory, "win-unpacked/Umbra.exe");
   if (fs.existsSync(executable)) {
-    const markers = ["setUmbraScreenMetrics", "setUmbraHardwareMetrics"].map(value => Buffer.from(value));
+    const markers = ["setUmbraScreenMetrics", "setUmbraHardwareMetrics", "setUmbraFontIsolation"].map(value => Buffer.from(value));
     const markerLength = Math.max(...markers.map(marker => marker.length));
     const fd = fs.openSync(executable, "r");
     const found = new Set();
@@ -44,14 +45,24 @@ async function verifyRelease(directory = path.join(__dirname, "../dist")) {
         overlap = nextOverlap;
       }
     } finally { fs.closeSync(fd); }
-    assert.equal(found.size, markers.length, "Packaged Umbra.exe must contain both native screen and hardware APIs");
+    assert.equal(found.size, markers.length, "Packaged Umbra.exe must contain native screen, hardware and font APIs");
+    const fonts = path.join(directory, "win-unpacked/resources/isolated-fonts");
+    await verifyFontBundle(fonts);
+    for (const notice of ["LICENSE.txt", "NOTICE.txt"]) {
+      const supplied = fs.readFileSync(path.join(fonts, notice), "utf8").replace(/\r\n/g, "\n");
+      const original = fs.readFileSync(path.join(__dirname, "../assets/isolated-fonts", notice), "utf8").replace(/\r\n/g, "\n");
+      assert.equal(supplied, original, "Font license/notice changed during packaging");
+    }
   }
   if (fs.existsSync(archive)) {
     const asar = require("@electron/asar");
     const files = new Set(asar.listPackage(archive).map((name) => name.split(path.sep).join("/")));
-    for (const name of ["/extensions.cjs", "/runtime/profile-home.cjs", "/runtime/theme.cjs", "/theme/styles.css", "/runtime/browser-pipe.cjs", "/runtime/background-workers.cjs", "/runtime/fingerprint.cjs", "/fingerprint-preload.cjs"]) {
+    for (const name of ["/extensions.cjs", "/runtime/profile-home.cjs", "/runtime/theme.cjs", "/theme/styles.css", "/runtime/browser-pipe.cjs", "/runtime/background-workers.cjs", "/runtime/fingerprint.cjs", "/fingerprint-preload.cjs", "/runtime/font-isolation.cjs", "/engine/font-bundle-lock.json"]) {
       assert(files.has(name), "Packaged application is missing " + name);
     }
+    assert.deepEqual(JSON.parse(asar.extractFile(archive, "engine/font-bundle-lock.json").toString("utf8")),
+      require("../engine/font-bundle-lock.json"), "Packaged font manifest differs from the verified source");
+    assert.equal(JSON.parse(asar.extractFile(archive, "package.json").toString("utf8")).version, pkg.version);
   }
   console.log("Verified Windows installer, version, SHA-512 and blockmap: " + expected);
 }

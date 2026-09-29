@@ -1,6 +1,6 @@
 {
   "id": "umbra-static-fonts-v1-experimental",
-  "status": "packaging-configured-engine-not-released",
+  "status": "bundled-opt-in",
   "license": "Apache-2.0",
   "chromiumCommit": "2c592105bbcd9490a9894df48d0fe59b2c512651",
   "archive": {

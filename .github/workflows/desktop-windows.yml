@@ -139,6 +139,11 @@ jobs:
         timeout-minutes: 5
         run: node engine/run-screen-native.cjs "$env:GITHUB_WORKSPACE\desktop\.engine\unpacked\electron.exe" hardware
 
+      - name: Test native fixed-font isolation across profiles and workers
+        working-directory: desktop
+        timeout-minutes: 5
+        run: node engine/run-fonts-native.cjs "$env:GITHUB_WORKSPACE\desktop\.engine\unpacked\electron.exe" "$env:GITHUB_WORKSPACE\desktop\assets\isolated-fonts"
+
       - name: Test Windows sandbox and encrypted restart
         working-directory: desktop
         timeout-minutes: 5
@@ -209,9 +214,14 @@ jobs:
           set -euo pipefail
 
           if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            notes_args=(--notes "Автоматическая сборка Umbra ${GITHUB_REF_NAME#v}.")
+            if [[ -f "docs/releases/${GITHUB_REF_NAME#v}.md" ]]; then
+              notes_args=(--notes-file "docs/releases/${GITHUB_REF_NAME#v}.md")
+            fi
             gh release create "$GITHUB_REF_NAME" \
+              --draft \
               --title "Umbra ${GITHUB_REF_NAME#v}" \
-              --notes "Автоматическая сборка Umbra ${GITHUB_REF_NAME#v}." \
+              "${notes_args[@]}" \
               --target "$GITHUB_SHA"
           fi
 
@@ -233,3 +243,7 @@ jobs:
               exit 1
             fi
           done
+
+          # Expose the update only after the installer, blockmap and manifest
+          # are all uploaded. A failed upload leaves a recoverable draft.
+          gh release edit "$GITHUB_REF_NAME" --draft=false --latest

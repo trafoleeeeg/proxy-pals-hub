@@ -11,6 +11,7 @@ async function verifyEngine({ release = false } = {}) {
   assert.equal(lock.appIntegrationEnabled, true, "Native screen integration is disabled");
   assert.equal(lock.nativeScreenApi, "session.setUmbraScreenMetrics");
   assert.equal(lock.nativeHardwareApi, "session.setUmbraHardwareMetrics");
+  assert.equal(lock.nativeFontApi, "session.setUmbraFontIsolation");
   assert.match(spec?.releaseTag || "", /^umbra-engine-v\d+\.\d+\.\d+-screen\d+$/);
   assert.equal(spec.asset, "dist.zip");
   assert.match(spec.sha256, /^[a-f0-9]{64}$/);

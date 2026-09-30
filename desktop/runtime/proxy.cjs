@@ -67,8 +67,12 @@ async function createRuntimeProxy(ses, proxy, { WorkerClass = Worker } = {}) {
         if (disposed) return;
         disposed = true;
         blockSession(ses);
-        try { await ses.closeAllConnections(); }
-        finally { if (worker) await worker.terminate(); }
+        // Terminate the localhost proxy immediately. Chromium may leave
+        // closeAllConnections unresolved after a renderer crash; waiting for
+        // it first would keep the credentialed proxy listener alive.
+        const termination = worker ? Promise.resolve().then(() => worker.terminate()) : Promise.resolve();
+        const connections = Promise.resolve().then(() => ses.closeAllConnections());
+        await Promise.allSettled([termination, connections]);
       },
     };
   } catch {

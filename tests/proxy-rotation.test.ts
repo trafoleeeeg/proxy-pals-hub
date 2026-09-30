@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { confirmRotation, rotationExpired, rotationOutcome } from "../src/lib/proxy-rotation";
+import { confirmRotation, rotationExpired, rotationOutcome, sameRotationRequest } from "../src/lib/proxy-rotation";
 import { validateRotationUrl } from "../src/lib/proxy-input";
 
 test("rotation completes on the first different IP; failures and unchanged addresses remain pending", async () => {
@@ -52,6 +52,9 @@ test("a superseded rotation stops quietly after saving the fresh IP", async () =
 });
 
 test("stale rotations recover and private destinations are rejected", () => {
+  expect(sameRotationRequest("2026-09-30T14:30:00.123Z", "2026-09-30T14:30:00.123000+00:00")).toBe(true);
+  expect(sameRotationRequest("2026-09-30T14:30:00.123Z", "2026-09-30T14:30:00.124+00:00")).toBe(false);
+  expect(sameRotationRequest("invalid", "2026-09-30T14:30:00.123Z")).toBe(false);
   expect(rotationExpired(new Date(0).toISOString(), 90_000)).toBe(true);
   expect(rotationExpired("invalid")).toBe(true);
   expect(rotationExpired(new Date().toISOString())).toBe(false);

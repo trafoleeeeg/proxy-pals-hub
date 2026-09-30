@@ -229,7 +229,7 @@ export function ProxiesPage() {
     },
     onSuccess: (result) => result.rotationConfirmed
       ? toast.success("Новый IP подтверждён: " + result.ip)
-      : toast.info("IP обновлён. Смена уже завершена в другом окне"),
+      : toast.info("Состояние смены IP изменилось. Обновляю данные прокси…"),
     onError: (error: Error) => toast.error(error.message),
     onSettled: () => invalidate(),
   });

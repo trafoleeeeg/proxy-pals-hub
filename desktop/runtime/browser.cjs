@@ -4,6 +4,7 @@ const { EventEmitter } = require("node:events");
 const { startUrl, bookmarkletUrl } = require("./validation.cjs");
 const { PRIVACY_CAPABILITIES } = require("./privacy-policy.cjs");
 const { browserUrl } = require("./browser-ui.cjs");
+const { recordProcessEvent } = require("./process-diagnostics.cjs");
 
 const CHROME_HEIGHT = 90;
 const handlers = new WeakMap();
@@ -83,6 +84,13 @@ async function createProfileBrowser(electron, {
   let tabOrder = [];
   const recentlyClosed = [];
   const shellContents = shell.webContents;
+  const recordRendererGone = (role, contents, details) => {
+    try {
+      recordProcessEvent(electron.app?.getPath?.("userData"), "renderer-gone", {
+        role, reason: details?.reason, exitCode: details?.exitCode, contentsId: contents.id,
+      });
+    } catch { /* Crash logging must not cause a second crash. */ }
+  };
   let activeId;
   let chromeHeight = CHROME_HEIGHT;
   // Меню и всплывающие панели рисуются поверх снимка страницы, а не сдвигают
@@ -556,7 +564,10 @@ async function createProfileBrowser(electron, {
   shell.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   for (const event of ["will-navigate", "will-redirect", "will-attach-webview"]) shell.webContents.on(event, (event) => event.preventDefault());
   shell.webContents.on("before-input-event", shortcuts);
-  shell.webContents.on("render-process-gone", () => { if (!destroyed) void closeProfile().catch(() => {}); });
+  shell.webContents.on("render-process-gone", (_event, details) => {
+    recordRendererGone("profile-shell", shellContents, details);
+    if (!destroyed) void closeProfile().catch(() => {});
+  });
   shell.on("resize", layout);
   shell.on("move", positionExtensionPopup);
   shell.on("close", (event) => { event.preventDefault(); void closeProfile().catch(() => { error = "Не удалось сохранить профиль. Повторите закрытие."; publish(); }); });
@@ -640,7 +651,11 @@ async function createProfileBrowser(electron, {
       });
       for (const event of ["did-start-loading", "did-stop-loading", "did-navigate", "did-navigate-in-page", "page-title-updated"]) wc.on(event, publish);
       wc.on("did-fail-load", (_event, code, _description, _url, mainFrame) => { if (mainFrame && code !== -3) { tab.error = "Не удалось загрузить страницу. Проверьте адрес и подключение прокси."; publish(); } });
-      wc.on("render-process-gone", () => { tab.error = "Вкладка остановилась. Обновите страницу и повторите попытку."; publish(); });
+      wc.on("render-process-gone", (_event, details) => {
+        recordRendererGone("profile-tab", wc, details);
+        tab.error = "Вкладка остановилась. Обновите страницу и повторите попытку.";
+        publish();
+      });
       wc.on("destroyed", () => {
         tabs.delete(tab.id);
         tabOrder = tabOrder.filter((id) => id !== tab.id);

@@ -4,6 +4,7 @@ const { StringDecoder } = require("node:string_decoder");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { recordProcessEvent } = require("./process-diagnostics.cjs");
 
 const CHANNEL = "umbra:private-browser-protocol";
 const CHILD = "UMBRA_PRIVATE_BROWSER_CHILD";
@@ -63,6 +64,9 @@ function superviseBrowser({ forwardOutput = false } = {}) {
     process.on("message", (message) => { if (message?.channel === CHANNEL && message.shutdown) app.quit(); });
     return false;
   }
+  const persistentUserData = app.getPath("userData");
+  const diagnose = (event, details) => recordProcessEvent(persistentUserData, event, details);
+  diagnose("coordinator-start");
   // This outer process owns only the pipe. The child retains the normal
   // single-instance lock, updater, windows and profile persistence lifecycle.
   // Give the coordinator its own temporary storage so two Electron browser
@@ -77,13 +81,18 @@ function superviseBrowser({ forwardOutput = false } = {}) {
   else { child.stdout.resume(); child.stderr.resume(); }
   let finished = false;
   child.on("error", () => {
+    diagnose("coordinator-child-error", { childPid: child.pid });
     finished = true;
     dialog.showErrorBox("Umbra", "Не удалось запустить защищённый браузерный процесс");
     app.exit(1);
   });
-  child.on("exit", (code) => { finished = true; cleanup(); app.exit(code || 0); });
+  child.on("exit", (code, signal) => {
+    diagnose("coordinator-child-exit", { childPid: child.pid, exitCode: code, signal });
+    finished = true; cleanup(); app.exit(code || 0);
+  });
   app.on("before-quit", (event) => {
     if (finished) return;
+    diagnose("coordinator-before-quit");
     event.preventDefault();
     if (child.connected) child.send({ channel: CHANNEL, shutdown: true }, () => {});
   });

@@ -10,8 +10,9 @@ const { createPrivacyStore, privacyOrigin } = require("./privacy-policy.cjs");
 const { sanitizeBrowserSettings } = require("./browser-settings.cjs");
 const { SAFE_WEBRTC } = require("./leak-check.cjs");
 const { createFaviconLoader } = require("./favicons.cjs");
-const { protectBackgroundWorkers } = require("./background-workers.cjs");
+const { protectBackgroundWorkers, quarantineBackgroundWorkers, backgroundWorkerSessionSafe } = require("./background-workers.cjs");
 const { applyFontIsolation } = require("./font-isolation.cjs");
+const { recordProcessEvent } = require("./process-diagnostics.cjs");
 
 // Сообщения об ошибках запуска показываются пользователю, поэтому они переводятся
 // на русский язык на границе клиента, без утечки URL и значений cookies.
@@ -31,6 +32,7 @@ const LAUNCH_ERROR_TEXT = [
   [/^OS cookie encryption/i, "Шифрование Windows недоступно, профиль не запущен"],
   [/^Proxy setup/i, "Не удалось поднять прокси, трафик заблокирован"],
   [/^Profile is closing/i, "Профиль закрывается, повторите запуск"],
+  [/^Background worker shutdown failed/i, "Защита фоновых процессов не завершилась. Перезапустите Umbra перед открытием профиля"],
   [/^Profile navigation/i, "Не удалось открыть стартовую страницу профиля"],
   [/^Only HTTP/i, "Допустимы только адреса http(s) без логина и пароля"],
   [/^Invalid cookie/i, "Сохранённые cookies повреждены"],
@@ -45,12 +47,21 @@ function launchErrorText(message) {
   return "Не удалось запустить профиль";
 }
 
+function within(promise, milliseconds) {
+  let timer;
+  return Promise.race([
+    Promise.resolve(promise),
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Profile cleanup timed out")), milliseconds); }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 function createProfileRuntime(electron, options = {}) {
   const { session, app, safeStorage } = electron;
   const createBrowser = options.createBrowser || createProfileBrowser;
   const setupProxy = options.setupProxy || createRuntimeProxy;
   const configureFingerprint = options.applyFingerprint || applyFingerprint;
   const configureBackgroundWorkers = options.protectBackgroundWorkers || protectBackgroundWorkers;
+  const cleanupTimeoutMs = options.cleanupTimeoutMs ?? 4000;
   const profiles = new Map();
   let shuttingDown = false;
   let store;
@@ -661,6 +672,7 @@ function createProfileRuntime(electron, options = {}) {
       try {
         entry.ses = session.fromPartition(entry.partition);
         blockSession(entry.ses);
+        if (!backgroundWorkerSessionSafe(entry.ses)) throw new Error("Background worker shutdown failed; restart Umbra");
         // Install guards before opening the proxy gate: service workers from
         // an existing partition must never inherit default device permissions.
         const localFontsAllowed = (permission, url) => {
@@ -800,6 +812,12 @@ function createProfileRuntime(electron, options = {}) {
     // Revocation must block immediately, even while an asynchronous launch or
     // durable cookie save is still in flight.
     if (entry.ses) blockSession(entry.ses);
+    const closePhase = (phase) => recordProcessEvent(app?.getPath?.("userData"), "profile-close-phase", { phase });
+    const requireRestart = () => {
+      quarantineBackgroundWorkers(entry.ses);
+      entry.restartRequired = true;
+    };
+    closePhase("begin");
     entry.closePromise = (async () => {
       await entry.startPromise.catch(() => {});
       entry.state = "closing";
@@ -807,29 +825,51 @@ function createProfileRuntime(electron, options = {}) {
        uninstallResourceRecovery(entry);
       if (entry.ses) {
         blockSession(entry.ses);
-        await entry.backgroundWorkers?.stop();
-        for (const win of entry.windows) if (!win.isDestroyed()) win.webContents.stop();
-        await Promise.race([
-          entry.ses.closeAllConnections(),
-          new Promise((resolve) => setTimeout(resolve, 3000)),
-        ]);
+        try { await within(Promise.resolve().then(() => entry.backgroundWorkers?.stop()), cleanupTimeoutMs); }
+        catch {
+          // Network remains blocked. Never reopen this BrowserContext until
+          // the browser process restarts: an old worker may still be alive.
+          requireRestart();
+        }
+        for (const win of entry.windows) {
+          try { if (!win.isDestroyed()) win.webContents.stop(); } catch { /* crashed renderer */ }
+        }
+        try { await within(Promise.resolve().then(() => entry.ses.closeAllConnections()), Math.min(cleanupTimeoutMs, 3000)); }
+        catch { requireRestart(); }
       }
+      closePhase("workers");
       await Promise.allSettled([...entry.pendingWindows]);
       // Freeze page JS before taking the final snapshot/outbox record.
-      await Promise.all([...entry.windows].map((win) => !win.isDestroyed() && win.webContents.debugger.isAttached()
-        ? win.webContents.debugger.sendCommand("Emulation.setScriptExecutionDisabled", { value: true })
-        : Promise.resolve()));
+      // A crashed renderer can detach its debugger or leave a CDP command
+      // unresolved. It must not prevent the durable cookie/tab snapshot.
+      await within(Promise.allSettled([...entry.windows].map((win) => Promise.resolve().then(() =>
+        !win.isDestroyed() && win.webContents.debugger.isAttached()
+          ? win.webContents.debugger.sendCommand("Emulation.setScriptExecutionDisabled", { value: true })
+          : undefined))), cleanupTimeoutMs).catch(() => {});
       await persistTabs(entry).catch(() => {});
+      closePhase("tabs");
       const result = entry.cookiesUpdatedAt ? await snapshot(entry) : { profileId: entry.profileId, lockToken: entry.lockToken, deviceId: entry.deviceId, cookies: null, cookiesUpdatedAt: null };
+      closePhase("cookies");
       if (typeof entry.onClosed === "function") await entry.onClosed(result);
+      closePhase("outbox");
       const extensionApi = entry.ses?.extensions || entry.ses;
-      for (const extensionId of entry.extensionsLoaded?.values() || []) extensionApi?.removeExtension?.(extensionId);
-      if (entry.proxyRuntime) await entry.proxyRuntime.dispose();
+      for (const extensionId of entry.extensionsLoaded?.values() || []) {
+        try { extensionApi?.removeExtension?.(extensionId); } catch { /* session is blocked and saved */ }
+      }
+      if (entry.proxyRuntime) {
+        try { await within(Promise.resolve().then(() => entry.proxyRuntime.dispose()), cleanupTimeoutMs); }
+        catch { requireRestart(); }
+      }
+      if (entry.restartRequired) {
+        try { app?.emit?.("umbra:profile-restart-required"); } catch { /* notification is optional */ }
+      }
       for (const win of entry.windows) if (!win.isDestroyed()) win.destroy();
       entry.browser?.destroy();
       profiles.delete(entry.profileId);
+      closePhase("done");
       return result;
     })().catch(() => {
+      closePhase("failed");
       entry.state = "error";
       entry.lastError = "Не удалось закрыть профиль, повторите попытку";
       entry.closePromise = null;

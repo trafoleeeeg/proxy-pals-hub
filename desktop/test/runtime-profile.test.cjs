@@ -16,6 +16,9 @@ function harness() {
   let flushGate = null;
   let navigationGate = null;
   let snapshotFailure = false;
+  let workerStop = async () => {};
+  let freezeCommand = async () => {};
+  let proxyDispose = async () => {};
   const records = new Map();
   const tabRecords = new Map();
   const bookmarkRecords = new Map();
@@ -35,7 +38,10 @@ function harness() {
         setWindowOpenHandler: (handler) => { this.openHandler = handler; }, stop: () => {},
       });
       this.webContents.debugger = new EventEmitter();
-      Object.assign(this.webContents.debugger, { attach: () => {}, isAttached: () => true, detach: () => {}, sendCommand: async (command, args) => { this.commands.push({ command, args }); } });
+      Object.assign(this.webContents.debugger, { attach: () => {}, isAttached: () => true, detach: () => {}, sendCommand: async (command, args) => {
+        this.commands.push({ command, args });
+        if (command === "Emulation.setScriptExecutionDisabled") await freezeCommand();
+      } });
       this.commands = []; windows.push(this);
     }
     async loadURL(url) {
@@ -71,7 +77,8 @@ function harness() {
     } },
   };
   const runtime = createProfileRuntime(electron, {
-    protectBackgroundWorkers: async () => ({ stop: async () => {}, isActive: () => true }),
+    cleanupTimeoutMs: 25,
+    protectBackgroundWorkers: async () => ({ stop: () => workerStop(), isActive: () => true }),
     createBrowser: async (_electron, options) => (browserConfig = options, {
       shell: { isDestroyed: () => false, focus() {} }, destroy() {},
       createTab: () => new Window({ webPreferences: { partition: options.partition, contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, devTools: false } }),
@@ -79,7 +86,7 @@ function harness() {
     setupProxy: async (ses) => {
       assert.equal(ses.permissionCheck(), false, "permissions denied before opening network gate");
       assert.equal(ses.devicePermission(), false, "device access denied before opening network gate");
-      configured++; return { diagnostics: { mode: "http" }, dispose: async () => { disposed++; } };
+      configured++; return { diagnostics: { mode: "http" }, dispose: async () => { disposed++; await proxyDispose(); } };
     },
     cookieStore: {
       read: async (id) => records.get(id),
@@ -95,7 +102,7 @@ function harness() {
     },
     privacyStore: { readPermissions: async (id) => privacyRecords.get(id) || {}, writePermissions: async (id, rules) => { privacyRecords.set(id, structuredClone(rules)); } },
   });
-  return { runtime, electron, privacyRecords, windows, sessions, records, tabRecords, bookmarkRecords, storageClears, get browserConfig() { return browserConfig; }, get configured() { return configured; }, get disposed() { return disposed; }, setFlushGate: (gate) => { flushGate = gate; }, setNavigationGate: (gate) => { navigationGate = gate; }, setSnapshotFailure: (value) => { snapshotFailure = value; } };
+  return { runtime, electron, privacyRecords, windows, sessions, records, tabRecords, bookmarkRecords, storageClears, get browserConfig() { return browserConfig; }, get configured() { return configured; }, get disposed() { return disposed; }, setFlushGate: (gate) => { flushGate = gate; }, setNavigationGate: (gate) => { navigationGate = gate; }, setSnapshotFailure: (value) => { snapshotFailure = value; }, setWorkerStop: (fn) => { workerStop = fn; }, setFreezeCommand: (fn) => { freezeCommand = fn; }, setProxyDispose: (fn) => { proxyDispose = fn; } };
 }
 
 const payload = () => ({ profileId: ID, deviceId: "test-device", name: "Test", lockToken: "test-lock-token", fingerprint: FP, cookies: "[]", cookiesUpdatedAt: null, proxy: null, startUrl: "https://example.test" });
@@ -333,6 +340,49 @@ test("snapshot failures retain the window and allow retry; snapshots carry monot
   const result = await h.runtime.closeProfileWindow(ID);
   assert.ok(Date.parse(result.cookiesUpdatedAt) > Date.parse(previous.cookiesUpdatedAt));
   assert.equal(closed, 1); assert.equal(h.windows[0].destroyed, true);
+});
+
+test("failed or stalled worker shutdown cannot trap a profile window after durable save", async () => {
+  for (const stop of [async () => { throw new Error("debugger detached"); }, () => new Promise(() => {})]) {
+    const h = harness();
+    let saved = 0;
+    await h.runtime.launchProfileWindow(payload(), () => { saved++; });
+    h.sessions.get(`persist:profile-${ID}`).cookies.update([{ name: "session", value: "v", domain: "example.test", path: "/", session: true }]);
+    h.setWorkerStop(stop);
+    await h.runtime.closeProfileWindow(ID);
+    assert.equal(saved, 1);
+    assert.equal(h.windows[0].destroyed, true);
+    assert.deepEqual(h.runtime.listRunningProfiles(), []);
+    assert.equal(h.records.get(ID).cookies[0].name, "session");
+    await assert.rejects(h.runtime.launchProfileWindow(payload()), /Перезапустите Umbra/);
+  }
+});
+
+test("crashed renderer debugger rejection or timeout does not block profile close", async () => {
+  for (const freeze of [async () => { throw new Error("renderer gone"); }, () => new Promise(() => {})]) {
+    const h = harness();
+    let saved = 0;
+    await h.runtime.launchProfileWindow(payload(), () => { saved++; });
+    h.setFreezeCommand(freeze);
+    await h.runtime.closeProfileWindow(ID);
+    assert.equal(saved, 1);
+    assert.equal(h.windows[0].destroyed, true);
+    assert.deepEqual(h.runtime.listRunningProfiles(), []);
+  }
+});
+
+test("stalled connection or proxy cleanup still saves cookies and requires restart", async () => {
+  for (const stall of ["connections", "proxy"]) {
+    const h = harness();
+    let saved = 0;
+    await h.runtime.launchProfileWindow(payload(), () => { saved++; });
+    if (stall === "connections") h.sessions.get(`persist:profile-${ID}`).closeAllConnections = () => new Promise(() => {});
+    else h.setProxyDispose(() => new Promise(() => {}));
+    await h.runtime.closeProfileWindow(ID);
+    assert.equal(saved, 1);
+    assert.equal(h.windows[0].destroyed, true);
+    await assert.rejects(h.runtime.launchProfileWindow(payload()), /Перезапустите Umbra/);
+  }
 });
 
 test("fingerprint camelCase/legacy mappings and document overrides precede navigation", async () => {

@@ -280,6 +280,16 @@ else {
         void dialog.showMessageBox({ type: "warning", title: "Umbra", message: body }).catch(() => {});
       }
     });
+    app.on("umbra:profile-restart-required", () => {
+      const body = "Профиль закрыт и данные сохранены, но остановка фоновых процессов не подтвердилась. Перезапустите Umbra перед повторным открытием профиля.";
+      if (Notification.isSupported()) {
+        const notice = new Notification({ title: "Umbra — требуется перезапуск", body });
+        notice.on("click", () => mainWindow?.focus());
+        notice.show();
+      } else {
+        void dialog.showMessageBox({ type: "warning", title: "Umbra", message: body }).catch(() => {});
+      }
+    });
     app.on("umbra:browser-settings-changed", (settings) => send("umbra:browser-settings-changed", settings));
     app.on("umbra:manage-extensions", () => {
       if (!mainWindow || mainWindow.isDestroyed()) return;

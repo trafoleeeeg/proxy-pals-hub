@@ -1,5 +1,5 @@
 diff --git a/BUILD.gn b/BUILD.gn
-index 0612847..990498b 100644
+index f29e9b6..ab65dd1 100644
 --- a/BUILD.gn
 +++ b/BUILD.gn
 @@ -803,6 +803,7 @@ source_set("electron_lib") {
@@ -8,8 +8,8 @@ index 0612847..990498b 100644
        "//components/os_crypt/async/browser:dpapi_key_provider",
 +      "//components/services/font_data:lib",
        "//third_party/libxml:xml_writer",
+       "//ui/color:accent_color_observer",
        "//ui/wm",
-       "//ui/wm/public",
 diff --git a/shell/browser/api/electron_api_session.cc b/shell/browser/api/electron_api_session.cc
 index 84ad350..f1471e2 100644
 --- a/shell/browser/api/electron_api_session.cc
@@ -404,18 +404,18 @@ index 3c03e70..59b0e1f 100644
  
  }  // namespace electron
 diff --git a/shell/browser/web_contents_preferences.cc b/shell/browser/web_contents_preferences.cc
-index 8cad0cd..7fce639 100644
+index 0bb0e6d..efac78c 100644
 --- a/shell/browser/web_contents_preferences.cc
 +++ b/shell/browser/web_contents_preferences.cc
-@@ -13,6 +13,7 @@
+@@ -12,6 +12,7 @@
+ 
  #include "base/command_line.h"
  #include "base/containers/fixed_flat_map.h"
- #include "base/memory/ptr_util.h"
 +#include "base/strings/string_util.h"
  #include "cc/base/switches.h"
  #include "content/public/browser/render_process_host.h"
  #include "content/public/browser/web_contents_user_data.h"
-@@ -145,9 +146,18 @@ void RendererProcessPreferences::AppendCommandLineSwitches(
+@@ -144,9 +145,18 @@ void RendererProcessPreferences::AppendCommandLineSwitches(
      command_line->AppendSwitch(switches::kScrollBounce);
  #endif
  

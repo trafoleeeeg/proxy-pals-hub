@@ -380,12 +380,28 @@ test("browser keeps quick tab actions outside the slow command queue", () => {
   const source = require("node:fs").readFileSync(require.resolve("../runtime/browser.cjs"), "utf8");
   assert.match(source, /const SERIALIZED = new Set\(\[/);
   assert.match(source, /if \(!SERIALIZED\.has\(message\?\.action\)\) return runCommand\(message\);/);
-  for (const action of ["close-tab", "navigate", "back", "forward", "reload", "new", "select", "duplicate", "find"]) {
+  for (const action of ["close-tab", "close-profile", "navigate", "back", "forward", "reload", "new", "select", "duplicate", "find"]) {
     assert.ok(!new RegExp(`"${action}",`).test(source.slice(source.indexOf("const SERIALIZED"), source.indexOf("function runCommand"))),
       `команда ${action} не должна попадать в очередь`);
   }
   assert.match(source, /popup\.show\(\);\s*popup\.focus\(\);/);
   assert.match(source, /refitExtensionPopup\(popup\)/);
+});
+
+test("closing a profile bypasses a stalled diagnostics command", async () => {
+  let resume;
+  const gate = new Promise((resolve) => { resume = resolve; });
+  let closed = false;
+  const h = await harness().start({ privacy: {
+    checkLeaks: () => gate,
+    closeProfile: async () => { closed = true; },
+  } });
+  const checking = h.command({ action: "check-leaks" });
+  await new Promise((resolve) => setImmediate(resolve));
+  await h.command({ action: "close-profile" });
+  assert.equal(closed, true);
+  resume(); await checking;
+  h.browser.destroy();
 });
 
 test("profile tabs apply fingerprint without a preliminary about:blank load", () => {

@@ -43,6 +43,16 @@ test("arbitrary event names and unrecognized Electron details are not logged", (
   }
 });
 
+test("close progress records only approved phases without profile identifiers", (t) => {
+  const { directory, file } = fixture(t);
+  recordProcessEvent(directory, "profile-close-phase", { phase: "cookies", profileId: "private-id", url: "https://private.example" });
+  recordProcessEvent(directory, "profile-close-phase", { phase: "https://private.example" });
+  const rows = fs.readFileSync(file, "utf8").trim().split("\n").map(JSON.parse);
+  assert.equal(rows[0].phase, "cookies");
+  assert.equal(Object.hasOwn(rows[1], "phase"), false);
+  assert.doesNotMatch(fs.readFileSync(file, "utf8"), /private|profileId|https/);
+});
+
 test("process diagnostics rotate bounded local logs and do not throw on failed writes", (t) => {
   const { directory, file } = fixture(t);
   for (let i = 0; i < 8; i++) assert.equal(recordProcessEvent(directory, "browser-start", {}, { maxBytes: 120 }), true);

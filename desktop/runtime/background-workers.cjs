@@ -6,6 +6,9 @@ const sessions = new WeakMap();
 const contexts = new Map();
 const targets = new Map();
 const awaitingContexts = new Map();
+// A failed worker shutdown must never be followed by reopening the same
+// BrowserContext: an old worker could resume with the new profile network gate.
+const unsafeSessions = new WeakSet();
 let protocol;
 let startup;
 
@@ -115,6 +118,7 @@ function initializeBackgroundWorkers() {
 }
 
 async function sessionState(ses) {
+  if (unsafeSessions.has(ses)) throw new Error("Background worker shutdown failed; restart Umbra");
   await initializeBackgroundWorkers();
   if (sessions.has(ses)) {
     const state = sessions.get(ses);
@@ -191,4 +195,16 @@ async function protectBackgroundWorkers(ses, fp, { onFailure } = {}) {
 
 function backgroundWorkersProtected(ses) { const state = ses && sessions.get(ses); return !!(state?.active && state.fp); }
 
-module.exports = { initializeBackgroundWorkers, allowBackgroundWorkers, protectBackgroundWorkers, backgroundWorkersProtected };
+function quarantineBackgroundWorkers(ses) {
+  if (!ses) return;
+  unsafeSessions.add(ses);
+  const state = sessions.get(ses);
+  if (state) {
+    state.active = false;
+    if (contexts.get(state.contextId) === state) contexts.set(state.contextId, { active: false });
+  }
+}
+
+function backgroundWorkerSessionSafe(ses) { return !unsafeSessions.has(ses); }
+
+module.exports = { initializeBackgroundWorkers, allowBackgroundWorkers, protectBackgroundWorkers, backgroundWorkersProtected, quarantineBackgroundWorkers, backgroundWorkerSessionSafe };

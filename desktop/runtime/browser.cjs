@@ -510,7 +510,7 @@ async function createProfileBrowser(electron, {
     "bookmark", "save-bookmark", "add-bookmark", "update-bookmark", "remove-bookmark",
     "reorder-bookmarks", "toggle-bookmark-bar", "pin-extension", "enable-extension", "set-site-privacy",
     "switch-proxy", "toggle-proxy-failover", "check-connection", "check-leaks",
-    "zoom-in", "zoom-out", "zoom-reset", "close-profile", "import-cookies",
+    "zoom-in", "zoom-out", "zoom-reset", "import-cookies",
   ]);
   function runCommand(message) {
     return command(message).then((result) => result || {}).catch(() => {
@@ -669,7 +669,10 @@ async function createProfileBrowser(electron, {
     getTabSnapshot: () => {
       const savedTabs = tabOrder.map((id) => tabs.get(id)).filter((tab) => tab && !tab.isDestroyed() && !isHome(tab));
       return {
-        tabs: savedTabs.map((tab) => tab.webContents.getURL() || tab.url || "about:blank"),
+        tabs: savedTabs.map((tab) => {
+          try { return tab.webContents.getURL() || tab.url || "about:blank"; }
+          catch { return tab.url || "about:blank"; }
+        }),
         activeIndex: Math.max(0, savedTabs.findIndex((tab) => tab.id === activeId)),
       };
     },

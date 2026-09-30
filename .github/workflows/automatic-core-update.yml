@@ -1,4 +1,4 @@
-name: Automatic Electron release
+name: Engine update watch
 
 on:
   schedule:
@@ -7,20 +7,20 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 concurrency:
-  group: automatic-core-release
+  group: engine-update-watch
   cancel-in-progress: false
 
 jobs:
-  update:
+  watch:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 5
     permissions:
-      contents: write
-      pull-requests: write
-      actions: write
+      contents: read
+      issues: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -29,9 +29,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Test release policy
-        run: node --test .github/scripts/core-update-policy.test.cjs
-      - name: Update, verify and release the stable engine
+      - name: Test update monitor
+        run: node --test .github/scripts/engine-update-monitor.test.cjs
+      - name: Check stable Electron and Chromium
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node .github/scripts/automatic-core-update.cjs
+        run: node .github/scripts/engine-update-monitor.cjs

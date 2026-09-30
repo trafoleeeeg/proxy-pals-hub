@@ -8,12 +8,16 @@ const lock = require("../engine/source-lock.json");
 async function verifyEngine({ release = false } = {}) {
   const spec = lock.distribution?.windowsX64;
   assert.equal(pkg.build.electronDist, ".engine/dist.zip", "Windows packaging must use the pinned custom Electron archive");
+  assert.equal(pkg.devDependencies.electron, lock.electron.tag.slice(1),
+    "Electron dependency must match the pinned custom engine");
   assert.equal(lock.appIntegrationEnabled, true, "Native screen integration is disabled");
   assert.equal(lock.nativeScreenApi, "session.setUmbraScreenMetrics");
   assert.equal(lock.nativeHardwareApi, "session.setUmbraHardwareMetrics");
   assert.equal(lock.nativeFontApi, "session.setUmbraFontIsolation");
   assert.equal(lock.nativeDnsPolicy, "drop-renderer-speculative-dns");
   assert.match(spec?.releaseTag || "", /^umbra-engine-v\d+\.\d+\.\d+-screen\d+$/);
+  assert(spec.releaseTag.startsWith("umbra-engine-" + lock.electron.tag + "-screen"),
+    "Engine release tag must match the pinned Electron source");
   assert.equal(spec.asset, "dist.zip");
   assert.match(spec.sha256, /^[a-f0-9]{64}$/);
   if (release) assert.equal(lock.status, "release-approved", "Experimental test engine must not be published as a stable Umbra update");

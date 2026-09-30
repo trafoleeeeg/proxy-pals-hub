@@ -1,7 +1,7 @@
 version: 2
 updates:
   # Electron contains the Chromium, Node.js and V8 runtime shipped to users.
-  # Electron itself is handled by the gated automatic-core-update workflow.
+  # Electron is watched daily and changed only together with a tested native build.
   - package-ecosystem: npm
     directory: /desktop
     schedule:

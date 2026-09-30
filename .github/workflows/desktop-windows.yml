@@ -126,6 +126,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Pinned custom Electron verification failed' }
           Expand-Archive -LiteralPath desktop/.engine/dist.zip -DestinationPath desktop/.engine/unpacked -Force
           if (-not (Test-Path desktop/.engine/unpacked/electron.exe)) { throw 'Custom Electron executable is missing' }
+          node desktop/scripts/verify-engine-runtime.cjs desktop/.engine/unpacked/electron.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned custom Electron runtime does not match source lock' }
 
       - name: Test native screen, color media and orientation across profiles
         working-directory: desktop

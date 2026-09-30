@@ -38,8 +38,8 @@ jobs:
       - name: Проверка сценариев и прав доступа
         run: bun run test
 
-      - name: Проверка правил автоматического выпуска ядра
-        run: node --test .github/scripts/core-update-policy.test.cjs
+      - name: Проверка наблюдения за обновлениями движка
+        run: node --test .github/scripts/engine-update-monitor.test.cjs
 
       - name: Зависимости клиента
         working-directory: desktop

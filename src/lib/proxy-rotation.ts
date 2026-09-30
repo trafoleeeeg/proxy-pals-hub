@@ -1,6 +1,13 @@
 import type { ProxyCheckResult, ProxyRotationStatus } from "./proxy-input";
 
 export const ROTATION_TIMEOUT_MS = 60_000;
+/** PostgREST may return the same timestamptz with +00:00 and extra fractional digits. */
+export function sameRotationRequest(requestedAt: string | null | undefined, storedAt: string | null | undefined) {
+  const requested = Date.parse(requestedAt ?? "");
+  const stored = Date.parse(storedAt ?? "");
+  return Number.isFinite(requested) && Number.isFinite(stored) && requested === stored;
+}
+
 export function rotationExpired(requestedAt: string | null | undefined, now = Date.now()) {
   const time = Date.parse(requestedAt ?? "");
   return !Number.isFinite(time) || now - time >= ROTATION_TIMEOUT_MS;

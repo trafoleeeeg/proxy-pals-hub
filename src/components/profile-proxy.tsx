@@ -120,7 +120,10 @@ export function useProxyOps(teamId: string | undefined) {
         toast.success("Новый IP подтверждён: " + result.ip);
         return;
       }
-      toast.info("IP обновлён. Смена уже завершена в другом окне");
+      // A superseded request does not tell us whether another window finished
+      // or started a newer rotation. Read the authoritative state instead.
+      invalidate();
+      toast.info("Состояние смены IP изменилось. Обновляю данные прокси…");
     },
     onError: (error: Error) => toast.error(error.message),
     // После успеха кэш уже обновлён выше. Немедленная повторная загрузка могла

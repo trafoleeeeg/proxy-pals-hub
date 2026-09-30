@@ -459,6 +459,19 @@ describe("mobile proxy rotation", () => {
     await invoke("recordProxyCheck", { ...target, ok: true, ip: "1.2.3.6" }, f);
     expect(f.tables.proxies[0]).toMatchObject({ rotation_new_ip: "1.2.3.5", rotation_changed_at: changedAt });
   });
+  test("PostgREST timestamp formatting does not turn our confirmation into a stale rotation", async () => {
+    const f = ready();
+    const requestedAt = "2026-09-30T14:30:00.123Z";
+    Object.assign(f.tables.proxies[0]!, {
+      rotation_status: "changing", rotation_requested_at: "2026-09-30T14:30:00.123000+00:00",
+      rotation_previous_ip: "1.2.3.4",
+    });
+    await expect(invoke("recordProxyCheck", {
+      ...target, ok: true, ip: "1.2.3.5", rotationRequestedAt: requestedAt,
+      rotationFinal: true, rotationConfirmed: true,
+    }, f)).resolves.toEqual({ ok: true, staleRotation: false });
+    expect(f.tables.proxies[0]).toMatchObject({ rotation_status: "success", rotation_new_ip: "1.2.3.5" });
+  });
   test("a later successful check reconciles a timed-out rotation", async () => {
     const f = ready();
     const requestedAt = new Date(Date.now() - 120_000).toISOString();

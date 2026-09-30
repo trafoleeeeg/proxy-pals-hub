@@ -8,7 +8,7 @@ import {
   validateProxyTarget, validateProxyTeam, validateRotationUrl,
 } from "./proxy-input";
 import type { ProxyCheckResult, ProxyInput, ProxyProtocol, ProxyRotationStatus } from "./proxy-input";
-import { rotationExpired, rotationOutcome } from "./proxy-rotation";
+import { rotationExpired, rotationOutcome, sameRotationRequest } from "./proxy-rotation";
 
 export type { ProxyInput } from "./proxy-input";
 type Context = { supabase: SupabaseClient<Database>; userId: string };
@@ -246,7 +246,7 @@ export const recordProxyCheck = createServerFn({ method: "POST" })
       .eq("id", data.id).eq("team_id", data.teamId).maybeSingle();
     if (currentError || !current) throw new Error("Не удалось прочитать состояние прокси");
     const now = new Date().toISOString();
-    const sameRotation = !!data.rotationRequestedAt && data.rotationRequestedAt === current["rotation_requested_at"];
+    const sameRotation = !!data.rotationRequestedAt && sameRotationRequest(data.rotationRequestedAt, current["rotation_requested_at"]);
     const confirmsRotation = sameRotation && current["rotation_status"] === "changing";
     // A subsequent successful connectivity check is authoritative even when
     // the provider responded slowly and the earlier rotation probe timed out.

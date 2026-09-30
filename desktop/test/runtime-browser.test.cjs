@@ -1,10 +1,13 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const { createProfileBrowser, CHROME_HEIGHT } = require("../runtime/browser.cjs");
 const { browserUrl } = require("../runtime/browser-ui.cjs");
 
-function harness(workAreaSize = { width: 1920, height: 1040 }, windowWorkAreaSize = workAreaSize) {
+function harness(workAreaSize = { width: 1920, height: 1040 }, windowWorkAreaSize = workAreaSize, diagnosticsDir) {
   let handler;
   const stateEvents = [];
   const views = [];
@@ -50,6 +53,7 @@ function harness(workAreaSize = { width: 1920, height: 1040 }, windowWorkAreaSiz
   const ipcMain = { handle(_channel, callback) { handler = callback; }, removeHandler() {} };
   const electron = {
     BrowserWindow: Shell, WebContentsView: View, ipcMain,
+    app: diagnosticsDir ? { getPath: () => diagnosticsDir } : undefined,
     screen: { getPrimaryDisplay: () => ({ workAreaSize }), getDisplayMatching: () => ({ workAreaSize: windowWorkAreaSize }) },
     session: { fromPartition: () => ({ webRequest: { onBeforeRequest() {} }, setPermissionRequestHandler() {}, setPermissionCheckHandler() {} }) },
   };
@@ -103,6 +107,20 @@ test("profile window cannot outgrow its advertised screen or work area", async (
   const otherMonitor = await harness({ width: 1200, height: 640 }, { width: 1920, height: 1040 }).start({ show: true });
   assert.equal(otherMonitor.browser.shell.maximized, undefined, "a larger secondary monitor must not override the profile cap");
   otherMonitor.browser.destroy();
+});
+
+test("a stopped profile tab writes Electron's reason without the tab URL", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "umbra-tab-diagnostic-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const h = await harness(undefined, undefined, directory).start();
+  h.views.at(-1).webContents.emit("render-process-gone", {}, { reason: "memory-eviction", exitCode: -1 });
+  const raw = fs.readFileSync(path.join(directory, "diagnostics", "process-events.jsonl"), "utf8");
+  const entry = JSON.parse(raw.trim());
+  assert.equal(entry.role, "profile-tab");
+  assert.equal(entry.reason, "memory-eviction");
+  assert.equal(entry.exitCode, -1);
+  assert.doesNotMatch(raw, /one\.example|two\.example/);
+  h.browser.destroy();
 });
 
 test("privacy consent is bound to the actual selected tab and origin", async () => {

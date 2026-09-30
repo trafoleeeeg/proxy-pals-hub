@@ -13,6 +13,7 @@ const { isTrustedSender, isWebUrl } = require("./ipc-policy.cjs");
 const { createUpdateController } = require("./update-controller.cjs");
 const { createSessionOutbox } = require("./session-outbox.cjs");
 const { checkEngineVersions } = require("./runtime/engine-status.cjs");
+const { recordProcessEvent } = require("./runtime/process-diagnostics.cjs");
 
 const DEFAULT_APP_URL = "https://proxy-pals-hub.lovable.app/app";
 // A packaged client must never let a local environment variable replace the
@@ -35,6 +36,9 @@ let quitting = false;
 let closing = false;
 let proxyChecks = 0;
 let extensionDownloads = 0;
+function diagnose(event, details) {
+  try { recordProcessEvent(app.getPath("userData"), event, details); } catch { /* Never disrupt the browser for diagnostics. */ }
+}
 function send(channel, payload) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
 }
@@ -226,6 +230,16 @@ handle("umbra:extensions-remove", async (id) => {
 
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
+  diagnose("browser-start");
+  process.on("disconnect", () => diagnose("coordinator-disconnect"));
+  process.on("uncaughtExceptionMonitor", () => diagnose("browser-uncaught-exception"));
+  app.on("render-process-gone", (_event, contents, details) => {
+    if (contents === mainWindow?.webContents) diagnose("renderer-gone", { role: "panel", reason: details?.reason, exitCode: details?.exitCode, contentsId: contents.id });
+  });
+  app.on("child-process-gone", (_event, details) => diagnose("child-process-gone", {
+    reason: details?.reason, exitCode: details?.exitCode, processType: details?.type,
+  }));
+  app.on("will-quit", () => diagnose("browser-will-quit"));
   app.on("second-instance", () => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
@@ -284,6 +298,7 @@ else {
 }
 app.on("before-quit", (event) => {
   if (quitting) return;
+  if (!closing) diagnose("browser-before-quit");
   event.preventDefault();
   if (closing) return;
   closing = true;

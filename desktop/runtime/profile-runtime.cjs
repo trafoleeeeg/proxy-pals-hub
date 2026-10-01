@@ -621,12 +621,12 @@ function createProfileRuntime(electron, options = {}) {
       entry.fingerprintDiagnostics = await configureFingerprint(win.webContents, entry.fp, fingerprintOptions);
       if (entry.closingRequested) throw new Error("Profile is closing");
       if (win.closing || win.isDestroyed()) return null;
-      win.webContents.debugger.on("detach", () => {
-        if (entry.closingRequested || win.closing || win.isDestroyed()) return;
-        entry.lastError = "Отпечаток браузера отключился, профиль остановлен";
-        blockSession(entry.ses);
-        closeProfileWindow(entry.profileId).catch(() => {});
-      });
+      // configureFingerprint already fails closed when CDP unexpectedly
+      // detaches from a live renderer. Do not add another unconditional
+      // listener here: Electron also detaches with "target closed" after a
+      // single tab renderer crashes or is deliberately closed. Treating that
+      // normal target teardown as a profile-wide protection failure closed the
+      // whole profile after an isolated tab crash.
       if (entry.closingRequested) throw new Error("Profile is closing");
       if (options.show !== false && activate) win.show();
       if (url !== "about:blank") {

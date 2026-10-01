@@ -199,18 +199,17 @@ test("unsafe native WebRTC policy or failed CDP protection prevents navigation s
   assert.equal(wc.detached, true);
 });
 
-test("planned tab close cannot revoke the shared session; unexpected debugger loss still fails closed", async () => {
-  for (const plannedClose of [true, false]) {
+test("closed or crashed renderer targets preserve other tabs; unexpected debugger loss still fails closed", async () => {
+  for (const reason of ["target closed", "render process gone", "replaced with devtools"]) {
     const wc = webContents();
-    let closing = false;
     let blocked = 0, failures = 0;
     wc.session = { webRequest: { onBeforeRequest() { blocked++; } }, closeAllConnections: async () => {} };
     wc.stop = () => {};
-    await applyFingerprint(wc, fingerprint(), { isClosing: () => closing, onFailure: () => { failures++; } });
-    closing = plannedClose;
-    wc.debugger.emit("detach", {}, "render process gone");
-    assert.equal(blocked, closing ? 0 : 1);
-    assert.equal(failures, closing ? 0 : 1);
+    await applyFingerprint(wc, fingerprint(), { onFailure: () => { failures++; } });
+    wc.debugger.emit("detach", {}, reason);
+    const expectedFailure = reason === "replaced with devtools" ? 1 : 0;
+    assert.equal(blocked, expectedFailure);
+    assert.equal(failures, expectedFailure);
   }
 });
 

@@ -229,7 +229,12 @@ async function applyFingerprint(wc, fp, { onFailure = () => {}, isClosing = () =
       if (children.has(params.sessionId)) fail();
     });
   });
-  wc.debugger.on?.("detach", (_event, reason) => { if (reason !== "target closed") fail(); });
+  wc.debugger.on?.("detach", (_event, reason) => {
+    // A dead renderer no longer executes site code. Its replacement must go
+    // through the normal protected tab creation path, but the other tabs in
+    // the profile remain protected and must not be closed with it.
+    if (reason !== "target closed" && reason !== "render process gone") fail();
+  });
   try {
     await autoAttach();
     await send("Page.enable");

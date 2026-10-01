@@ -619,6 +619,8 @@ function createProfileRuntime(electron, options = {}) {
         void closeProfileWindow(entry.profileId).catch(() => {});
       } };
       entry.fingerprintDiagnostics = await configureFingerprint(win.webContents, entry.fp, fingerprintOptions);
+      if (entry.closingRequested) throw new Error("Profile is closing");
+      if (win.closing || win.isDestroyed()) return null;
       win.webContents.debugger.on("detach", () => {
         if (entry.closingRequested || win.closing || win.isDestroyed()) return;
         entry.lastError = "Отпечаток браузера отключился, профиль остановлен";
@@ -634,6 +636,9 @@ function createProfileRuntime(electron, options = {}) {
       if (entry.closingRequested) throw new Error("Profile is closing");
       return win;
     } catch (error) {
+      // User cancellation of a newly created tab is not a launch/protection
+      // failure and must not report an error against the shared profile.
+      if (!primary && !entry.closingRequested && (win.closing || win.isDestroyed())) return null;
       if (!primary) entry.lastError = launchErrorText(error.message);
       if (!win.isDestroyed()) win.destroy();
       throw error;

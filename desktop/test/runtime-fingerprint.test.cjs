@@ -200,15 +200,42 @@ test("unsafe native WebRTC policy or failed CDP protection prevents navigation s
 });
 
 test("planned tab close cannot revoke the shared session; unexpected debugger loss still fails closed", async () => {
-  for (const closing of [true, false]) {
+  for (const plannedClose of [true, false]) {
     const wc = webContents();
+    let closing = false;
     let blocked = 0, failures = 0;
     wc.session = { webRequest: { onBeforeRequest() { blocked++; } }, closeAllConnections: async () => {} };
     wc.stop = () => {};
     await applyFingerprint(wc, fingerprint(), { isClosing: () => closing, onFailure: () => { failures++; } });
+    closing = plannedClose;
     wc.debugger.emit("detach", {}, "render process gone");
     assert.equal(blocked, closing ? 0 : 1);
     assert.equal(failures, closing ? 0 : 1);
+  }
+});
+
+test("closing a tab during CDP setup never accesses its destroyed native debugger", async () => {
+  for (const destroyed of [false, true]) {
+    const wc = webContents();
+    const debug = wc.debugger;
+    let closing = false, release;
+    const gate = new Promise(resolve => { release = resolve; });
+    debug.sendCommand = async command => {
+      wc.commands.push({ command });
+      assert.equal(command, "Target.setAutoAttach", "no later CDP calls after close");
+      await gate;
+    };
+    wc.isDestroyed = () => destroyed && closing;
+    Object.defineProperty(wc, "debugger", { get() {
+      assert.equal(wc.isDestroyed(), false, "destroyed debugger getter would crash native Electron");
+      return debug;
+    } });
+    const pending = applyFingerprint(wc, fingerprint(), { isClosing: () => closing });
+    closing = true;
+    release();
+    await assert.rejects(pending, /Unable to apply fingerprint before navigation/);
+    assert.equal(wc.commands.length, 1);
+    assert.equal(wc.detached, !destroyed);
   }
 });
 

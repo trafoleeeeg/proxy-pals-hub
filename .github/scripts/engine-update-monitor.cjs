@@ -37,14 +37,16 @@ function plan(packageJson, lock, latestElectron, stableChrome) {
 
 function issueFor(update) {
   const title = 'Движок Umbra: проверить Electron ' + update.latestElectron +
-    ' / Chromium ' + update.stableChrome;
+    ' (Chrome Stable ' + update.stableChrome + ' — ориентир)';
   const body = [
     marker,
     'Umbra сейчас выпускается с Electron **' + update.pinnedElectron +
-      '** и Chromium **' + update.pinnedChrome + '**. Стабильные доступные версии: Electron **' +
-      update.latestElectron + '**, Chrome **' + update.stableChrome + '**.',
+      '** и встроенным Chromium **' + update.pinnedChrome + '**. Последний стабильный Electron: **' +
+      update.latestElectron + '**. Отдельный Chrome Stable: **' + update.stableChrome + '**.',
+    'Версия отдельного Chrome не является версией Chromium внутри Electron. Её нельзя подставлять ' +
+      'в сборку Electron: точные Chromium и Node нужно брать из DEPS выбранного тега Electron.',
     'Новая npm-зависимость не обновляет закреплённый движок Umbra и не должна выпускаться отдельно от нового нативного архива.',
-    '- [ ] Проверить стабильный Electron: https://github.com/electron/electron/releases/tag/v' + update.latestElectron,
+    '- [ ] Проверить стабильный Electron и версии его Chromium/Node по DEPS: https://github.com/electron/electron/releases/tag/v' + update.latestElectron,
     '- [ ] Перенести патчи из desktop/engine/ на новые исходники Electron/Chromium.',
     '- [ ] Собрать Windows-движок и пройти нативные screen, hardware, fonts, DNS и network-тесты.',
     '- [ ] Опубликовать тестовый ZIP движка; закрепить SHA-256 и точные исходные коммиты в desktop/engine/source-lock.json.',

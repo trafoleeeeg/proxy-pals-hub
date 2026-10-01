@@ -612,7 +612,7 @@ function createProfileRuntime(electron, options = {}) {
           win.webContents.loadURL("about:blank").catch(() => {});
         }
       } catch { /* рендерер появится при первой навигации */ }
-      const fingerprintOptions = { onFailure: () => {
+      const fingerprintOptions = { isClosing: () => entry.closingRequested || win.closing || win.isDestroyed(), onFailure: () => {
         if (entry.closingRequested || win.closing || win.isDestroyed()) return;
         entry.lastError = "Защита страницы недоступна, профиль остановлен";
         blockSession(entry.ses);

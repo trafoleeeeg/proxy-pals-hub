@@ -162,7 +162,7 @@ function userAgentOverride(fp) {
   return result;
 }
 
-async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
+async function applyFingerprint(wc, fp, { onFailure = () => {}, isClosing = () => false } = {}) {
   wc.setUserAgent(fp.userAgent);
   wc.setWebRTCIPHandlingPolicy(WEBRTC_POLICY);
   if (wc.getWebRTCIPHandlingPolicy() !== WEBRTC_POLICY) throw new Error("Unable to apply fingerprint WebRTC policy");
@@ -171,7 +171,7 @@ async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
   let stopped = false;
   const children = new Set();
   const fail = () => {
-    if (stopped || wc.isDestroyed?.()) return;
+    if (stopped || isClosing() || wc.isDestroyed?.()) return;
     stopped = true;
     // Never leave a running renderer behind when protection disappears.
     wc.session?.webRequest?.onBeforeRequest((_details, callback) => callback({ cancel: true }));

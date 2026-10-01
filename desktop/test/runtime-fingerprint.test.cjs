@@ -127,13 +127,13 @@ function webContents({ policy = "disable_non_proxied_udp", reject = null } = {})
   return {
     commands, get detached() { return detached; },
     setUserAgent() {}, setWebRTCIPHandlingPolicy() {}, getWebRTCIPHandlingPolicy: () => policy,
-    debugger: {
+    debugger: Object.assign(new (require("node:events").EventEmitter)(), {
       attach() {}, isAttached: () => !detached, detach() { detached = true; },
       async sendCommand(command, args) {
         commands.push({ command, args });
         if (command === reject) throw new Error("Protocol error");
       },
-    },
+    }),
   };
 }
 
@@ -197,6 +197,19 @@ test("unsafe native WebRTC policy or failed CDP protection prevents navigation s
   const wc = webContents({ reject: "Emulation.setHardwareConcurrencyOverride" });
   await assert.rejects(applyFingerprint(wc, fingerprint()), /Unable to apply fingerprint before navigation/);
   assert.equal(wc.detached, true);
+});
+
+test("planned tab close cannot revoke the shared session; unexpected debugger loss still fails closed", async () => {
+  for (const closing of [true, false]) {
+    const wc = webContents();
+    let blocked = 0, failures = 0;
+    wc.session = { webRequest: { onBeforeRequest() { blocked++; } }, closeAllConnections: async () => {} };
+    wc.stop = () => {};
+    await applyFingerprint(wc, fingerprint(), { isClosing: () => closing, onFailure: () => { failures++; } });
+    wc.debugger.emit("detach", {}, "render process gone");
+    assert.equal(blocked, closing ? 0 : 1);
+    assert.equal(failures, closing ? 0 : 1);
+  }
 });
 
 test("document privacy hides attached media-device identities and supports macOS work area", async () => {

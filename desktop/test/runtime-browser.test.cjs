@@ -28,7 +28,7 @@ function harness(workAreaSize = { width: 1920, height: 1040 }, windowWorkAreaSiz
     getZoomLevel() { return this.zoomLevel || 0; }
     setZoomLevel(level) { this.zoomLevel = level; }
     isLoading() { return this.loading; }
-    isDestroyed() { return false; }
+    isDestroyed() { return !!this.destroyed; }
     async loadURL(url) { this.url = url; this.title = url === "about:blank" ? "" : new URL(url).hostname; this.emit("did-navigate", {}, url); }
     reload() { this.reloads++; }
     async capturePage() { return { isEmpty: () => false, toDataURL: () => "data:image/png;base64,AA==" }; }
@@ -41,6 +41,7 @@ function harness(workAreaSize = { width: 1920, height: 1040 }, windowWorkAreaSiz
   class Shell extends EventEmitter {
     constructor(options) { super(); this.options = options; this.webContents = new Contents(); this.contentView = { addChildView(view) { views.push(view); }, removeChildView() {} }; }
     maximize() { this.maximized = true; }
+    removeMenu() { this.menuRemoved = true; }
     async loadURL() {}
     isDestroyed() { return false; }
     isVisible() { return true; }
@@ -120,6 +121,30 @@ test("a stopped profile tab writes Electron's reason without the tab URL", async
   assert.equal(entry.reason, "memory-eviction");
   assert.equal(entry.exitCode, -1);
   assert.doesNotMatch(raw, /one\.example|two\.example/);
+  h.browser.destroy();
+});
+
+test("Ctrl+W closes one tab in a Russian layout and preserves the pinned home and profile window", async () => {
+  let profileClosures = 0;
+  const h = await harness().start({ withHome: true, privacy: { closeProfile: async () => { profileClosures++; } } });
+  const press = async (contents) => {
+    let prevented = false;
+    contents.emit("before-input-event", { preventDefault() { prevented = true; } }, { type: "keyDown", key: "ц", code: "KeyW", control: true });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(prevented, true);
+    await h.command({ action: "state" });
+  };
+  await press(h.views[2].webContents);
+  assert.equal(h.views[2].webContents.isDestroyed(), true);
+  assert.equal(h.stateEvents.at(-1).tabs.length, 2);
+  await press(h.browser.shell.webContents);
+  assert.equal(h.views[1].webContents.isDestroyed(), true);
+  assert.equal(h.stateEvents.at(-1).tabs.length, 1);
+  await press(h.browser.shell.webContents);
+  assert.equal(h.views[0].webContents.isDestroyed(), false);
+  assert.equal(h.stateEvents.at(-1).tabs.length, 1);
+  assert.equal(profileClosures, 0);
+  assert.equal(h.browser.shell.menuRemoved, true, "hidden default menu must not retain a close-window accelerator");
   h.browser.destroy();
 });
 

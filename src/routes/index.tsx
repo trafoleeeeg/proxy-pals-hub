@@ -75,7 +75,7 @@ function Landing() {
           </p>
           <div className="mt-10 flex flex-wrap gap-3">
             <Button asChild size="lg">
-              <Link to="/auth">Создать аккаунт</Link>
+              <Link to="/auth">Войти в Umbra</Link>
             </Button>
             <Button asChild size="lg" variant="secondary">
               <Link to="/auth">У меня уже есть доступ</Link>

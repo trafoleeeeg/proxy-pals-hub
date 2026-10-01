@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { supabase as primaryClient } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
-import { clearEmployeePreview, employeeAuthKey, LEGACY_PREVIEW_KEY, readEmployeePreview, saveEmployeePreview, type EmployeePreview } from "./employee-session-storage";
+import { clearEmployeePreview, employeeAuthKey, EMPLOYEE_EXIT_KEY, LEGACY_PREVIEW_KEY, readEmployeePreview, saveEmployeePreview, type EmployeePreview } from "./employee-session-storage";
 
 // The primary client owns the persistent login. An authorized employee preview
 // gets a separate auth client/storage, never setSession on the primary client.
@@ -10,6 +10,34 @@ import { clearEmployeePreview, employeeAuthKey, LEGACY_PREVIEW_KEY, readEmployee
 type Client = typeof primaryClient;
 let activeClient: Client | undefined;
 let legacyRecovery: Promise<void> | undefined;
+let primarySignInPending = false;
+
+export function isPrimarySignInPending() { return primarySignInPending; }
+
+// Explicit credentials always replace the persistent identity, never a preview.
+// AuthSync must not redirect halfway through verification/overlay cleanup.
+export async function signInPrimaryAccount(email: string, password: string) {
+  if (primarySignInPending) throw new Error("Вход уже выполняется");
+  primarySignInPending = true;
+  try {
+    // Finish any legacy restoration already started before this explicit login.
+    // Otherwise its late response could overwrite the newly entered account.
+    if (legacyRecovery) await legacyRecovery.catch(() => {});
+    const result = await primaryClient.auth.signInWithPassword({ email, password });
+    if (result.error) throw result.error;
+    if (!result.data.session || !result.data.user) throw new Error("Не удалось подтвердить вход");
+    const verified = await primaryClient.auth.getUser(result.data.session.access_token);
+    if (verified.error || verified.data.user?.id !== result.data.user.id
+      || verified.data.user.email?.toLowerCase() !== email.toLowerCase()) {
+      await primaryClient.auth.signOut({ scope: "local" });
+      throw new Error("Сервер вернул другую учётную запись. Повторите вход.");
+    }
+    await leaveEmployeePreview();
+    sessionStorage.removeItem(LEGACY_PREVIEW_KEY);
+    sessionStorage.removeItem(EMPLOYEE_EXIT_KEY);
+    return verified.data.user;
+  } finally { primarySignInPending = false; }
+}
 
 function temporaryClient(preview: EmployeePreview): Client {
   const url = import.meta.env["VITE_SUPABASE_URL"] || process.env["SUPABASE_URL"];

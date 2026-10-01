@@ -11,7 +11,7 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
-import { supabase } from "@/lib/app-supabase";
+import { isPrimarySignInPending, supabase } from "@/lib/app-supabase";
 import { Toaster } from "@/components/ui/sonner";
 import "@/lib/desktop";
 
@@ -156,17 +156,22 @@ function AuthSync({ queryClient }: { queryClient: QueryClient }) {
   const router = useRouter();
 
   useEffect(() => {
-    const { data } = supabase.auth.onAuthStateChange((event) => {
+    let previousUserId: string | null | undefined;
+    const { data } = supabase.auth.onAuthStateChange((event, session) => {
+      const userId = session?.user.id ?? null;
+      if (previousUserId !== undefined && previousUserId !== userId) queryClient.clear();
+      previousUserId = userId;
       if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;
       if (event === "SIGNED_OUT") queryClient.clear();
+      if (isPrimarySignInPending()) return;
       // Auth callbacks execute while the auth client can still own its Web Lock.
       // Defer router work so protected requests never wait on that same lock.
       window.setTimeout(() => {
+        if (isPrimarySignInPending() || previousUserId !== userId) return;
         void router.invalidate();
-        if (event === "SIGNED_IN") {
-          const here = window.location.pathname;
-          if (here === "/" || here === "/auth") window.location.replace("/app");
-        } else if (event === "SIGNED_OUT" && window.location.pathname !== "/auth") {
+        // SIGNED_IN also fires when an old stored session is refreshed. Do not
+        // eject the operator from the login form before explicit login finishes.
+        if (event === "SIGNED_OUT" && window.location.pathname !== "/auth") {
           const next = window.location.pathname.startsWith("/") ? window.location.pathname : "/app";
           window.location.replace(`/auth?next=${encodeURIComponent(next)}`);
         }

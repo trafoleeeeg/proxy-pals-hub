@@ -65,6 +65,34 @@ beforeAll(async () => {
 afterAll(async () => { await db?.close(); });
 
 describe("real migrations and RLS", () => {
+  test("an employee can create and immediately return profiles only in an authorized folder", async () => {
+    const employee = crypto.randomUUID();
+    const folder = "Create regression " + employee;
+    const ids = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
+    await db.query("insert into auth.users(id, email, email_confirmed_at) values ($1, 'creator@example.test', now())", [employee]);
+    await db.query("insert into public.team_members(team_id, user_id, role) values ($1, $2, 'member')", [team, employee]);
+    await db.query("insert into public.profile_folders(team_id, name) values ($1, $2)", [team, folder]);
+    try {
+      await asUser(owner, "select public.set_member_permissions($1, $2, true, true, true, true, true, true, true)", [team, employee]);
+      await expect(asUser(employee, "insert into public.browser_profiles(team_id, name, folder, created_by) values ($1, 'Denied', $2, $3) returning id", [team, folder, employee])).rejects.toThrow();
+      await asUser(owner, "select public.set_folder_access($1, $2, $3, true)", [team, folder, employee]);
+      expect(await asUser(employee, "insert into public.browser_profiles(id, team_id, name, folder, created_by) values ($1, $2, 'Created', $3, $4) returning id", [ids[0], team, folder, employee])).toEqual([{ id: ids[0] }]);
+      expect(await asUser(employee, "insert into public.browser_profiles(id, team_id, name, folder, created_by) values ($1, $2, 'Bulk 1', $3, $4), ($5, $2, 'Bulk 2', $3, $4) returning id", [ids[1], team, folder, employee, ids[2]])).toEqual([{ id: ids[1] }, { id: ids[2] }]);
+      expect(await asUser(employee, "select id from public.browser_profiles where id = any($1::uuid[]) order by name", [ids])).toEqual([{ id: ids[1] }, { id: ids[2] }, { id: ids[0] }]);
+      for (const deniedFolder of ["", "Основная", "Not shared"]) {
+        await expect(asUser(employee, "insert into public.browser_profiles(team_id, name, folder, created_by) values ($1, 'Denied', $2, $3) returning id", [team, deniedFolder, employee])).rejects.toThrow();
+      }
+      await expect(asUser(employee, "insert into public.browser_profiles(team_id, name, folder, created_by) values ($1, 'Cross-team', $2, $3) returning id", [otherTeam, folder, employee])).rejects.toThrow();
+      await asUser(owner, "select public.set_member_permissions($1, $2, false, true, true, true, true, true, true)", [team, employee]);
+      await expect(asUser(employee, "insert into public.browser_profiles(team_id, name, folder, created_by) values ($1, 'Permission revoked', $2, $3) returning id", [team, folder, employee])).rejects.toThrow();
+    } finally {
+      await db.query("delete from public.browser_profiles where id = any($1::uuid[])", [ids]);
+      await db.query("delete from public.profile_folders where team_id = $1 and name = $2", [team, folder]);
+      await db.query("delete from public.team_members where team_id = $1 and user_id = $2", [team, employee]);
+      await db.query("delete from auth.users where id = $1", [employee]);
+    }
+  });
+
   test("the private main folder cannot be shared, even through old direct grants", async () => {
     const legacyMember = crypto.randomUUID();
     const legacyProfile = crypto.randomUUID();

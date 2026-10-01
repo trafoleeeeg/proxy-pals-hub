@@ -124,6 +124,36 @@ test("a stopped profile tab writes Electron's reason without the tab URL", async
   h.browser.destroy();
 });
 
+test("reloading a crashed tab creates a protected replacement without closing the profile", async () => {
+  let profileClosures = 0;
+  const h = await harness().start({ privacy: { closeProfile: async () => { profileClosures++; } } });
+  const crashed = h.views.at(-1).webContents;
+  const crashedUrl = crashed.getURL();
+  crashed.emit("render-process-gone", {}, { reason: "crashed", exitCode: -2147483645 });
+  await h.command({ action: "reload" });
+
+  assert.equal(profileClosures, 0);
+  assert.equal(crashed.destroyed, true);
+  assert.equal(crashed.reloads, 0, "a renderer that lost fingerprint protection must never reload in place");
+  assert.equal(h.views.at(-1).webContents.getURL(), crashedUrl);
+  h.browser.destroy();
+});
+
+test("a crashed pinned home never reloads an unprotected renderer or closes the profile", async () => {
+  let profileClosures = 0;
+  const h = await harness().start({ withHome: true, privacy: { closeProfile: async () => { profileClosures++; } } });
+  const home = h.views[0].webContents;
+  await h.command({ action: "home" });
+  home.emit("render-process-gone", {}, { reason: "crashed", exitCode: -2147483645 });
+  await h.command({ action: "reload" });
+
+  assert.equal(profileClosures, 0);
+  assert.equal(home.reloads, 0, "the dead home renderer must not restart outside profile-runtime protection");
+  assert.equal(home.isDestroyed(), false, "the shell keeps the pinned placeholder until the next profile launch");
+  assert.match(h.stateEvents.at(-1).tabs[0].error, /следующем запуске/);
+  h.browser.destroy();
+});
+
 test("Ctrl+W closes one tab in a Russian layout and preserves the pinned home and profile window", async () => {
   let profileClosures = 0;
   const h = await harness().start({ withHome: true, privacy: { closeProfile: async () => { profileClosures++; } } });

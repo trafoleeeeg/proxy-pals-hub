@@ -371,6 +371,25 @@ test("crashed renderer debugger rejection or timeout does not block profile clos
   }
 });
 
+test("a closed or crashed tab target does not close the whole profile", async () => {
+  const h = harness();
+  let closed = 0;
+  await h.runtime.launchProfileWindow(payload(), () => { closed++; });
+  const tab = h.windows[0];
+
+  // Chromium emits this debugger-detach reason when the renderer target goes
+  // away. Fingerprint protection for a still-live target remains fail-closed;
+  // this target is already gone and must not take the shared profile with it.
+  tab.webContents.debugger.emit("detach", {}, "target closed");
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(closed, 0);
+  assert.equal(tab.destroyed, false);
+  assert.equal(h.runtime.listRunningProfiles().length, 1);
+  await h.runtime.closeAllProfiles();
+  assert.equal(closed, 1);
+});
+
 test("stalled connection or proxy cleanup still saves cookies and requires restart", async () => {
   for (const stall of ["connections", "proxy"]) {
     const h = harness();

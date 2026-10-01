@@ -500,7 +500,27 @@ async function createProfileBrowser(electron, {
       case "navigate": if (tab) { bookmarksOpen = false; proxiesOpen = false; tab.error = ""; const url = addressUrl(message.value); if (isHome(tab) || message.newTab === true) await openTab(url); else void tab.loadURL(url).catch(() => {}); } break;
       case "back": if (tab?.webContents.navigationHistory.canGoBack()) tab.webContents.navigationHistory.goBack(); break;
       case "forward": if (tab?.webContents.navigationHistory.canGoForward()) tab.webContents.navigationHistory.goForward(); break;
-      case "reload": if (tab) { tab.error = ""; if (tab.webContents.isLoading()) tab.webContents.stop(); else tab.webContents.reload(); } break;
+      case "reload": if (tab) {
+        if (tab.crashed && isHome(tab)) {
+          // The pinned start page is owned by the shell and cannot be replaced
+          // here without bypassing profile-runtime's pre-navigation protection.
+          // Keep the profile and all ordinary tabs alive; the shell start page
+          // remains usable and the native view is recreated on the next launch.
+          tab.error = "Стартовая вкладка остановилась. Откройте сайт в новой вкладке; стартовая восстановится при следующем запуске профиля.";
+          publish();
+        } else if (tab.crashed) {
+          // Never reload a crashed WebContents in place: its CDP protection
+          // belonged to the renderer that died. A replacement tab is created
+          // through profile-runtime, which applies the fingerprint before the
+          // page is allowed to navigate.
+          const target = tab.url || "about:blank";
+          await openTab(target);
+          closeTab(tab);
+        } else {
+          tab.error = "";
+          if (tab.webContents.isLoading()) tab.webContents.stop(); else tab.webContents.reload();
+        }
+      } break;
        default: throw new Error("Неизвестная команда браузера");
     }
     flushPublish();
@@ -659,7 +679,10 @@ async function createProfileBrowser(electron, {
       wc.on("did-fail-load", (_event, code, _description, _url, mainFrame) => { if (mainFrame && code !== -3) { tab.error = "Не удалось загрузить страницу. Проверьте адрес и подключение прокси."; publish(); } });
       wc.on("render-process-gone", (_event, details) => {
         recordRendererGone("profile-tab", wc, details);
-        tab.error = "Вкладка остановилась. Обновите страницу и повторите попытку.";
+        tab.crashed = true;
+        tab.error = isHome(tab)
+          ? "Стартовая вкладка остановилась. Остальные вкладки и профиль продолжают работать; стартовая восстановится при следующем запуске."
+          : "Вкладка остановилась. Нажмите обновить — она безопасно откроется заново.";
         publish();
       });
       wc.on("destroyed", () => {

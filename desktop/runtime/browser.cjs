@@ -64,6 +64,9 @@ async function createProfileBrowser(electron, {
     title: name, backgroundColor: "#111317", show: false, autoHideMenuBar: true,
     webPreferences: { session: shellSession, preload: path.join(__dirname, "browser-preload.cjs"), contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, devTools: false },
   });
+  // autoHideMenuBar only hides Electron's menu; its Ctrl+W accelerator still
+  // closes the entire native window. Profile shortcuts belong to our tabs.
+  shell.removeMenu?.();
   // В фоновом режиме maximize пропускается: некоторые Linux window manager
   // отображают окно. На большем мониторе не раскрываем физический размер.
   const currentWorkArea = (shell.getBounds && electron.screen?.getDisplayMatching?.(shell.getBounds())?.workAreaSize) || hostWorkArea;
@@ -532,7 +535,10 @@ async function createProfileBrowser(electron, {
   }
   function shortcuts(event, input) {
     if (input.type !== "keyDown") return;
-    const key = input.key.toLowerCase();
+    // KeyboardEvent.key follows the active layout (KeyW becomes "ц" in
+    // Russian). Browser shortcuts must follow the physical letter key.
+    const key = ((input.control || input.meta) && /^Key[A-Z]$/.test(input.code || "")
+      ? input.code.slice(3) : input.key || "").toLowerCase();
     let action;
     if (input.control || input.meta) {
       if (key === "l") { event.preventDefault(); focusAddress(); return; }
@@ -657,10 +663,11 @@ async function createProfileBrowser(electron, {
         publish();
       });
       wc.on("destroyed", () => {
+        const closedIndex = tabOrder.indexOf(tab.id);
         tabs.delete(tab.id);
         tabOrder = tabOrder.filter((id) => id !== tab.id);
         if (!shell.isDestroyed()) shell.contentView.removeChildView(view);
-        if (activeId === tab.id) select(homeTab() || tabs.get(tabOrder.at(-1)));
+        if (activeId === tab.id) select(tabs.get(tabOrder[Math.min(closedIndex, tabOrder.length - 1)]) || homeTab());
         tab.emit("closed"); publish(); if (ready) onTabsChanged();
       });
       return tab;

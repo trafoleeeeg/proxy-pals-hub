@@ -162,7 +162,14 @@ function userAgentOverride(fp) {
   return result;
 }
 
-async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
+async function applyFingerprint(wc, fp, { onFailure = () => {}, isClosing = () => false } = {}) {
+  const ensureOpen = () => {
+    // Accessing webContents.debugger after native destruction can DCHECK in
+    // Electron, not merely reject a JS promise. Check before every CDP call,
+    // including continuations of setup that was started before Ctrl+W.
+    if (isClosing() || wc.isDestroyed?.()) throw new Error("Fingerprint target is closing");
+  };
+  ensureOpen();
   wc.setUserAgent(fp.userAgent);
   wc.setWebRTCIPHandlingPolicy(WEBRTC_POLICY);
   if (wc.getWebRTCIPHandlingPolicy() !== WEBRTC_POLICY) throw new Error("Unable to apply fingerprint WebRTC policy");
@@ -171,7 +178,7 @@ async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
   let stopped = false;
   const children = new Set();
   const fail = () => {
-    if (stopped || wc.isDestroyed?.()) return;
+    if (stopped || isClosing() || wc.isDestroyed?.()) return;
     stopped = true;
     // Never leave a running renderer behind when protection disappears.
     wc.session?.webRequest?.onBeforeRequest((_details, callback) => callback({ cancel: true }));
@@ -181,6 +188,7 @@ async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
     onFailure("Защита страницы недоступна, профиль остановлен");
   };
   const send = async (method, params, id) => {
+    ensureOpen();
     let timer;
     try {
       return await Promise.race([wc.debugger.sendCommand(method, params, id), new Promise((_, reject) => {
@@ -238,9 +246,10 @@ async function applyFingerprint(wc, fp, { onFailure = () => {} } = {}) {
       })]),
       send("Page.addScriptToEvaluateOnNewDocument", { source }),
     ]);
+    ensureOpen();
   } catch {
     stopped = true;
-    if (wc.debugger.isAttached()) wc.debugger.detach();
+    if (!wc.isDestroyed?.() && wc.debugger.isAttached()) wc.debugger.detach();
     throw new Error("Unable to apply fingerprint before navigation");
   }
   const backgroundProtected = require("./background-workers.cjs").backgroundWorkersProtected(wc.session);

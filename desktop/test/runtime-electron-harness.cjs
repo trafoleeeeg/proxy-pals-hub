@@ -436,12 +436,32 @@ if (process.versions.electron) {
     await navigateFromToolbar("file:///C:/Windows/win.ini");
     await waitUntil(() => !fresh.webContents.isLoading());
     assert.ok(fresh.webContents.getURL().endsWith("/second-page"));
-    await shell.webContents.executeJavaScript("document.querySelector('.tab:last-child .tab-close').click()");
+    // Exercise the actual shortcut callback on a native page, including the
+    // non-Latin layout that previously fell through to Electron's window menu.
+    let shortcutPrevented = false;
+    freshContents.emit("before-input-event", { preventDefault() { shortcutPrevented = true; } }, { type: "keyDown", key: "ц", code: "KeyW", control: true });
+    assert.equal(shortcutPrevented, true);
     await waitUntil(() => runtime.getRunningProfile(ID).tabCount === 3);
     assert.equal(freshContents.isDestroyed(), true);
     assert.equal(runtime.getRunningProfile(ID).state, "running");
     await shell.webContents.executeJavaScript("document.getElementById('menu-button').click(); document.getElementById('restore-menu').click()");
     await waitUntil(() => runtime.getRunningProfile(ID).tabCount === 4);
+
+    const pressClose = () => shell.webContents.emit("before-input-event", { preventDefault() {} }, { type: "keyDown", key: "w", code: "KeyW", control: true });
+    for (const count of [3, 2, 1]) {
+      pressClose();
+      await waitUntil(() => runtime.getRunningProfile(ID)?.tabCount === count);
+      assert.equal(shell.isDestroyed(), false);
+      assert.equal(closed.length, 0, "Ctrl+W must not close either profile");
+    }
+    pressClose();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(runtime.getRunningProfile(ID).tabCount, 1);
+    assert.equal(runtime.getRunningProfile(ID).state, "running");
+    assert.equal(homeView.webContents.isDestroyed(), false);
+    assert.equal(closed.length, 0);
+    // A deliberately closed tab must not block the shared profile network.
+    await ses.fetch(`https://localhost:${local.port}/after-shortcut-close`);
 
     const bad = payload(WRONG); bad.proxy.password = "wrong";
     await assert.rejects(runtime.launchProfileWindow(bad));

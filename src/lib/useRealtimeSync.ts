@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "./app-supabase";
 
 const TABLES = ["browser_profiles", "profile_access", "folder_access", "member_permissions", "proxies", "team_bookmark_defaults", "profile_browser_settings"] as const;
 const KEYS = ["profiles", "trash", "proxies", "bookmark-defaults", "team", "folder-access", "folders", "permissions", "member-permissions", "workspace"];

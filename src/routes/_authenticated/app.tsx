@@ -3,7 +3,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { ArchiveRestore, Bot, ChevronDown, Download, Globe, LayoutGrid, ListChecks, LogOut, Monitor, PanelLeftClose, PanelLeftOpen, RefreshCw, Users } from "lucide-react";
 import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
+import { employeePreview, leaveEmployeePreview, supabase } from "@/lib/app-supabase";
+import { queueEmployeeExit } from "@/lib/employee-session-storage";
 import { useWorkspace, useWorkspaceSelection, WorkspaceProvider } from "@/lib/useWorkspace";
 import { usePresenceHeartbeat } from "@/hooks/usePresenceHeartbeat";
 import { useRealtimeSync } from "@/lib/useRealtimeSync";
@@ -108,6 +109,15 @@ function AppShell() {
     setSigningOut(true);
     try {
       await runtime.closeAll();
+      const preview = employeePreview();
+      if (preview) {
+        // Leaving an operator's preview must not globally revoke the employee's
+        // own sessions or remove the original persistent operator login.
+        queueEmployeeExit(sessionStorage, preview);
+        await leaveEmployeePreview();
+        window.location.assign("/app");
+        return;
+      }
       const result = await supabase.auth.signOut();
       if (result.error) throw new Error();
       try { sessionStorage.removeItem("umbra:impersonation"); } catch { /* Нет доступа к хранилищу. */ }

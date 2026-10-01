@@ -1,25 +1,23 @@
-import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { toast } from "sonner";
-import { supabase } from "@/lib/app-supabase";
+import { signInPrimaryAccount } from "@/lib/app-supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 type Search = {
-  mode?: string | undefined;
   next?: string | undefined;
 };
 
 export const Route = createFileRoute("/auth")({
   validateSearch: (s: Record<string, unknown>): Search => ({
-    mode: typeof s["mode"] === "string" ? s["mode"] : undefined,
     next: typeof s["next"] === "string" ? s["next"] : undefined,
   }),
   head: () => ({
     meta: [
       { title: "Вход в Umbra" },
-      { name: "description", content: "Вход и регистрация в системе управления профилями Umbra." },
+      { name: "description", content: "Вход в систему управления профилями Umbra." },
       { property: "og:title", content: "Вход в Umbra" },
       { property: "og:description", content: "Доступ к вашим профилям, прокси и команде." },
       { property: "og:type", content: "website" },
@@ -42,10 +40,6 @@ function toEmail(login: string) {
 
 function AuthPage() {
   const search = Route.useSearch();
-  const navigate = useNavigate();
-  const [mode, setMode] = useState<"signin" | "signup">(
-    search.mode === "signup" ? "signup" : "signin",
-  );
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -56,19 +50,9 @@ function AuthPage() {
     e.preventDefault();
     setBusy(true);
     try {
-      if (mode === "signup") {
-        const { error } = await supabase.auth.signUp({
-          email: toEmail(email),
-          password,
-          options: { emailRedirectTo: `${window.location.origin}${next}` },
-        });
-        if (error) throw error;
-        toast.success("Проверьте почту — мы отправили ссылку для подтверждения.");
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({ email: toEmail(email), password });
-        if (error) throw error;
-        navigate({ to: next });
-      }
+      await signInPrimaryAccount(toEmail(email), password);
+      // Recreate the auth client and all identity-dependent caches together.
+      window.location.replace(next);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Не удалось выполнить вход");
     } finally {
@@ -83,12 +67,10 @@ function AuthPage() {
           ← UMBRA
         </Link>
         <h1 className="mt-4 text-2xl font-semibold">
-          {mode === "signin" ? "Вход" : "Регистрация"}
+          Вход
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          {mode === "signin"
-            ? "Войдите, чтобы управлять профилями и командой."
-            : "Создайте владельца команды — сотрудников добавите позже."}
+          Войдите, чтобы управлять профилями и командой.
         </p>
 
         <form onSubmit={submit} className="mt-6 space-y-4">
@@ -110,23 +92,19 @@ function AuthPage() {
               type="password"
               required
               minLength={8}
-              autoComplete={mode === "signin" ? "current-password" : "new-password"}
+              autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
           </div>
           <Button type="submit" className="w-full" disabled={busy}>
-            {mode === "signin" ? "Войти" : "Зарегистрироваться"}
+            Войти
           </Button>
         </form>
 
-        <button
-          type="button"
-          className="mt-6 w-full text-center text-sm text-muted-foreground hover:text-foreground"
-          onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
-        >
-          {mode === "signin" ? "Нет аккаунта? Зарегистрироваться" : "Уже есть аккаунт? Войти"}
-        </button>
+        <p className="mt-6 text-center text-sm text-muted-foreground">
+          Публичная регистрация временно закрыта. Учётную запись и доступы выдаёт владелец Umbra.
+        </p>
       </div>
     </div>
   );

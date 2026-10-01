@@ -17,8 +17,17 @@ function storage() {
 type Store = ReturnType<typeof storage>;
 const source = fileURLToPath(new URL("../src/lib/app-supabase.ts", import.meta.url));
 const stub = `
-  export const state = { primaryUserId: ${JSON.stringify(ownerId)}, primarySets: [], primarySignouts: [], clients: [] };
+  export const state = { primaryUserId: ${JSON.stringify(ownerId)}, primaryEmail: 'owner@example.test', verifiedEmail: null, primarySets: [], primarySignouts: [], clients: [], primarySignIns: [] };
   export const supabase = { auth: {
+    signInWithPassword: async credentials => {
+      state.primarySignIns.push(credentials);
+      if (credentials.password === 'wrong') return { error: new Error('Invalid login'), data: {} };
+      state.primaryUserId = credentials.email === 'employee@example.test' ? ${JSON.stringify(employeeId)} : ${JSON.stringify(ownerId)};
+      state.primaryEmail = credentials.email;
+      const user = { id: state.primaryUserId, email: credentials.email };
+      return { error: null, data: { user, session: { access_token: state.primaryUserId } } };
+    },
+    getUser: async () => ({ error: null, data: { user: { id: state.primaryUserId, email: state.verifiedEmail || state.primaryEmail } } }),
     getSession: async () => ({ error: null, data: { session: state.primaryUserId ? { user: { id: state.primaryUserId } } : null } }),
     setSession: async tokens => { state.primarySets.push(tokens); state.primaryUserId = tokens.access_token; return { error: null, data: { user: { id: tokens.access_token } } }; },
     signOut: async options => { state.primarySignouts.push(options); state.primaryUserId = null; return { error: null }; }
@@ -56,6 +65,41 @@ async function load(store: Store) {
 afterEach(() => { Reflect.deleteProperty(globalThis, "window"); Reflect.deleteProperty(globalThis, "sessionStorage"); });
 
 describe("temporary employee identity", () => {
+  test("explicit owner login from a preview updates only the primary identity and removes obsolete preview/escrow before reload", async () => {
+    const store = storage(); saveEmployeePreview(store, preview);
+    store.setItem(employeeAuthKey(preview), JSON.stringify({ user: { id: employeeId } }));
+    store.setItem(LEGACY_PREVIEW_KEY, JSON.stringify({ ownerAccessToken: employeeId }));
+    const api = await load(store); api.state.primaryUserId = employeeId;
+    const login = api.signInPrimaryAccount('owner@example.test', 'synthetic-password');
+    expect(api.isPrimarySignInPending()).toBe(true);
+    const user = await login;
+    expect(user.id).toBe(ownerId);
+    expect(api.isPrimarySignInPending()).toBe(false);
+    expect(api.state.primaryUserId).toBe(ownerId);
+    expect(api.employeePreview()).toBeNull();
+    expect(store.getItem(LEGACY_PREVIEW_KEY)).toBeNull();
+    expect((await api.supabase.auth.getSession()).data.session).toBeNull();
+    expect((await (await load(store)).supabase.auth.getSession()).data.session.user.id).toBe(ownerId);
+  });
+  test("explicit employee login remains an employee with no owner return state", async () => {
+    const api = await load(storage());
+    const user = await api.signInPrimaryAccount('employee@example.test', 'synthetic-password');
+    expect(user.id).toBe(employeeId);
+    expect(api.state.primaryUserId).toBe(employeeId);
+    expect(api.employeePreview()).toBeNull();
+  });
+  test("incorrect credentials preserve the existing preview; mismatched server identity never enters the panel", async () => {
+    const store = storage(); saveEmployeePreview(store, preview);
+    const api = await load(store);
+    await expect(api.signInPrimaryAccount('owner@example.test', 'wrong')).rejects.toThrow('Invalid login');
+    expect(api.employeePreview()).toEqual(preview);
+    expect(api.isPrimarySignInPending()).toBe(false);
+    api.state.verifiedEmail = 'employee@example.test';
+    await expect(api.signInPrimaryAccount('owner@example.test', 'synthetic-password')).rejects.toThrow('другую');
+    expect(api.state.primaryUserId).toBeNull();
+    expect(api.state.primarySignouts).toEqual([{scope: 'local'}]);
+    expect(api.isPrimarySignInPending()).toBe(false);
+  });
   test("enter/reload/restart leaves the primary login untouched and chooses employee credentials only in the current window", async () => {
     const store = storage();
     const first = await load(store);

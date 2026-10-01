@@ -1,5 +1,5 @@
 import type { Session, User } from "@supabase/supabase-js";
-import { supabase } from "@/integrations/supabase/client";
+import { recoverLegacyOwnerSession, supabase } from "./app-supabase";
 
 const REFRESH_MARGIN_SECONDS = 60;
 export const AUTH_OPERATION_TIMEOUT_MS = 8_000;
@@ -67,6 +67,7 @@ export async function expireLocalSession(): Promise<void> {
 }
 
 export async function getUsableSession(): Promise<Session | null> {
+  await withAuthTimeout(recoverLegacyOwnerSession());
   const { data, error } = await withAuthTimeout(supabase.auth.getSession());
   if (error) {
     if (isDefinitiveAuthFailure(error)) {

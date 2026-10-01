@@ -78,6 +78,18 @@ async function configureWorker(params, parentSessionId, existing) {
     record.phase = "running";
   } catch {
     if (record.cancelled || record.phase === "stopped" || record.epoch !== epoch) return;
+    // A target held behind `waitForDebugger` has not executed site code yet.
+    // CDP setup can transiently fail while Chromium is creating a worker (for
+    // example during a service-worker update). Closing only that paused target
+    // is safe: its script never ran, and Chromium will attach a fresh target
+    // which goes through this protection path again. Do not take down every
+    // profile tab for a recoverable startup race. If the target was already
+    // running, protection cannot be proven and the profile still fails closed.
+    if (waitingForDebugger) {
+      record.phase = "stopped";
+      await protocol.send("Target.closeTarget", { targetId: info.targetId }).catch(() => {});
+      return;
+    }
     fail(record.state);
     await protocol.send("Target.closeTarget", { targetId: info.targetId }).catch(() => {});
   }

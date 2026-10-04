@@ -62,46 +62,46 @@
 }
 
 :root {
-  --radius: 0.5rem;
-  /* Графитовая гамма клиента: фон #111317, нейтральные поверхности и синий акцент. */
-  --background: oklch(0.1864 0.0088 264.3);
-  --foreground: oklch(0.932 0.0081 278.6);
-  --card: oklch(0.2393 0 0);
-  --card-foreground: oklch(0.932 0.0081 278.6);
-  --popover: oklch(0.2668 0.0189 276.2);
-  --popover-foreground: oklch(0.932 0.0081 278.6);
-  --primary: oklch(0.6015 0.2167 273);
-  --primary-foreground: oklch(0.98 0.004 270);
-  --secondary: oklch(0.2418 0.0036 228.9);
-  --secondary-foreground: oklch(0.932 0.0081 278.6);
-  --muted: oklch(0.281 0.006 265);
-  --muted-foreground: oklch(0.6543 0.0298 278.8);
-  --accent: oklch(0.318 0.014 270);
-  --accent-foreground: oklch(0.932 0.0081 278.6);
-  --destructive: oklch(0.6 0.21 22);
-  --destructive-foreground: oklch(0.97 0.01 20);
-  --success: oklch(0.72 0.17 152);
+  --radius: 0.625rem;
+  /* Нейтральный графит: цвет нужен только для состояния, не для декора. */
+  --background: oklch(0.209 0 0);
+  --foreground: oklch(0.932 0 0);
+  --card: oklch(0.247 0 0);
+  --card-foreground: oklch(0.932 0 0);
+  --popover: oklch(0.278 0 0);
+  --popover-foreground: oklch(0.932 0 0);
+  --primary: oklch(0.932 0 0);
+  --primary-foreground: oklch(0.209 0 0);
+  --secondary: oklch(0.285 0 0);
+  --secondary-foreground: oklch(0.932 0 0);
+  --muted: oklch(0.285 0 0);
+  --muted-foreground: oklch(0.742 0 0);
+  --accent: oklch(0.312 0 0);
+  --accent-foreground: oklch(0.957 0 0);
+  --destructive: oklch(0.704 0.16 24);
+  --destructive-foreground: oklch(0.17 0.015 24);
+  --success: oklch(0.73 0.12 155);
   --success-foreground: oklch(0.17 0.03 150);
-  --warning: oklch(0.78 0.15 78);
+  --warning: oklch(0.8 0.12 80);
   --warning-foreground: oklch(0.2 0.04 80);
-  --border: oklch(0.322 0.009 270);
-  --input: oklch(0.322 0.009 270);
-  --ring: oklch(0.6015 0.2167 273);
+  --border: oklch(0.321 0 0);
+  --input: oklch(0.348 0 0);
+  --ring: oklch(0.742 0 0);
   --chart-1: oklch(0.6015 0.2167 273);
   --chart-2: oklch(0.7 0.15 230);
   --chart-3: oklch(0.78 0.16 85);
   --chart-4: oklch(0.72 0.17 152);
   --chart-5: oklch(0.68 0.2 25);
   --sidebar: oklch(0.2393 0 0);
-  --sidebar-foreground: oklch(0.91 0.006 275);
-  --sidebar-primary: oklch(0.6015 0.2167 273);
-  --sidebar-primary-foreground: oklch(0.98 0.004 270);
-  --sidebar-accent: oklch(0.292 0.007 270);
-  --sidebar-accent-foreground: oklch(0.932 0.0081 278.6);
-  --sidebar-border: oklch(0.304 0.006 270);
-  --sidebar-ring: oklch(0.6015 0.2167 273);
+  --sidebar-foreground: oklch(0.91 0 0);
+  --sidebar-primary: oklch(0.932 0 0);
+  --sidebar-primary-foreground: oklch(0.209 0 0);
+  --sidebar-accent: oklch(0.302 0 0);
+  --sidebar-accent-foreground: oklch(0.957 0 0);
+  --sidebar-border: oklch(0.302 0 0);
+  --sidebar-ring: oklch(0.742 0 0);
   --font-display: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-  --font-code: "IBM Plex Mono", ui-monospace, monospace;
+  --font-code: "Cascadia Code", "Consolas", ui-monospace, monospace;
 }
 
 @theme inline {
@@ -122,10 +122,17 @@
     background-color: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-display);
+    font-size: 14px;
+    line-height: 1.5;
     -webkit-font-smoothing: antialiased;
   }
 
-  h1, h2, h3 { letter-spacing: 0; }
+  h1, h2, h3 { letter-spacing: -0.025em; }
+  .lucide { stroke-width: 1.7; }
+  :is(a, button, input, select, textarea):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 3px;
+  }
 
   * {
     scrollbar-width: thin;
@@ -170,20 +177,24 @@
   }
 
   &::-webkit-scrollbar-thumb {
-    background: color-mix(in oklab, var(--color-primary) 55%, var(--color-border));
+    background: color-mix(in oklab, var(--color-muted-foreground) 45%, transparent);
     border: 2px solid transparent;
     background-clip: padding-box;
     border-radius: 9999px;
   }
 
   &::-webkit-scrollbar-thumb:hover {
-    background: var(--color-primary);
+    background: var(--color-muted-foreground);
     background-clip: padding-box;
   }
 }
 
 /* Статичные поверхности плоские, а тень остаётся только у всплывающих слоёв. */
 .shadow, .shadow-sm { box-shadow: none !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .umbra-workspace :is(button, a, aside, svg) { transition-duration: 0s !important; }
+}
 
 @keyframes boot {
   0% { transform: translateX(-100%); }

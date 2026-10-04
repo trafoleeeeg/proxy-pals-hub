@@ -15,8 +15,9 @@ app.on("window-all-closed", () => {});
 app.commandLine.appendSwitch("disable-background-networking");
 const windows = new Set();
 let server;
+let lastCheck = "startup";
 function finish(code) { for (const win of windows) if (!win.isDestroyed()) win.destroy(); server?.close(); app.exit(code); }
-setTimeout(() => { console.error("WORKER_LIFECYCLE_TIMEOUT"); finish(1); }, 45000).unref();
+setTimeout(() => { console.error("WORKER_LIFECYCLE_TIMEOUT after " + lastCheck); finish(1); }, 45000).unref();
 
 async function identity() {
   // Capture synchronous properties before the script yields even once.
@@ -42,6 +43,7 @@ const fpA = fingerprint("fr-CA", "America/Toronto", 6, 4);
 const fpB = fingerprint("de-DE", "Asia/Tokyo", 10, 2);
 const fpReopened = fingerprint("es-ES", "Europe/Madrid", 2, 8);
 function check(value, fp, label) {
+  lastCheck = label;
   for (const [field, expected] of Object.entries({ ua: fp.userAgent, appVersion: fp.userAgent.replace(/^Mozilla\//, ""), platform: fp.platform, languages: fp.languages, cores: fp.hardwareConcurrency, memory: fp.deviceMemory, timezone: fp.timezone, locale: fp.languages[0] })) {
     assert.ok(JSON.stringify(value[field]) === JSON.stringify(expected), `${label}: ${field} must match this profile`);
   }
@@ -73,9 +75,10 @@ app.whenReady().then(async () => {
     ses.setPermissionCheckHandler(() => false);
     ses.setUserAgent(fp.userAgent, fp.languages.join(","));
     let fault, expectedFailure = false;
+    const diagnostics = [];
     const revoked = new Promise(resolve => { fault = resolve; });
-    const protection = await protectBackgroundWorkers(ses, fp, { onFailure: message => {
-      if (!expectedFailure) { console.error("UNEXPECTED_WORKER_PROTECTION_FAILURE"); finish(1); }
+    const protection = await protectBackgroundWorkers(ses, fp, { onDiagnostic: details => diagnostics.push(details), onFailure: message => {
+      if (!expectedFailure) { console.error("UNEXPECTED_WORKER_PROTECTION_FAILURE", lastCheck, JSON.stringify(diagnostics.at(-1))); finish(1); }
       fault(message);
     } });
     installSessionPrivacy(ses, fp, () => protection.isActive());
@@ -84,11 +87,13 @@ app.whenReady().then(async () => {
     await win.loadURL("about:blank");
     await applyFingerprint(win.webContents, fp, { onFailure: () => { console.error("PAGE_PROTECTION_FAILED"); finish(1); } });
     await win.loadURL(origin);
-    return { ses, win, fp, protection, revoked, expectFailure: () => { expectedFailure = true; }, execute: source => win.webContents.executeJavaScript(source) };
+    return { ses, win, fp, protection, diagnostics, revoked, expectFailure: () => { expectedFailure = true; }, execute: source => win.webContents.executeJavaScript(source) };
   }
   const shared = p => p.execute("new Promise((resolve,reject)=>{const w=new SharedWorker('/shared.js');globalThis.fixturePort=w.port;w.port.onmessage=e=>resolve(e.data);w.onerror=()=>reject(new Error('shared failed'));w.port.start();})");
   const liveShared = p => p.execute("new Promise(resolve=>{fixturePort.onmessage=e=>resolve(e.data);fixturePort.postMessage('again');})");
-  const service = p => p.execute("navigator.serviceWorker.register('/sw.js').then(()=>navigator.serviceWorker.ready).then(reg=>new Promise(resolve=>{const c=new MessageChannel();c.port1.onmessage=e=>{resolve(e.data);c.port1.close();};reg.active.postMessage(0,[c.port2]);}))");
+  // ready can return the OLD active version while register installs a new one.
+  // Exercise the replacement itself, not a message that wakes the exiting SW.
+  const service = p => p.execute("navigator.serviceWorker.register('/sw.js').then(async reg=>{const w=reg.installing||reg.waiting||reg.active;if(w.state!=='activated')await new Promise((resolve,reject)=>{const changed=()=>{if(w.state==='activated')resolve();else if(w.state==='redundant')reject(new Error('replacement became redundant'));};w.addEventListener('statechange',changed);changed();});return new Promise(resolve=>{const c=new MessageChannel();c.port1.onmessage=e=>{resolve(e.data);c.port1.close();};w.postMessage(0,[c.port2]);});})");
   async function close(p) { await p.protection.stop(); p.win.destroy(); windows.delete(p.win); await p.ses.cookies.flushStore(); p.ses.flushStorageData(); }
   let a = await open("a", restart ? fpReopened : fpA);
   check(await shared(a), a.fp, "A first shared");
@@ -100,6 +105,17 @@ app.whenReady().then(async () => {
   check(await a.execute("new Promise((resolve,reject)=>{const w=new SharedWorker('/shared.js',{type:'module',name:'module'});w.onerror=()=>reject(new Error('module SharedWorker failed'));w.port.onmessage=e=>{resolve(e.data);w.port.close();};})"), a.fp, "module SharedWorker");
   check(await a.execute("new Promise((resolve,reject)=>{const w=new Worker('/nested.js');w.onerror=()=>reject(new Error('nested Worker failed'));w.onmessage=e=>{resolve(e.data);w.terminate();};})"), a.fp, "nested dedicated worker");
   check(await a.execute("(async()=>{const r=await navigator.serviceWorker.register('/sw.js?module',{type:'module',scope:'/module/'});const w=r.installing||r.waiting||r.active;if(w.state!=='activated')await new Promise(resolve=>w.onstatechange=()=>{if(w.state==='activated')resolve();});return new Promise(resolve=>{const c=new MessageChannel();c.port1.onmessage=e=>{resolve(e.data);c.port1.close();};w.postMessage(0,[c.port2]);});})()"), a.fp, "module ServiceWorker");
+  await a.execute("navigator.serviceWorker.getRegistration('/module/').then(r=>r.unregister())");
+  await new Promise(resolve => setTimeout(resolve, 200));
+  assert.equal(a.protection.isActive(), true, "removing a worker registration must not close its profile");
+  for (let update = 0; update < 3; update++) {
+    await a.execute(`(async()=>{const r=await navigator.serviceWorker.register('/sw.js?updated=${update}');const w=r.installing||r.waiting||r.active;if(w.state!=='activated')await new Promise(resolve=>w.addEventListener('statechange',()=>{if(w.state==='activated')resolve();}));})()`);
+    await new Promise(resolve => setTimeout(resolve, 200));
+    assert.equal(a.protection.isActive(), true, "updating a worker registration must not close its profile");
+    check(await a.execute("fetch('/worker-state').then(r=>r.json())"), a.fp, "updated ServiceWorker");
+  }
+  assert.ok(a.diagnostics.some(d => d.reason === "worker-retired" && d.outcome === "worker-closed"), "fixture must exercise terminal retirement, not only registration");
+  check(await liveShared(b), b.fp, "B after A unregisters a service worker");
   if (!restart) {
     await a.ses.cookies.set({ url: origin, name: "worker-fixture", value: "retained", expirationDate: Date.now()/1000+3600 });
     await a.execute("localStorage.setItem('worker-fixture','retained');caches.open('worker-fixture').then(c=>c.put('/fixture',new Response('retained')))");
@@ -112,22 +128,31 @@ app.whenReady().then(async () => {
   } else {
     check(await a.execute("fetch('/worker-state').then(r=>r.json())"), a.fp, "restarted app persisted service");
   }
+  lastCheck = "checking localStorage";
   assert.equal(await a.execute("localStorage.getItem('worker-fixture')"), "retained");
+  lastCheck = "checking CacheStorage";
   assert.equal(await a.execute("caches.open('worker-fixture').then(c=>c.match('/fixture')).then(r=>r.text())"), "retained");
+  lastCheck = "checking cookies";
   assert.ok((await a.ses.cookies.get({ name: "worker-fixture" })).some(c=>c.value==='retained'));
-  // An unexpected SW process loss is a protection failure, not permission to
-  // resume an unguarded cached script. The other profile must remain usable.
+  // A stopped but non-retired SW can restart in place without startup pause.
+  // It remains a protection failure; terminal retirement above is distinct.
   a.expectFailure();
+  lastCheck = "before explicit stop";
   await a.win.webContents.debugger.sendCommand("ServiceWorker.enable");
   await a.win.webContents.debugger.sendCommand("ServiceWorker.stopAllWorkers");
+  lastCheck = "explicit stop replied";
   await a.revoked;
+  lastCheck = "protection revoked";
   assert.equal(a.protection.isActive(), false);
-  assert.equal(await a.execute("fetch('/headers?after-failure').then(()=>false,()=>true)"), true);
+  // Test the revoked network gate directly, not a request that keeps trying
+  // to wake the intentionally stopped controller of this synthetic page.
+  lastCheck = "checking blocked network";
+  assert.equal(await a.ses.fetch(origin + "/headers?after-failure").then(() => false, () => true), true);
   check(await liveShared(b), b.fp, "B after A protection failure");
   await close(a); await close(b);
   // Unprofiled panel sessions are explicitly registered and keep native APIs.
   const panel = session.fromPartition("worker-panel");
   await allowBackgroundWorkers(panel);
-  console.log("UMBRA_WORKER_LIFECYCLE_OK: first-statement identity, simultaneous profiles, retained worker and storage, " + (restart ? "app restart" : "profile reopen"));
+  console.log("UMBRA_WORKER_LIFECYCLE_OK: first-statement identity, repeated worker updates, simultaneous profiles, retained worker and storage, " + (restart ? "app restart" : "profile reopen"));
   finish(0);
 }).catch(error => { console.error("WORKER_LIFECYCLE_FAILED", error.message); finish(1); });

@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { listProxies, proxyForCheck, recordProxyCheck, rotateProxyIp } from "@/lib/proxies.functions";
 import { normalizeProxyCheck, performDesktopProxyCheck, proxyAddress } from "@/lib/proxy-input";
 import { IpCountryFlag } from "@/components/ip-country-flag";
-import { confirmRotation } from "@/lib/proxy-rotation";
+import { confirmRotation, prepareRotation } from "@/lib/proxy-rotation";
 import { desktop } from "@/lib/desktop";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,7 +36,7 @@ export function useProxyOps(teamId: string | undefined) {
   const record = useServerFn(recordProxyCheck);
   const rotate = useServerFn(rotateProxyIp);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [completedRotations, setCompletedRotations] = useState<Record<string, { previousIp: string; newIp: string; changedAt: string }>>({});
+  const [completedRotations, setCompletedRotations] = useState<Record<string, { previousIp: string | null; newIp: string; changedAt: string }>>({});
   const invalidate = () => { void qc.invalidateQueries({ queryKey: ["proxies"] }); };
 
   const checkMut = useMutation({
@@ -79,14 +79,15 @@ export function useProxyOps(teamId: string | undefined) {
         if (!response.ok || !response.result) throw new Error("Не удалось проверить прокси в приложении");
         return normalizeProxyCheck(response.result);
       };
-      const before = await probe();
-      await record({ data: { id, teamId, ...before } });
-      if (!before.ok || !before.ip) throw new Error("Текущий IP недоступен. Сначала восстановите подключение к прокси");
-      const request = await rotate({ data: { id, teamId } });
+      const request = await prepareRotation({
+        probe,
+        record: (before) => record({ data: { id, teamId, ...before } }),
+        request: () => rotate({ data: { id, teamId } }),
+      });
       toast.info("Запрос отправлен. Ожидаю новый IP…");
       invalidate();
-      return confirmRotation({
-        previousIp: request.previousIp!,
+      const result = await confirmRotation({
+        previousIp: request.previousIp,
         probe,
         record: async (result, final, confirmed) => {
           const saved = await record({ data: { id, teamId, ...result, rotationRequestedAt: request.requestedAt, rotationFinal: final, rotationConfirmed: confirmed } });
@@ -94,17 +95,17 @@ export function useProxyOps(teamId: string | undefined) {
           return saved;
         },
       });
+      return { ...result, previousIp: request.previousIp };
     },
     onSuccess: (result, id) => {
       // Не ждём очередного опроса сервера: подтверждённый новый адрес уже
       // сохранён, поэтому сразу завершаем плашку «меняем IP» в текущей панели.
-      if (teamId && result.rotationConfirmed && result.ip) {
+      if (teamId && (result.rotationConfirmed || result.connectionRestored) && result.ip) {
+        setErrors((old) => { const next = { ...old }; delete next[id]; return next; });
         const changedAt = new Date().toISOString();
-        const rows = qc.getQueryData<ProxyRow[]>(["proxies", teamId]);
-        const previousIp = rows?.find((proxy) => proxy.id === id)?.rotationPreviousIp;
-        if (previousIp) setCompletedRotations((current) => ({
+        setCompletedRotations((current) => ({
           ...current,
-          [id]: { previousIp, newIp: result.ip ?? previousIp, changedAt },
+          [id]: { previousIp: result.previousIp, newIp: result.ip!, changedAt },
         }));
         qc.setQueryData<ProxyRow[]>(["proxies", teamId], (rows) => rows?.map((proxy) => proxy.id === id ? {
           ...proxy,
@@ -113,11 +114,12 @@ export function useProxyOps(teamId: string | undefined) {
           last_check_latency_ms: result.latency ?? proxy.last_check_latency_ms,
           last_check_error: null,
           rotationStatus: "success",
+          rotationPreviousIp: result.previousIp,
           rotationNewIp: result.ip ?? proxy.rotationNewIp,
           rotationChangedAt: changedAt,
           rotationLastError: null,
         } : proxy));
-        toast.success("Новый IP подтверждён: " + result.ip);
+        toast.success((result.connectionRestored ? "Подключение восстановлено. IP: " : "Новый IP подтверждён: ") + result.ip);
         return;
       }
       // A superseded request does not tell us whether another window finished
@@ -144,7 +146,7 @@ export function ProfileProxyCell({ proxy, ops, compact = false }: { proxy: Proxy
   const rotating = !completed && ((ops.rotateMut.isPending && ops.rotateMut.variables === proxy.id) || proxy.rotationStatus === "changing");
   const error = ops.errors[proxy.id] ?? proxy.last_check_error;
   const shownIp = completed?.newIp ?? proxy.last_check_ip;
-  const previousIp = completed?.previousIp ?? proxy.rotationPreviousIp;
+  const previousIp = completed ? completed.previousIp : proxy.rotationPreviousIp;
   const newIp = completed?.newIp ?? proxy.rotationNewIp;
   const dot = checking || rotating ? "bg-primary animate-pulse" : completed || proxy.last_check_ok === true ? "bg-success" : proxy.last_check_ok === false || error ? "bg-destructive" : "bg-primary";
   const hint = [
@@ -153,7 +155,7 @@ export function ProfileProxyCell({ proxy, ops, compact = false }: { proxy: Proxy
     shownIp ? `IP ${shownIp}${proxy.last_check_latency_ms != null ? ` · ${proxy.last_check_latency_ms} мс` : ""}` : "IP не проверялся",
     proxy.last_checked_at ? `проверено ${relativeTime(proxy.last_checked_at)}` : "",
     previousIp ? `был ${previousIp}${newIp ? " → стал " + newIp : ""}` : "",
-    proxy.rotationChangedAt ? `смена IP ${relativeTime(proxy.rotationChangedAt)}` : "",
+    proxy.rotationChangedAt ? `${previousIp ? "смена IP" : "подключение восстановлено"} ${relativeTime(proxy.rotationChangedAt)}` : "",
     rotating ? "меняем IP, ждём подтверждения" : "",
     error ?? "",
   ].filter(Boolean).join("\n");
@@ -181,7 +183,7 @@ export function ProfileProxyCell({ proxy, ops, compact = false }: { proxy: Proxy
           : <>меняем IP{proxy.rotationPreviousIp ? <> · был <span className="text-foreground/70">{proxy.rotationPreviousIp}</span></> : ""}…</>
         : previousIp
         ? <>был <span className="text-foreground/70">{previousIp}</span> → стал <span className="text-success">{newIp ?? shownIp ?? "—"}</span></>
-        : "смены IP не было"}
+        : proxy.rotationStatus === "success" && newIp ? "подключение восстановлено" : "смены IP не было"}
     </div>
   </div>;
 
@@ -215,7 +217,7 @@ export function ProfileProxyCell({ proxy, ops, compact = false }: { proxy: Proxy
       Был: {proxy.rotationPreviousIp}{proxy.rotationNewIp ? " → стал: " + proxy.rotationNewIp : ""}
     </div>}
     {proxy.rotationChangedAt && <div className="flex items-center gap-1 text-xs text-muted-foreground">
-      <Clock3 className="size-3" />Смена IP {relativeTime(proxy.rotationChangedAt)}
+      <Clock3 className="size-3" />{proxy.rotationPreviousIp ? "Смена IP" : "Подключение восстановлено"} {relativeTime(proxy.rotationChangedAt)}
     </div>}
     {rotating && <p role="status" className="text-xs text-warning">Меняем IP, ждём подтверждения…</p>}
     {error && <p role="status" className="break-words text-xs text-destructive">{error}</p>}

@@ -85,7 +85,8 @@ export const listProxies = createServerFn({ method: "POST" })
     if (error) throw new Error("Не удалось загрузить прокси");
     const rawRows = (rows ?? []) as unknown as Array<Record<string, unknown>>;
     return rawRows.map((row) => {
-      const reconciled = row["last_check_ok"] === true && !!row["last_check_ip"] && !!row["rotation_previous_ip"]
+      const reconciled = row["last_check_ok"] === true && !!row["last_check_ip"]
+        && (!!row["rotation_previous_ip"] || row["rotation_last_error"] === "not_confirmed")
         && row["last_check_ip"] !== row["rotation_previous_ip"]
         && Date.parse(String(row["last_checked_at"] ?? "")) > Date.parse(String(row["rotation_requested_at"] ?? ""))
         && (row["rotation_status"] === "error" || (row["rotation_status"] === "changing" && rotationExpired(row["rotation_requested_at"] as string | null)));
@@ -242,7 +243,7 @@ export const recordProxyCheck = createServerFn({ method: "POST" })
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const db = context.supabase as any;
     const { data: current, error: currentError } = await db.from("proxies")
-      .select("last_check_ip, rotation_status, rotation_changed_at, rotation_previous_ip, rotation_new_ip, rotation_requested_at")
+      .select("last_check_ip, rotation_status, rotation_last_error, rotation_changed_at, rotation_previous_ip, rotation_new_ip, rotation_requested_at")
       .eq("id", data.id).eq("team_id", data.teamId).maybeSingle();
     if (currentError || !current) throw new Error("Не удалось прочитать состояние прокси");
     const now = new Date().toISOString();
@@ -252,7 +253,8 @@ export const recordProxyCheck = createServerFn({ method: "POST" })
     // the provider responded slowly and the earlier rotation probe timed out.
     const reconcilesRotation = (current["rotation_status"] === "error" || (current["rotation_status"] === "changing" && !data.rotationRequestedAt))
       && (!data.rotationRequestedAt || sameRotation)
-      && data.ok && !!data.ip && !!current["rotation_previous_ip"]
+      && data.ok && !!data.ip
+      && (!!current["rotation_previous_ip"] || current["rotation_last_error"] === "not_confirmed")
       && data.ip !== current["rotation_previous_ip"]
       && !!current["rotation_requested_at"];
     // A server-function response can be retried after the first request has
@@ -317,8 +319,12 @@ export const rotateProxyIp = createServerFn({ method: "POST" })
     if (readError) throw new Error("Не удалось прочитать настройки смены IP");
     if (!proxy?.rotation_url_enc) throw new Error("Для этого прокси не настроена ссылка смены IP");
     if (proxy.rotation_status === "changing" && !rotationExpired(proxy.rotation_requested_at)) throw new Error("Смена IP уже выполняется");
+    // The provider's control URL is independent of the proxy tunnel. Rotation
+    // must remain available to recover a failed mobile connection. Only a fresh
+    // successful check supplies a trustworthy baseline for proving an IP change.
     const lastCheck = Date.parse(proxy.last_checked_at ?? "");
-    if (!proxy.last_check_ok || !proxy.last_check_ip || !Number.isFinite(lastCheck) || Date.now() - lastCheck > 60_000) throw new Error("Сначала проверьте текущий IP прокси");
+    const previousIp = proxy.last_check_ok && Number.isFinite(lastCheck) && Date.now() - lastCheck <= 60_000
+      ? proxy.last_check_ip ?? null : null;
     const { decryptSecret } = await import("./crypto.server");
     let url: string;
     try { url = validateRotationUrl(decryptSecret(proxy.rotation_url_enc), false); }
@@ -326,7 +332,7 @@ export const rotateProxyIp = createServerFn({ method: "POST" })
     const requestedAt = new Date().toISOString();
     let claim = db.from("proxies").update({
       rotation_status: "changing", rotation_requested_at: requestedAt, rotation_last_error: null,
-      rotation_previous_ip: proxy.last_check_ip, rotation_new_ip: null,
+      rotation_previous_ip: previousIp, rotation_new_ip: null,
     }).eq("id", data.id).eq("team_id", data.teamId).eq("rotation_status", proxy.rotation_status).eq("rotation_url_enc", proxy.rotation_url_enc);
     if (proxy.rotation_requested_at) claim = claim.eq("rotation_requested_at", proxy.rotation_requested_at);
     else claim = claim.is("rotation_requested_at", null);
@@ -359,7 +365,7 @@ export const rotateProxyIp = createServerFn({ method: "POST" })
       if (markFailureError) throw new Error("Не удалось сохранить состояние смены IP");
       throw new Error(`Смена IP не удалась: ${reason}`);
     }
-    return { ok: true, previousIp: proxy.last_check_ip ?? null, requestedAt };
+    return { ok: true, previousIp, requestedAt };
   });
 
 /** Cloudflare fetch cannot implement an arbitrary HTTP CONNECT / SOCKS tunnel. */

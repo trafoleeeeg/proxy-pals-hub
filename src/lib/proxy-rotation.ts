@@ -13,16 +13,27 @@ export function rotationExpired(requestedAt: string | null | undefined, now = Da
   return !Number.isFinite(time) || now - time >= ROTATION_TIMEOUT_MS;
 }
 
-/** A reachable proxy is not proof of rotation: the actual address must differ. */
+/** With no baseline, success means restored connectivity, not a proven IP change. */
 export function rotationOutcome(previousIp: string | null, result: ProxyCheckResult, final: boolean, confirmed = true): ProxyRotationStatus {
-  if (confirmed && result.ok && previousIp && result.ip && result.ip !== previousIp) return "success";
+  if (confirmed && result.ok && result.ip && (previousIp ? result.ip !== previousIp : final)) return "success";
   return final ? "error" : "changing";
+}
+
+/** Rotation is a recovery action: an unavailable tunnel must not block its provider URL. */
+export async function prepareRotation<T>({ probe, record, request }: {
+  probe: () => Promise<ProxyCheckResult>;
+  record: (result: ProxyCheckResult) => Promise<unknown>;
+  request: () => Promise<T>;
+}) {
+  const before = await probe().catch(() => ({ ok: false as const }));
+  await record(before);
+  return request();
 }
 
 export async function confirmRotation({
   previousIp, probe, record, wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), attempts = 40,
 }: {
-  previousIp: string;
+  previousIp: string | null;
   probe: () => Promise<ProxyCheckResult>;
   record: (result: ProxyCheckResult, final: boolean, confirmed: boolean) => Promise<unknown>;
   wait?: (ms: number) => Promise<unknown>;
@@ -41,14 +52,16 @@ export async function confirmRotation({
     if (changedIp !== null) {
       const saved = await record(result, true, true);
       if (saved && typeof saved === "object" && "staleRotation" in saved && saved.staleRotation === true) {
-        return { ...result, rotationConfirmed: false };
+        return { ...result, rotationConfirmed: false, connectionRestored: false };
       }
-      return { ...result, rotationConfirmed: true };
+      return { ...result, rotationConfirmed: previousIp !== null, connectionRestored: previousIp === null };
     }
     const saved = await record(result, final, false);
     if (saved && typeof saved === "object" && "staleRotation" in saved && saved.staleRotation === true) {
-      return { ...result, rotationConfirmed: false };
+      return { ...result, rotationConfirmed: false, connectionRestored: false };
     }
   }
-  throw new Error("Провайдер принял запрос, но новый IP не подтверждён. Повторите проверку позже.");
+  throw new Error(previousIp
+    ? "Запрос смены отправлен, но новый IP не подтверждён. Повторите проверку позже."
+    : "Запрос смены отправлен, но подключение к прокси пока не восстановилось. Повторите проверку позже.");
 }

@@ -1,11 +1,11 @@
 import { expect, test } from "bun:test";
-import { confirmRotation, rotationExpired, rotationOutcome, sameRotationRequest } from "../src/lib/proxy-rotation";
+import { confirmRotation, prepareRotation, rotationExpired, rotationOutcome, sameRotationRequest } from "../src/lib/proxy-rotation";
 import { validateRotationUrl } from "../src/lib/proxy-input";
 
 test("rotation completes on the first different IP; failures and unchanged addresses remain pending", async () => {
   expect(rotationOutcome("1.2.3.4", { ok: true, ip: "1.2.3.4" }, false)).toBe("changing");
   expect(rotationOutcome("1.2.3.4", { ok: false }, false)).toBe("changing");
-  expect(rotationOutcome(null, { ok: true, ip: "1.2.3.5" }, true)).toBe("error");
+  expect(rotationOutcome(null, { ok: true, ip: "1.2.3.5" }, true, false)).toBe("error");
   const records: unknown[] = [];
   let attempt = 0;
   const result = await confirmRotation({
@@ -22,6 +22,54 @@ test("rotation completes on the first different IP; failures and unchanged addre
     record: async (_result, final) => { finals.push(final); }, wait: async () => {},
   })).rejects.toThrow("не подтверждён");
   expect(finals).toEqual([false, true]);
+});
+
+test("failed connectivity and thrown desktop probes cannot block the recovery request", async () => {
+  for (const probe of [async () => ({ ok: false }), async () => { throw new Error("offline"); }]) {
+    const steps: string[] = [];
+    expect(await prepareRotation({
+      probe,
+      record: async (result) => { expect(result.ok).toBe(false); steps.push("record"); },
+      request: async () => { steps.push("provider"); return { previousIp: null }; },
+    })).toEqual({ previousIp: null });
+    expect(steps).toEqual(["record", "provider"]);
+  }
+});
+
+test("persistence or authorization failure still stops rotation", async () => {
+  let requested = false;
+  await expect(prepareRotation({
+    probe: async () => ({ ok: false }),
+    record: async () => { throw new Error("denied"); },
+    request: async () => { requested = true; },
+  })).rejects.toThrow("denied");
+  expect(requested).toBe(false);
+});
+
+test("recovery without a baseline ends polling but never claims proof of IP change", async () => {
+  let probes = 0;
+  const result = await confirmRotation({
+    previousIp: null,
+    probe: async () => ++probes === 1 ? { ok: false } : { ok: true, ip: "1.2.3.5" },
+    record: async (value, final, confirmed) => {
+      expect(rotationOutcome(null, value, final, confirmed)).toBe(value.ok ? "success" : "changing");
+    },
+    wait: async () => {},
+  });
+  expect(result).toMatchObject({ rotationConfirmed: false, connectionRestored: true, ip: "1.2.3.5" });
+  expect(probes).toBe(2);
+});
+
+test("failed and superseded recovery cannot claim restored connectivity", async () => {
+  await expect(confirmRotation({
+    previousIp: null, probe: async () => ({ ok: false }), attempts: 2,
+    record: async () => {}, wait: async () => {},
+  })).rejects.toThrow("не восстановилось");
+  const result = await confirmRotation({
+    previousIp: null, probe: async () => ({ ok: true, ip: "1.2.3.5" }),
+    record: async () => ({ staleRotation: true }), wait: async () => {},
+  });
+  expect(result).toMatchObject({ rotationConfirmed: false, connectionRestored: false });
 });
 
 test("rotation immediately confirms the first changed address", async () => {

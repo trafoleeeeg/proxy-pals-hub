@@ -25,6 +25,7 @@ function harness() {
   const privacyRecords = new Map();
   const storageClears = [];
   let browserConfig;
+  const shell = { hidden: false, isDestroyed: () => false, focus() {}, hide() { this.hidden = true; }, show() { this.hidden = false; } };
   class Window extends EventEmitter {
     constructor(options) {
       super(); this.options = options; this.destroyed = false;
@@ -78,9 +79,10 @@ function harness() {
   };
   const runtime = createProfileRuntime(electron, {
     cleanupTimeoutMs: 25,
+    shutdownTimeoutMs: 100,
     protectBackgroundWorkers: async () => ({ stop: () => workerStop(), isActive: () => true }),
     createBrowser: async (_electron, options) => (browserConfig = options, {
-      shell: { isDestroyed: () => false, focus() {} }, destroy() {},
+      shell, destroy() {},
       createTab: () => new Window({ webPreferences: { partition: options.partition, contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, devTools: false } }),
     }),
     setupProxy: async (ses) => {
@@ -102,7 +104,7 @@ function harness() {
     },
     privacyStore: { readPermissions: async (id) => privacyRecords.get(id) || {}, writePermissions: async (id, rules) => { privacyRecords.set(id, structuredClone(rules)); } },
   });
-  return { runtime, electron, privacyRecords, windows, sessions, records, tabRecords, bookmarkRecords, storageClears, get browserConfig() { return browserConfig; }, get configured() { return configured; }, get disposed() { return disposed; }, setFlushGate: (gate) => { flushGate = gate; }, setNavigationGate: (gate) => { navigationGate = gate; }, setSnapshotFailure: (value) => { snapshotFailure = value; }, setWorkerStop: (fn) => { workerStop = fn; }, setFreezeCommand: (fn) => { freezeCommand = fn; }, setProxyDispose: (fn) => { proxyDispose = fn; } };
+  return { runtime, electron, shell, privacyRecords, windows, sessions, records, tabRecords, bookmarkRecords, storageClears, get browserConfig() { return browserConfig; }, get configured() { return configured; }, get disposed() { return disposed; }, setFlushGate: (gate) => { flushGate = gate; }, setNavigationGate: (gate) => { navigationGate = gate; }, setSnapshotFailure: (value) => { snapshotFailure = value; }, setWorkerStop: (fn) => { workerStop = fn; }, setFreezeCommand: (fn) => { freezeCommand = fn; }, setProxyDispose: (fn) => { proxyDispose = fn; } };
 }
 
 const payload = () => ({ profileId: ID, deviceId: "test-device", name: "Test", lockToken: "test-lock-token", fingerprint: FP, cookies: "[]", cookiesUpdatedAt: null, proxy: null, startUrl: "https://example.test" });
@@ -335,6 +337,7 @@ test("snapshot failures retain the window and allow retry; snapshots carry monot
   h.sessions.get(`persist:profile-${ID}`).cookies.update([{ name: "changed", value: "v", domain: "example.test", path: "/", session: true }]);
   h.setSnapshotFailure(true);
   await assert.rejects(h.runtime.closeProfileWindow(ID), /Не удалось закрыть профиль/);
+  assert.equal(h.shell.hidden, false, "save failure must restore the shell for retry");
   assert.equal(h.windows[0].destroyed, false); assert.equal(closed, 0);
   h.setSnapshotFailure(false);
   const result = await h.runtime.closeProfileWindow(ID);
@@ -356,6 +359,36 @@ test("failed or stalled worker shutdown cannot trap a profile window after durab
     assert.equal(h.records.get(ID).cookies[0].name, "session");
     await assert.rejects(h.runtime.launchProfileWindow(payload()), /Перезапустите Umbra/);
   }
+});
+
+test("close hides immediately, blocks reopen while pending, and tolerates delayed shutdown", async () => {
+  const h = harness();
+  await h.runtime.launchProfileWindow(payload());
+  const stopped = defer();
+  h.setWorkerStop(() => stopped.promise);
+  let disconnected = false;
+  h.sessions.get(`persist:profile-${ID}`).closeAllConnections = async () => { disconnected = true; };
+  const closing = h.runtime.closeProfileWindow(ID);
+  assert.equal(h.shell.hidden, true);
+  await assert.rejects(h.runtime.launchProfileWindow(payload()), /закрывается/);
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.equal(disconnected, true, "connection shutdown must not wait for worker reply");
+  stopped.resolve(); await closing;
+  await h.runtime.launchProfileWindow(payload());
+  await h.runtime.closeAllProfiles();
+});
+
+test("continuous cookie updates cannot starve the encrypted checkpoint", async () => {
+  const h = harness();
+  await h.runtime.launchProfileWindow(payload());
+  const ses = h.sessions.get(`persist:profile-${ID}`);
+  const change = () => ses.cookies.update([{ name: "busy", value: "checkpoint", domain: "example.test", path: "/", session: true }]);
+  change();
+  const interval = setInterval(change, 30);
+  try {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    assert.equal(h.records.get(ID).cookies[0]?.name, "busy");
+  } finally { clearInterval(interval); await h.runtime.closeAllProfiles(); }
 });
 
 test("crashed renderer debugger rejection or timeout does not block profile close", async () => {

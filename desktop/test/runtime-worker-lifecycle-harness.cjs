@@ -1,13 +1,17 @@
-const { app, BrowserWindow, session } = require("electron");
+const { app, BrowserWindow, session, safeStorage } = require("electron");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const http = require("node:http");
 const { initializeBackgroundWorkers, protectBackgroundWorkers, allowBackgroundWorkers } = require("../runtime/background-workers.cjs");
 const { normalizeFingerprint, applyFingerprint, installSessionPrivacy } = require("../runtime/fingerprint.cjs");
+const { createCookieStore, initializeCookies } = require("../runtime/cookies.cjs");
 const directory = process.env.UMBRA_WORKER_TEST_DIR;
 assert.ok(directory);
-const restart = process.env.UMBRA_WORKER_TEST_PHASE === "restart";
+const phase = process.env.UMBRA_WORKER_TEST_PHASE;
+const restart = phase !== "initial";
+const crashId = "10000000-0000-4000-8000-000000000001";
+const cloudBase = "2026-01-01T00:00:00.000Z";
 app.setPath("userData", path.join(directory, "user"));
 app.setPath("sessionData", path.join(directory, "sessions"));
 app.enableSandbox();
@@ -54,6 +58,19 @@ function check(value, fp, label) {
 }
 app.whenReady().then(async () => {
   await initializeBackgroundWorkers();
+  // Real Windows DPAPI is mandatory in Windows CI; Linux's headless job uses
+  // a deterministic fixture cipher, never an application fallback.
+  let protection = safeStorage;
+  if (process.platform === "win32") assert.ok(safeStorage.isEncryptionAvailable(), "DPAPI required for crash recovery");
+  else {
+    const crypto = require("node:crypto");
+    const key = crypto.createHash("sha256").update("synthetic crash fixture only").digest();
+    protection = { isEncryptionAvailable: () => true,
+      encryptString(value) { const iv = crypto.randomBytes(12); const c = crypto.createCipheriv("aes-256-gcm", key, iv); const data = Buffer.concat([c.update(value), c.final()]); return Buffer.concat([iv, c.getAuthTag(), data]); },
+      decryptString(value) { const c = crypto.createDecipheriv("aes-256-gcm", key, value.subarray(0, 12)); c.setAuthTag(value.subarray(12, 28)); return Buffer.concat([c.update(value.subarray(28)), c.final()]).toString(); },
+    };
+  }
+  const crashStore = createCookieStore({ safeStorage: protection, userData: app.getPath("userData") });
   let port = restart ? JSON.parse(await fs.readFile(path.join(directory, "port.json"), "utf8")) : 0;
   server = http.createServer((req, res) => {
     if (req.url === "/headers") { res.setHeader("Content-Type", "application/json"); return res.end(JSON.stringify({ ua: req.headers["user-agent"], language: req.headers["accept-language"] })); }
@@ -82,6 +99,11 @@ app.whenReady().then(async () => {
       fault(message);
     } });
     installSessionPrivacy(ses, fp, () => protection.isActive());
+    if (phase === "restart" && name === "a") {
+      const restored = await initializeCookies(ses, crashStore, { profileId: crashId, cookiesUpdatedAt: cloudBase, cookies: "[]" });
+      assert.equal(restored.source, "local-recovery", "stale cloud must not erase unclean checkpoint");
+      assert.ok((await ses.cookies.get({ name: "crash-session" })).some(c => c.value === "checkpoint-retained" && c.session));
+    }
     const win = new BrowserWindow({ show: false, webPreferences: { session: ses, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true } });
     windows.add(win);
     await win.loadURL("about:blank");
@@ -134,6 +156,23 @@ app.whenReady().then(async () => {
   assert.equal(await a.execute("caches.open('worker-fixture').then(c=>c.match('/fixture')).then(r=>r.text())"), "retained");
   lastCheck = "checking cookies";
   assert.ok((await a.ses.cookies.get({ name: "worker-fixture" })).some(c=>c.value==='retained'));
+  if (phase === "crash") {
+    await a.ses.cookies.set({ url: origin, name: "crash-session", value: "checkpoint-retained" });
+    await a.ses.cookies.flushStore();
+    a.ses.flushStorageData();
+    await crashStore.write(crashId, await a.ses.cookies.get({}), "2026-02-01T00:00:00.000Z", { pending: true, baseRevision: cloudBase });
+    const rename = fs.rename;
+    const snapshotFile = path.join(app.getPath("userData"), "profile-cookie-snapshots", crashId + ".bin");
+    fs.rename = async (from, to) => {
+      if (to !== snapshotFile) return rename(from, to);
+      // The parent kills only this isolated child after the next temp snapshot
+      // is fsynced, BEFORE its rename. The previous checkpoint must survive.
+      console.log("UMBRA_CHECKPOINT_BEFORE_ABRUPT_EXIT");
+      await new Promise(() => {});
+    };
+    const uncommitted = (await a.ses.cookies.get({})).map(c => c.name === "crash-session" ? { ...c, value: "uncommitted" } : c);
+    await crashStore.write(crashId, uncommitted, "2026-03-01T00:00:00.000Z", { pending: true, baseRevision: cloudBase });
+  }
   // A stopped but non-retired SW can restart in place without startup pause.
   // It remains a protection failure; terminal retirement above is distinct.
   a.expectFailure();

@@ -61,6 +61,19 @@ test("process diagnostics rotate bounded local logs and do not throw on failed w
   assert.equal(recordProcessEvent("\0", "browser-start"), false);
 });
 
+test("cleanup diagnostics identify the failed step without recording error payloads", t => {
+  const { directory, file } = fixture(t);
+  recordProcessEvent(directory, "profile-cleanup-failed", { operation: "workers", elapsedMs: 15001, error: "private-cookie", profileId: "private-id" });
+  recordProcessEvent(directory, "profile-cleanup-failed", { operation: "private", elapsedMs: -1 });
+  const raw = fs.readFileSync(file, "utf8");
+  const rows = raw.trim().split("\n").map(JSON.parse);
+  assert.equal(rows[0].operation, "workers");
+  assert.equal(rows[0].elapsedMs, 15001);
+  assert.equal(rows[1].operation, undefined);
+  assert.equal(rows[1].elapsedMs, undefined);
+  assert.doesNotMatch(raw, /private|profileId|cookie/);
+});
+
 test("worker diagnostics retain only approved stages, reasons and outcomes", (t) => {
   const { directory, file } = fixture(t);
   recordProcessEvent(directory, "background-worker", {

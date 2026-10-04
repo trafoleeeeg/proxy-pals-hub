@@ -6,6 +6,7 @@ const sessions = new WeakMap();
 const contexts = new Map();
 const targets = new Map();
 const terminations = new Map();
+const shutdownTargets = new Map();
 const awaitingContexts = new Map();
 // A failed worker shutdown must never be followed by reopening the same
 // BrowserContext: an old worker could resume with the new profile network gate.
@@ -188,6 +189,8 @@ function initializeBackgroundWorkers() {
         targets.delete(params.sessionId);
       }
       if (method === "Target.targetDestroyed") {
+        const shutdown = shutdownTargets.get(params.targetId);
+        if (shutdown) { shutdownTargets.delete(params.targetId); shutdown.resolve(); }
         const record = terminations.get(params.targetId)?.record || [...targets.values()].find((item) => item.targetId === params.targetId);
         if (record) {
           record.destroyed = true;
@@ -288,13 +291,18 @@ async function stopState(state) {
   state.stopping = (async () => {
     const owned = [...targets.values()].filter((record) => record.state === state);
     for (const record of owned) record.cancelled = true;
-    // Stops executions, not registrations or cookies/IndexedDB/cache data.
-    await state.wc.debugger.sendCommand("ServiceWorker.enable");
-    await state.wc.debugger.sendCommand("ServiceWorker.stopAllWorkers");
-    await Promise.all(owned.map(async (record) => {
-      await protocol.send("Target.closeTarget", { targetId: record.targetId }).catch(() => {});
-      await protocol.send("Target.detachFromTarget", { sessionId: record.id }).catch(() => {});
-    }));
+    // A debugger-held worker can prevent stopAllWorkers/closeTarget replying.
+    // Dispatch stop AND detach concurrently; never wait for stop before detach.
+    // The SW domain's completion confirms stopped executions, not registrations.
+    // Shared workers additionally require target destruction, not close.success.
+    const sharedStopped = owned.filter(record => record.info.type === "shared_worker" && !record.destroyed)
+      .map(record => new Promise(resolve => shutdownTargets.set(record.targetId, { resolve })));
+    const servicesStopped = state.wc.debugger.sendCommand("ServiceWorker.stopAllWorkers");
+    for (const record of owned) {
+      void protocol.send("Target.closeTarget", { targetId: record.targetId }).catch(() => {});
+      void protocol.send("Target.detachFromTarget", { sessionId: record.id }).catch(() => {});
+    }
+    await Promise.all([servicesStopped, ...sharedStopped]);
     state.wc.close();
     state.guard = null;
     sessions.delete(state.ses);

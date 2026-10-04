@@ -209,10 +209,15 @@ function createCookieStore({ safeStorage, userData }) {
       try {
         const data = JSON.parse(safeStorage.decryptString(encrypted));
         if (data.version !== 1 || data.profileId !== profileId(id) || !revision(data.cookiesUpdatedAt)) throw new Error("Invalid snapshot");
-        return { cookies: parseCookies(data.cookies), cookiesUpdatedAt: revision(data.cookiesUpdatedAt) };
+        return { cookies: parseCookies(data.cookies), cookiesUpdatedAt: revision(data.cookiesUpdatedAt),
+          ...(data.pending === true ? { pending: true, baseRevision: revision(data.baseRevision) } : {}) };
       } catch { throw new Error("Unable to decrypt cookie snapshot; local data was preserved"); }
     },
-    async write(id, cookies, cookiesUpdatedAt) {
+    async markClosed(id) {
+      const saved = await this.read(id);
+      if (saved?.pending) await this.write(id, saved.cookies, saved.cookiesUpdatedAt);
+    },
+    async write(id, cookies, cookiesUpdatedAt, recovery = {}) {
       requireEncryption();
       const serialized = canonicalCookies(cookies);
       parseCookies(serialized);
@@ -220,7 +225,8 @@ function createCookieStore({ safeStorage, userData }) {
       const temporary = `${file}.${randomUUID()}.tmp`;
       let handle;
       try {
-        const encrypted = safeStorage.encryptString(JSON.stringify({ version: 1, profileId: profileId(id), cookies: serialized, cookiesUpdatedAt: revision(cookiesUpdatedAt) }));
+        const encrypted = safeStorage.encryptString(JSON.stringify({ version: 1, profileId: profileId(id), cookies: serialized, cookiesUpdatedAt: revision(cookiesUpdatedAt),
+          ...(recovery.pending === true ? { pending: true, baseRevision: revision(recovery.baseRevision) } : {}) }));
         await fs.mkdir(root, { recursive: true });
         handle = await fs.open(temporary, "wx", 0o600);
         await handle.writeFile(encrypted);
@@ -243,11 +249,17 @@ async function initializeCookies(ses, store, payload) {
   const cloudRevision = revision(payload.cookiesUpdatedAt);
   let selected;
   let source;
-  // Серверная версия является подтверждённой: профиль нельзя открыть повторно,
-  // пока предыдущая локальная сессия не синхронизирована. Поэтому явный
-  // облачный снимок (включая импорт из панели или другого ПК) всегда важнее
-  // локального кэша. Сравнение часов разных компьютеров здесь ненадёжно.
-  if (cloudRevision) {
+  // Clean local caches defer to an explicit cloud revision/import. An unclean
+  // checkpoint instead remembers its exact cloud base: it is not just a cache.
+  // Comparing wall clocks from different computers is never authoritative.
+  if (local?.pending && local.cookiesUpdatedAt !== cloudRevision) {
+    // Compare the known base revision, never clocks on different machines.
+    // A changed cloud base might be a deliberate import or another device:
+    // preserve both rather than silently overwriting either snapshot.
+    if (local.baseRevision !== cloudRevision) throw new Error("Unclean cookie recovery conflict; local and cloud data preserved");
+    selected = local;
+    source = "local-recovery";
+  } else if (cloudRevision) {
     selected = { cookies: parseCookies(payload.cookies ?? "[]"), cookiesUpdatedAt: cloudRevision };
     source = "cloud";
   } else if (local) {
@@ -264,7 +276,7 @@ async function initializeCookies(ses, store, payload) {
   // Rejected or expired imports must remain recoverable for another attempt.
   if (selected.cookies.length && !restoreResult.installed) throw new Error("Unable to restore imported cookies: no cookies were accepted");
   const cookiesUpdatedAt = selected.cookiesUpdatedAt || new Date().toISOString();
-  await store.write(payload.profileId, cookies, cookiesUpdatedAt);
+  await store.write(payload.profileId, cookies, cookiesUpdatedAt, { pending: true, baseRevision: cloudRevision });
   return { cookiesUpdatedAt, signature: canonicalCookies(cookies), source, skippedCookies: restoreResult.skipped,
     cookieRestore: { installed: restoreResult.installed, total: selected.cookies.length, expired: restoreResult.expired } };
 }

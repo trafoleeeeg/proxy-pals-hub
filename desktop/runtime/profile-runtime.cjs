@@ -24,6 +24,7 @@ const LAUNCH_ERROR_TEXT = [
   [/^Unable to (?:restore|read encrypted|decrypt) cookie/i, "Не удалось восстановить cookies профиля"],
   [/^Unable to save encrypted/i, "Не удалось сохранить cookies профиля"],
   [/^Unable to flush encrypted/i, "Не удалось сохранить cookies профиля"],
+  [/^Unclean cookie recovery conflict/i, "После аварийного завершения остались локальные cookies, отличающиеся от облачной версии. Обе версии сохранены; требуется согласование данных"],
   [/^Unable to apply fingerprint/i, "Не удалось применить отпечаток браузера"],
   [/^Native screen protection is unavailable/i, "В сборке браузера нет нативной защиты экрана; профиль не запущен"],
   [/^Native screen protection could not be applied/i, "Не удалось применить защиту экрана. После изменения размеров перезапустите Umbra"],
@@ -62,6 +63,7 @@ function createProfileRuntime(electron, options = {}) {
   const configureFingerprint = options.applyFingerprint || applyFingerprint;
   const configureBackgroundWorkers = options.protectBackgroundWorkers || protectBackgroundWorkers;
   const cleanupTimeoutMs = options.cleanupTimeoutMs ?? 4000;
+  const shutdownTimeoutMs = options.shutdownTimeoutMs ?? 15000;
   const profiles = new Map();
   let shuttingDown = false;
   let store;
@@ -103,7 +105,7 @@ function createProfileRuntime(electron, options = {}) {
       const signature = canonicalCookies(cookies);
       if (signature !== entry.cookieSignature) {
         const next = new Date(Math.max(Date.now(), Date.parse(entry.cookiesUpdatedAt || 0) + 1)).toISOString();
-        await cookieStore().write(entry.profileId, cookies, next);
+        await cookieStore().write(entry.profileId, cookies, next, { pending: true, baseRevision: entry.cloudCookieRevision });
         entry.cookiesUpdatedAt = next;
         entry.cookieSignature = signature;
       }
@@ -147,8 +149,9 @@ function createProfileRuntime(electron, options = {}) {
       void persistTabs(entry);
     };
     entry.cookieChanged = () => {
-      clearTimeout(entry.cookieTimer);
-      entry.cookieTimer = setTimeout(checkpoint, 300);
+      // Coalesce without postponing forever on a busy site's cookie stream.
+      if (entry.cookieTimer) return;
+      entry.cookieTimer = setTimeout(() => { entry.cookieTimer = null; checkpoint(); }, 300);
       entry.cookieTimer.unref?.();
     };
     entry.ses.cookies.on("changed", entry.cookieChanged);
@@ -664,6 +667,7 @@ function createProfileRuntime(electron, options = {}) {
       lockToken: payload.lockToken ?? null, deviceId: payload.deviceId ?? null, partition: `persist:profile-${id}`,
       state: "starting", startedAt: new Date().toISOString(), windows: new Set(), pendingWindows: new Set(),
       snapshotQueue: Promise.resolve(), onClosed, closingRequested: false,
+      cloudCookieRevision: revision(payload.cookiesUpdatedAt),
     };
     const initialSettings = sanitizeBrowserSettings(payload.browserSettings, id);
     const bookmarkDefaults = payload.bookmarkDefaults && typeof payload.bookmarkDefaults === "object" ? payload.bookmarkDefaults : null;
@@ -816,6 +820,9 @@ function createProfileRuntime(electron, options = {}) {
     if (!entry) return Promise.resolve(null);
     if (entry.closePromise) return entry.closePromise;
     entry.closingRequested = true;
+    // The user's close action is immediate; durable cleanup continues behind
+    // the hidden shell. Keep the entry/lock until it finishes, preventing reopen.
+    try { entry.primary?.hide?.(); } catch { /* shell may already be destroyed */ }
     // Revocation must block immediately, even while an asynchronous launch or
     // durable cookie save is still in flight.
     if (entry.ses) blockSession(entry.ses);
@@ -827,22 +834,28 @@ function createProfileRuntime(electron, options = {}) {
     closePhase("begin");
     entry.closePromise = (async () => {
       await entry.startPromise.catch(() => {});
+      try { entry.primary?.hide?.(); } catch { /* shell may already be destroyed */ }
       entry.state = "closing";
       unwatchCookies(entry);
        uninstallResourceRecovery(entry);
       if (entry.ses) {
         blockSession(entry.ses);
-        try { await within(Promise.resolve().then(() => entry.backgroundWorkers?.stop()), cleanupTimeoutMs); }
-        catch {
-          // Network remains blocked. Never reopen this BrowserContext until
-          // the browser process restarts: an old worker may still be alive.
-          requireRestart();
-        }
+        const cleanup = async (operation, task, timeout) => {
+          const started = Date.now();
+          try { await within(Promise.resolve().then(task), timeout); }
+          catch {
+            recordProcessEvent(app?.getPath?.("userData"), "profile-cleanup-failed", { operation, elapsedMs: Date.now() - started });
+            requireRestart();
+          }
+        };
+        const workersStopped = cleanup("workers", () => entry.backgroundWorkers?.stop(), shutdownTimeoutMs);
+        const connectionsClosed = cleanup("connections", () => entry.ses.closeAllConnections(), shutdownTimeoutMs);
+        // Network remains blocked while cleanup runs. A timeout quarantines
+        // this BrowserContext; it cannot be reopened in the same process.
         for (const win of entry.windows) {
           try { if (!win.isDestroyed()) win.webContents.stop(); } catch { /* crashed renderer */ }
         }
-        try { await within(Promise.resolve().then(() => entry.ses.closeAllConnections()), Math.min(cleanupTimeoutMs, 3000)); }
-        catch { requireRestart(); }
+        await Promise.all([workersStopped, connectionsClosed]);
       }
       closePhase("workers");
       await Promise.allSettled([...entry.pendingWindows]);
@@ -865,10 +878,16 @@ function createProfileRuntime(electron, options = {}) {
       }
       if (entry.proxyRuntime) {
         try { await within(Promise.resolve().then(() => entry.proxyRuntime.dispose()), cleanupTimeoutMs); }
-        catch { requireRestart(); }
+        catch {
+          recordProcessEvent(app?.getPath?.("userData"), "profile-cleanup-failed", { operation: "proxy" });
+          requireRestart();
+        }
       }
       if (entry.restartRequired) {
         try { app?.emit?.("umbra:profile-restart-required"); } catch { /* notification is optional */ }
+      } else {
+        // Clear crash recovery only after confirmed cleanup and durable outbox.
+        await cookieStore().markClosed?.(entry.profileId);
       }
       for (const win of entry.windows) if (!win.isDestroyed()) win.destroy();
       entry.browser?.destroy();
@@ -879,6 +898,7 @@ function createProfileRuntime(electron, options = {}) {
       closePhase("failed");
       entry.state = "error";
       entry.lastError = "Не удалось закрыть профиль, повторите попытку";
+      try { entry.primary?.show?.(); } catch { /* shell may already be destroyed */ }
       entry.closePromise = null;
       throw new Error(entry.lastError);
     });

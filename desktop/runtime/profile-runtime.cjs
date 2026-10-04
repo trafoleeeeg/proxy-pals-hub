@@ -701,7 +701,9 @@ function createProfileRuntime(electron, options = {}) {
           required: process.env.UMBRA_REQUIRE_NATIVE_HARDWARE === "1" || (process.platform === "win32" && electron.app?.isPackaged === true),
         });
         entry.fp.hardwarePermissions = await privacyStore().readPermissions(id);
-        entry.backgroundWorkers = await configureBackgroundWorkers(entry.ses, entry.fp, { onFailure: (message) => {
+        entry.backgroundWorkers = await configureBackgroundWorkers(entry.ses, entry.fp, {
+          onDiagnostic: (details) => recordProcessEvent(app?.getPath?.("userData"), "background-worker", details),
+          onFailure: (message) => {
           entry.lastError = message;
           blockSession(entry.ses);
           void closeProfileWindow(entry.profileId).then(

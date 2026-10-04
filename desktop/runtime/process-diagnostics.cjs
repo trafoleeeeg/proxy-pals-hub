@@ -8,6 +8,7 @@ const EVENTS = new Set([
   "coordinator-start", "coordinator-before-quit", "coordinator-child-error", "coordinator-child-exit",
   "coordinator-disconnect", "renderer-gone", "child-process-gone",
   "profile-close-phase",
+  "background-worker",
 ]);
 const CLOSE_PHASES = new Set(["begin", "workers", "tabs", "cookies", "outbox", "done", "failed"]);
 const ROLES = new Set(["panel", "profile-shell", "profile-tab", "other"]);
@@ -19,6 +20,10 @@ const PROCESS_TYPES = new Set([
   "GPU", "Utility", "Zygote", "Sandbox helper", "Pepper Plugin", "Pepper Plugin Broker", "Unknown",
 ]);
 const SIGNALS = new Set(["SIGABRT", "SIGBUS", "SIGFPE", "SIGILL", "SIGINT", "SIGKILL", "SIGSEGV", "SIGTERM"]);
+const WORKER_REASONS = new Set(["setup-failed", "close-failed", "resume-failed", "started-unprotected", "worker-crashed", "protocol-disconnect"]);
+const WORKER_STAGES = new Set(["context", "Inspector.enable", "Runtime.enable", "Emulation.setUserAgentOverride",
+  "Emulation.setTimezoneOverride", "Emulation.setLocaleOverride", "Emulation.setHardwareConcurrencyOverride",
+  "Runtime.evaluate", "Target.setAutoAttach", "Runtime.runIfWaitingForDebugger"]);
 
 // This is deliberately an allowlist: never persist URLs, profile names, IPC
 // payloads, command lines, cookies or arbitrary Electron error messages.
@@ -29,6 +34,12 @@ function recordProcessEvent(userData, event, details = {}, options = {}) {
     if (ROLES.has(details.role)) row.role = details.role;
     if (event === "profile-close-phase" && CLOSE_PHASES.has(details.phase)) row.phase = details.phase;
     if (REASONS.has(details.reason)) row.reason = details.reason;
+    if (event === "background-worker") {
+      if (WORKER_REASONS.has(details.reason)) row.reason = details.reason;
+      if (WORKER_STAGES.has(details.stage)) row.stage = details.stage;
+      if (["worker", "shared_worker", "service_worker"].includes(details.workerType)) row.workerType = details.workerType;
+      if (["stopped", "worker-closed"].includes(details.outcome)) row.outcome = details.outcome;
+    }
     if (PROCESS_TYPES.has(details.processType)) row.processType = details.processType;
     if (SIGNALS.has(details.signal)) row.signal = details.signal;
     for (const key of ["exitCode", "childPid", "contentsId"]) {

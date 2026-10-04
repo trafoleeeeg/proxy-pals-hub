@@ -99,7 +99,9 @@ function ProfilesWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [metadataOpen, setMetadataOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
-  const { widths, setWidth, reset: resetWidths } = useColumnWidths();
+  const { widths: savedWidths, setWidth, reset: resetWidths } = useColumnWidths();
+  // Keep names readable at laptop widths without overriding saved column sizes.
+  const widths = { name: 180, ...savedWidths } as Record<string, number>;
   const [visibleColumns, setVisibleColumns] = useState<FixedColumn[]>(DEFAULT_COLUMNS);
   const [visibleFields, setVisibleFields] = useState<string[]>([]);
   const profiles = useQuery({ queryKey: ["profiles", ws?.teamId], queryFn: () => { if (!ws) throw new Error("Команда не загружена"); return listFn({ data: { teamId: ws.teamId } }); }, enabled: !!ws, refetchInterval: 20_000 });
@@ -191,9 +193,9 @@ function ProfilesWorkspace() {
   if (workspace.isPending) return <p role="status" className="text-sm text-muted-foreground">Загрузка рабочего пространства…</p>;
   if (workspace.isError) return <div role="alert" className="flex flex-wrap items-center gap-3 text-sm text-destructive"><span>Не удалось загрузить рабочее пространство.</span><Button variant="outline" disabled={workspace.isFetching} onClick={() => workspace.refetch()}><RefreshCw className={workspace.isFetching ? "size-4 animate-spin" : "size-4"} />{workspace.isFetching ? "Подключение…" : "Повторить"}</Button></div>;
 
-  return <div className="space-y-3">
-    <div className="flex flex-wrap items-center gap-3 border-b border-border pb-3">
-      <div><h1 className="text-xl font-semibold">Профили</h1><p className="text-xs text-muted-foreground">{profiles.data?.length ?? 0} профилей · {running.size} открыто</p></div>
+  return <div className="space-y-4">
+    <div className="flex flex-wrap items-center gap-3 pb-1">
+      <div className="space-y-1"><h1 className="text-2xl font-semibold">Профили</h1><p className="text-sm text-muted-foreground">{profiles.data?.length ?? 0} профилей · {running.size} открыто</p></div>
       <div className="ml-auto flex flex-wrap gap-2">
         {canEdit && <Button variant={editMode ? "secondary" : "outline"} onClick={() => setEditMode((value) => !value)}><Pencil className="size-4" />{editMode ? "Готово" : "Редактировать"}</Button>}
         {canEdit && <Button variant="outline" title="Статусы и поля" aria-label="Статусы и поля" onClick={() => setMetadataOpen(true)}><Settings2 className="size-4" />Статусы и поля</Button>}
@@ -215,10 +217,10 @@ function ProfilesWorkspace() {
         })),
         { label: "Занято", value: occupied, detail: "другим пользователем", icon: LockKeyhole, tone: "text-warning" },
         { label: "С прокси", value: withProxy, detail: `${(profiles.data?.length ?? 0) - withProxy} без прокси`, icon: Globe2, tone: "text-primary" },
-      ].map((stat) => <div key={stat.label} title={stat.detail} className="flex min-w-32 flex-1 items-center gap-2 rounded-md border border-border bg-card px-3 py-2">
-        <stat.icon className={`size-4 shrink-0 ${stat.tone}`} />
+      ].map((stat) => <div key={stat.label} title={stat.detail} className="flex min-w-32 flex-1 items-center gap-2.5 rounded-lg border border-border/60 bg-card/65 px-3 py-2.5">
+        <stat.icon className={`size-4 shrink-0 opacity-80 ${stat.tone}`} />
         <p className="min-w-0 truncate text-xs text-muted-foreground">{stat.label}</p>
-        <p className={`ml-auto text-lg font-semibold leading-5 tabular-nums ${stat.tone}`}>{stat.value}</p>
+        <p className="ml-auto text-base font-medium leading-5 tabular-nums text-foreground">{stat.value}</p>
       </div>)}
     </div>
     <div className="relative"><Search className="pointer-events-none absolute left-3 top-2.5 size-4 text-muted-foreground" /><Input aria-label="Поиск профилей" placeholder="Поиск по профилям" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" /></div>
@@ -234,8 +236,8 @@ function ProfilesWorkspace() {
     {ws?.scope === "member" && folderList.isSuccess && !folderList.data.length && <p role="status" className="text-sm text-warning">Вам пока не открыта ни одна папка с профилями. Владелец может выдать доступ в разделе «Папки».</p>}
     {profiles.isError && <p role="alert" className="text-sm text-destructive">Не удалось обновить профили. <Button size="sm" variant="outline" onClick={() => profiles.refetch()}>Повторить</Button></p>}
     {proxies.isError && <p role="alert" className="text-sm text-warning">Прокси недоступны. <Button size="sm" variant="outline" onClick={() => proxies.refetch()}>Повторить</Button></p>}
-    <div className="min-h-[480px] overflow-hidden border-y border-border">
-      <div className="scroll-thin min-w-0 overflow-x-auto"><Table className="min-w-max table-fixed text-xs"><TableHeader className="sticky top-0 z-10 bg-background"><TableRow>
+    <div className="min-h-[360px] overflow-hidden rounded-xl border border-border/70">
+      <div className="scroll-thin min-w-0 overflow-x-auto"><Table className="min-w-max table-fixed text-[13px]"><TableHeader className="sticky top-0 z-10 bg-background"><TableRow>
         {manage && <TableHead className="w-10"><Checkbox aria-label="Выбрать видимые профили" disabled={!rows.length} checked={visibleSelected === 0 ? false : visibleSelected === rows.length ? true : "indeterminate"} onCheckedChange={(checked) => setSelected((current) => toggleVisibleSelection(current, visibleIds, checked === true))} /></TableHead>}
         <TableHead className="w-12">Запуск</TableHead>{manage && <TableHead className="w-10"><span className="sr-only">Действия</span></TableHead>}<ResizableHead columnKey="name" widths={widths} setWidth={setWidth} className="min-w-28">Название</ResizableHead>{shown("folder") && <ResizableHead columnKey="folder" widths={widths} setWidth={setWidth} className="min-w-24">Папка</ResizableHead>}{shown("status") && <ResizableHead columnKey="status" widths={widths} setWidth={setWidth} className="min-w-24">Статус</ResizableHead>}{shown("proxy") && <ResizableHead columnKey="proxy" widths={widths} setWidth={setWidth} className="min-w-56">Прокси</ResizableHead>}{shown("notes") && <ResizableHead columnKey="notes" widths={widths} setWidth={setWidth} className="min-w-32">Заметки</ResizableHead>}{shownFields.map((field) => <ResizableHead columnKey={"field-" + field.id} widths={widths} setWidth={setWidth} className="min-w-24" key={field.id}>{field.name}</ResizableHead>)}{shown("fingerprint") && <ResizableHead columnKey="fingerprint" widths={widths} setWidth={setWidth} className="min-w-32">Отпечаток</ResizableHead>}{shown("updated") && <ResizableHead columnKey="updated" widths={widths} setWidth={setWidth} className="min-w-28">Изменён</ResizableHead>}{shown("created") && <ResizableHead columnKey="created" widths={widths} setWidth={setWidth} className="min-w-28">Создан</ResizableHead>}
       </TableRow></TableHeader><TableBody>
@@ -248,7 +250,7 @@ function ProfilesWorkspace() {
           const busyBy = !active && profile.lock ? (profile.lock.name || profile.lock.email || "другой сотрудник") : null;
           return <ContextMenu key={profile.id}><ContextMenuTrigger asChild><ProfileDragRow id={profile.id} name={profile.name} disabled={!canEdit || !!busy} data-state={selected.includes(profile.id) ? "selected" : undefined}>
             {manage && <TableCell><Checkbox aria-label={"Выбрать " + profile.name} checked={selected.includes(profile.id)} onCheckedChange={(v) => setSelected((current) => toggleVisibleSelection(current, [profile.id], v === true))} /></TableCell>}
-            <TableCell><Button variant={active ? "outline" : "default"} size="icon" title={active ? "Закрыть профиль" : busyBy ? `Профиль занят: ${busyBy}` : runtime.available ? "Запустить профиль" : "Запуск в приложении Windows"} aria-label={busyBy ? `Профиль ${profile.name} занят: ${busyBy}` : (active ? "Закрыть " : "Запустить ") + profile.name} disabled={!runtime.available || !runtime.ready || runtime.restoring || processing || (!active && locked(profile.id))} onClick={() => { void (active ? runtime.stop(profile.id) : runtime.start(profile.id)).catch((e: Error) => toast.error(e.message)); }}>{processing ? <RefreshCw className="size-4 animate-spin" /> : active ? <Square className="size-4" /> : busyBy ? <LockKeyhole className="size-4" /> : <Play className="size-4" />}</Button></TableCell>
+            <TableCell><Button variant="outline" className={active ? "border-success/40 bg-success/10 text-success hover:bg-success/20 hover:text-success" : "bg-secondary/40"} size="icon" title={active ? "Закрыть профиль" : busyBy ? `Профиль занят: ${busyBy}` : runtime.available ? "Запустить профиль" : "Запуск в приложении Windows"} aria-label={busyBy ? `Профиль ${profile.name} занят: ${busyBy}` : (active ? "Закрыть " : "Запустить ") + profile.name} disabled={!runtime.available || !runtime.ready || runtime.restoring || processing || (!active && locked(profile.id))} onClick={() => { void (active ? runtime.stop(profile.id) : runtime.start(profile.id)).catch((e: Error) => toast.error(e.message)); }}>{processing ? <RefreshCw className="size-4 animate-spin" /> : active ? <Square className="size-4" /> : busyBy ? <LockKeyhole className="size-4" /> : <Play className="size-4" />}</Button></TableCell>
             {manage && <TableCell><DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="size-7" title="Действия с профилем" aria-label={"Действия " + profile.name}><MoreVertical className="size-4" /></Button></DropdownMenuTrigger><DropdownMenuContent align="start" className="w-44">
               <DropdownMenuItem disabled={!canEdit || !!busy || locked(profile.id)} onSelect={() => { setError(null); setEditing({ id: profile.id, name: profile.name, folder: profile.folder, tags: profile.tags.join(", "), notes: profile.notes, proxyId: profile.proxy_id ?? "none", fingerprint: profile.fingerprint, statusId: profile.status_id, customFields: profile.custom_fields }); }}><Pencil className="size-4" />Изменить</DropdownMenuItem>
               <DropdownMenuItem disabled={!canCreate || !!busy} onSelect={() => void perform(profile.id, () => cloneFn({ data: { id: profile.id } }))}><Copy className="size-4" />Создать копию</DropdownMenuItem>

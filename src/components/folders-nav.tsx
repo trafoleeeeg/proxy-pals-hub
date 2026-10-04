@@ -21,8 +21,8 @@ import { useWorkspace } from "@/lib/useWorkspace";
 function MainFolder({ collapsed, count, selected, select }: { collapsed: boolean; count: number; selected: boolean; select: () => void }) {
   const { setNodeRef, isOver } = useDroppable({ id: folderDragId("main") });
   return <Button ref={setNodeRef} variant={selected ? "secondary" : "ghost"} title="Основная — личная папка" aria-label="Папка Основная"
-    className={"h-9 w-full gap-2 px-2 text-xs " + (collapsed ? "justify-center" : "justify-start") + (isOver ? " ring-2 ring-primary" : "")}
-    onClick={select}><LockKeyhole className="size-4 shrink-0 text-primary" />{!collapsed && <><span className="truncate">Основная</span><span className="ml-auto tabular-nums text-muted-foreground">{count}</span></>}</Button>;
+    aria-pressed={selected} className={"h-10 w-full gap-3 px-3 text-sm " + (collapsed ? "justify-center px-0" : "justify-start") + (isOver ? " ring-2 ring-primary" : "")}
+    onClick={select}><LockKeyhole className="size-4 shrink-0 text-muted-foreground" />{!collapsed && <><span className="truncate">Основная</span><span className="ml-auto text-xs tabular-nums text-muted-foreground">{count}</span></>}</Button>;
 }
 
 function SharedFolder({ row, collapsed, count, selected, canManage, select, rename, remove }: {
@@ -36,12 +36,12 @@ function SharedFolder({ row, collapsed, count, selected, canManage, select, rena
   return <ContextMenu><ContextMenuTrigger asChild><Button ref={setNodeRef}
     variant={selected ? "secondary" : "ghost"} title={row.name} aria-label={`Папка ${row.name}`}
     style={{ transform: CSS.Transform.toString(transform), transition }}
-    className={"h-9 w-full gap-2 px-2 text-xs " + (collapsed ? "justify-center" : "justify-start") + (isDragging ? " opacity-35" : "") + (isOver ? " ring-2 ring-primary" : "")}
+    aria-pressed={selected} className={"group h-10 w-full gap-3 px-3 text-sm " + (collapsed ? "justify-center px-0" : "justify-start") + (isDragging ? " opacity-35" : "") + (isOver ? " ring-2 ring-primary" : "")}
     onClick={select}>
     {movable && !collapsed ? <span {...attributes} {...listeners} aria-label={`Перетащить папку ${row.name}`}
-      className="flex size-4 shrink-0 cursor-grab items-center justify-center active:cursor-grabbing" style={{ touchAction: "none" }}><GripVertical className="size-4" /></span>
+      className="relative flex size-4 shrink-0 cursor-grab items-center justify-center text-muted-foreground active:cursor-grabbing" style={{ touchAction: "none" }}><Folder className="absolute size-4 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0" /><GripVertical className="size-4 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100" /></span>
       : <Folder className="size-4 shrink-0 text-muted-foreground" />}
-    {!collapsed && <><span className="truncate">{row.name}</span><span className="ml-auto tabular-nums text-muted-foreground">{count}</span></>}
+    {!collapsed && <><span className="truncate">{row.name}</span><span className="ml-auto text-xs tabular-nums text-muted-foreground">{count}</span></>}
   </Button></ContextMenuTrigger><ContextMenuContent>
     <ContextMenuItem onSelect={select}>Открыть</ContextMenuItem>
     {movable && <><ContextMenuItem onSelect={rename}>Переименовать</ContextMenuItem><ContextMenuItem onSelect={remove}>Удалить</ContextMenuItem></>}
@@ -86,9 +86,9 @@ export function FoldersNav({ collapsed = false }: { collapsed?: boolean }) {
     if (!ws || !window.confirm(`Удалить папку «${row.name}»? Профили перейдут в вашу Основную.`)) return;
     void deleteFn({ data: { teamId: ws.teamId, id: row.id } }).then(() => { if (folder === row.name) setFolder(MAIN_FOLDER); refresh(); }).catch((error: Error) => toast.error(error.message));
   };
-  return <div className="mt-2 border-t border-sidebar-border pt-2">
+  return <div className="mt-4 border-t border-sidebar-border/70 pt-3">
     <Link to="/app/folders" title="Управление папками" aria-label="Папки" aria-current={pathname === "/app/folders" ? "page" : undefined}
-      className={"mb-1 flex items-center gap-2 rounded-md px-2 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground " + (collapsed ? "justify-center" : "")}>
+      className={"mb-1 flex items-center gap-3 rounded-lg px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent/60 hover:text-foreground " + (collapsed ? "justify-center px-0" : "")}>
       <FolderCog className="size-4 shrink-0" />{!collapsed && "Папки"}
     </Link>
     <div className="flex flex-col gap-0.5">

@@ -48,7 +48,7 @@ function api<T>(method: string, handler: (data: any) => T) {
     return structuredClone(await handler(input.data ?? {}));
   };
 }
-const workspaces = ["a", "b"].map((id) => ({ teamId: `team-${id}`, teamName: id === "a" ? "Основная команда" : "Вторая команда", role: scenario === "member" ? "member" : "owner", userId: "owner", email: "owner@example.com" }));
+const workspaces = ["a", "b"].map((id) => ({ teamId: `team-${id}`, teamName: id === "a" ? "Основная команда" : "Вторая команда", role: scenario === "member" ? "member" : "owner", scope: scenario === "member" ? "member" : "owner", isSuperadmin: false, userId: "owner", email: "owner@example.com" }));
 export const listWorkspaces = api("listWorkspaces", () => workspaces);
 export const getWorkspace = api("getWorkspace", (data) => workspaces.find((team) => team.teamId === (data.teamId ?? "team-a"))!);
 export const listProfiles = api("listProfiles", (data) => fixture.profiles.filter((profile) => profile.teamId === data.teamId));
@@ -148,6 +148,38 @@ export const checkProxy = api("checkProxy", () => ({ error: "Проверка в
 export const proxyForCheck = api("proxyForCheck", () => ({ id: "proxy-1", protocol: "http", host: "proxy.example", port: 8080, username: null, password: "" }));
 export const recordProxyCheck = api("recordProxyCheck", () => ({ ok: true }));
 export const rotateProxyIp = api("rotateProxyIp", () => ({ ok: true, previousIp: "203.0.113.1", requestedAt: new Date().toISOString() }));
+// These explicit mocks track current panel imports without contacting a real
+// authentication service, database, proxy provider or desktop profile.
+const sharedFolders = [
+  { id: "folder-work", name: "Работа", isDefault: false, virtual: false, position: 0 },
+  { id: "folder-social", name: "Социальные сети", isDefault: false, virtual: false, position: 1 },
+];
+export const listFolders = api("listFolders", () => sharedFolders);
+export const reorderFolders = api("reorderFolders", () => ({ ok: true }));
+export const reorderProfiles = api("reorderProfiles", () => ({ ok: true }));
+export const renameFolder = api("renameFolder", (data) => { const folder = sharedFolders.find((row) => row.id === data.id); if (folder) folder.name = data.name; return { ok: true }; });
+export const deleteFolder = api("deleteFolder", () => ({ ok: true }));
+export const transferProfiles = api("transferProfiles", () => ({ transferred: 1 }));
+export const getProfileCookieStatus = api("getProfileCookieStatus", () => ({ total: 1, usable: 1, updatedAt: now }));
+export const updateProfileStatus = api("updateProfileStatus", () => ({ ok: true }));
+export const deleteProfileStatus = api("deleteProfileStatus", () => ({ ok: true }));
+export const getMyPermissions = api("getMyPermissions", () => ({ scope: scenario === "member" ? "member" : "owner",
+  "profile.create": true, "profile.edit": true, "profile.delete": true, "profile.proxy": true,
+  "folder.manage": scenario !== "member", "proxy.manage": true, "bookmarks.manage": true,
+}));
+export const startEmployeeSession = api("startEmployeeSession", () => { throw new Error("Not supported in the isolated visual fixture"); });
+export const endEmployeeSession = api("endEmployeeSession", () => ({ ok: true }));
+export const listMemberPermissions = api("listMemberPermissions", () => []);
+export const setMemberPermissions = api("setMemberPermissions", () => ({ ok: true }));
+export const setMemberScope = api("setMemberScope", () => ({ ok: true }));
+export const createEmployee = api("createEmployee", () => ({ id: "fixture-employee" }));
+export const updateEmployee = api("updateEmployee", () => ({ ok: true }));
+export const revokeEmployeeAccess = api("revokeEmployeeAccess", () => ({ ok: true }));
+export const deleteEmployeeAccount = api("deleteEmployeeAccount", () => ({ ok: true }));
+export const touchPresence = api("touchPresence", () => ({ ok: true }));
+export const listPresence = api("listPresence", () => []);
+export const getBookmarkDefaults = api("getBookmarkDefaults", (data) => ({ teamId: data.teamId, bookmarks: [], bookmarkBarVisible: true, revision: 1, updatedAt: null }));
+export const saveBookmarkDefaults = api("saveBookmarkDefaults", () => ({ ok: true }));
 if (scenario === "extensions") {
   bridge.listExtensions = async () => ({ ok: true, extensions: [{ id: "fixture-extension", name: "Пример расширения", version: "1.0" }] });
   bridge.addExtension = async () => ({ ok: true, extension: { id: "fixture-added", name: "Новое расширение", version: "2.0" } });

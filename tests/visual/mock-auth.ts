@@ -1,2 +1,6 @@
 import { fixture } from "./mock-api";
-export const supabase = { auth: { signOut: async () => { fixture.calls.push({ method: "signOut", data: {} }); return { error: null }; } } };
+const channel = { on: () => channel, subscribe: () => channel };
+export const supabase = {
+  channel: () => channel, removeChannel: async () => {},
+  auth: { signOut: async () => { fixture.calls.push({ method: "signOut", data: {} }); return { error: null }; } },
+};

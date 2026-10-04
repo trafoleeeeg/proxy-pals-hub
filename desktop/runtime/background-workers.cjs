@@ -160,7 +160,7 @@ function initializeBackgroundWorkers() {
           // This also describes a normally retired SW version. Only terminal
           // target destruction allows traffic again; in-place restart is unsafe.
           if (record.info.type === "service_worker" && !record.cancelled) {
-            if (record.state?.redundantTargets.has(record.targetId)) {
+            if (record.state?.redundantTargets?.has(record.targetId)) {
               record.retired = true;
               diagnose(record.state, "worker-retired", record, "worker-closed");
             } else awaitTermination(record, record.closing);
@@ -183,7 +183,7 @@ function initializeBackgroundWorkers() {
         const record = targets.get(params.sessionId);
         if (record) {
           record.cancelled = true; ++record.epoch;
-          record.state?.redundantTargets.delete(record.targetId);
+          record.state?.redundantTargets?.delete(record.targetId);
         }
         targets.delete(params.sessionId);
       }
@@ -191,7 +191,7 @@ function initializeBackgroundWorkers() {
         const record = terminations.get(params.targetId)?.record || [...targets.values()].find((item) => item.targetId === params.targetId);
         if (record) {
           record.destroyed = true;
-          record.state?.redundantTargets.delete(record.targetId);
+          record.state?.redundantTargets?.delete(record.targetId);
           for (const [versionId, targetId] of record.state?.workerVersions || []) {
             if (targetId === record.targetId) record.state.workerVersions.delete(versionId);
           }

@@ -382,3 +382,18 @@ test("diagnostic callback failure does not interfere with fail-closed", async ()
   assert.equal(policy.blocked, true);
   assert.deepEqual(f.failures, ["a"]);
 });
+
+test("late workers in a closed context retain its deny policy without throwing", async () => {
+  const f = fixture();
+  const a = await f.protect();
+  await a.protection.stop();
+  for (const id of ["late-detached", "late-destroyed"]) {
+    f.attach({ id });
+    await f.drain();
+    assert.doesNotThrow(() => f.protocol.emit("message", "Inspector.targetCrashed", {}, id));
+    if (id === "late-detached") assert.doesNotThrow(() => f.protocol.emit("message", "Target.detachedFromTarget", { sessionId: id }));
+    assert.doesNotThrow(() => f.protocol.emit("message", "Target.targetDestroyed", { targetId: `target-${id}` }));
+  }
+  assert.equal(a.protection.isActive(), false);
+  assert.equal(f.calls.some(c => c.method === "Runtime.runIfWaitingForDebugger"), false);
+});

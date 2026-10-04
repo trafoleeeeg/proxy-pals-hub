@@ -48,7 +48,7 @@ function api<T>(method: string, handler: (data: any) => T) {
     return structuredClone(await handler(input.data ?? {}));
   };
 }
-const workspaces = ["a", "b"].map((id) => ({ teamId: `team-${id}`, teamName: id === "a" ? "Основная команда" : "Вторая команда", role: scenario === "member" ? "member" : "owner", scope: scenario === "member" ? "member" : "owner", isSuperadmin: false, userId: "owner", email: "owner@example.com" }));
+const workspaces = ["a", "b"].map((id) => ({ teamId: `team-${id}`, teamName: id === "a" ? "Основная команда" : "Вторая команда", role: scenario === "member" ? "member" : "owner", scope: scenario === "member" ? "member" : "owner", canManage: scenario !== "member", isSuperadmin: false, userId: "owner", email: "owner@example.com" }));
 export const listWorkspaces = api("listWorkspaces", () => workspaces);
 export const getWorkspace = api("getWorkspace", (data) => workspaces.find((team) => team.teamId === (data.teamId ?? "team-a"))!);
 export const listProfiles = api("listProfiles", (data) => fixture.profiles.filter((profile) => profile.teamId === data.teamId));
@@ -89,7 +89,7 @@ export const importProfileCookies = api("importProfileCookies", (data) => { fixt
 export const exportProfileCookies = api("exportProfileCookies", () => ({ cookies: fixture.cookies }));
 export const listMembers = api("listMembers", () => ({ members: [
   { id: "m1", userId: "owner", role: "owner", email: "owner@example.com" },
-  { id: "m2", userId: "staff", role: "member", email: "staff@example.com" },
+  { id: "m2", userId: "staff", role: "member", scope: "member", email: "staff@example.com" },
 ], invites: [{ id: "invite-1", email: "verylongemailaddress".repeat(8) + "@example.com", token: "test-invite" }], access: fixture.access }));
 export const setProfilesAccess = api("setProfilesAccess", (data) => {
   fixture.access = fixture.access.filter((row) => row.user_id !== data.userId || !data.profileIds.includes(row.profile_id));
@@ -155,6 +155,9 @@ const sharedFolders = [
   { id: "folder-social", name: "Социальные сети", isDefault: false, virtual: false, position: 1 },
 ];
 export const listFolders = api("listFolders", () => sharedFolders);
+export const createFolder = api("createFolder", () => ({ id: "fixture-folder-new" }));
+export const listFolderAccess = api("listFolderAccess", () => [{ folder: "Работа", userId: "staff" }]);
+export const setFolderAccess = api("setFolderAccess", () => ({ ok: true }));
 export const reorderFolders = api("reorderFolders", () => ({ ok: true }));
 export const reorderProfiles = api("reorderProfiles", () => ({ ok: true }));
 export const renameFolder = api("renameFolder", (data) => { const folder = sharedFolders.find((row) => row.id === data.id); if (folder) folder.name = data.name; return { ok: true }; });
@@ -178,6 +181,13 @@ export const revokeEmployeeAccess = api("revokeEmployeeAccess", () => ({ ok: tru
 export const deleteEmployeeAccount = api("deleteEmployeeAccount", () => ({ ok: true }));
 export const touchPresence = api("touchPresence", () => ({ ok: true }));
 export const listPresence = api("listPresence", () => []);
+export const listTrash = api("listTrash", () => [{ id: "fixture-trash", name: "Удалённый тестовый профиль", folder: "Работа", deleted_at: new Date(Date.now() - 86_400_000).toISOString() }]);
+export const restoreProfile = api("restoreProfile", () => ({ ok: true }));
+export const listAgentKeys = api("listAgentKeys", () => []);
+export const listAgentActivity = api("listAgentActivity", () => []);
+export const createAgentKey = api("createAgentKey", () => { throw new Error("Not supported in the isolated visual fixture"); });
+export const revokeAgentKey = api("revokeAgentKey", () => ({ ok: true }));
+export const deleteAgentKey = api("deleteAgentKey", () => ({ ok: true }));
 export const getBookmarkDefaults = api("getBookmarkDefaults", (data) => ({ teamId: data.teamId, bookmarks: [], bookmarkBarVisible: true, revision: 1, updatedAt: null }));
 export const saveBookmarkDefaults = api("saveBookmarkDefaults", () => ({ ok: true }));
 if (scenario === "extensions") {

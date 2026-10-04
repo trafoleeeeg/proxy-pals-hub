@@ -50,7 +50,7 @@ function fixture() {
   const policies = new Map();
   const fp = { timezone: "UTC", languages: ["en-US"], hardwareConcurrency: 8 };
   return {
-    protocol, calls, diagnostics, failures,
+    protocol, calls, diagnostics, failures, guards,
     versions(versions, contextId = "a") { guards.get(contextId).emit("message", {}, "ServiceWorker.workerVersionUpdated", { versions }); },
     intercept(fn) { intercept = fn; },
     async protect(contextId = "a") {
@@ -92,6 +92,36 @@ test("worker resumes only after every protection command succeeds", async () => 
   assert.equal(f.calls.at(-1).method, "Runtime.runIfWaitingForDebugger");
   assert.ok(f.calls.findIndex((c) => c.method === "Runtime.evaluate") < f.calls.length - 1);
   assert.equal(f.failures.length, 0);
+});
+
+test("shutdown detaches debugger-held workers without waiting for stop acknowledgement", async () => {
+  const f = fixture();
+  const { protection } = await f.protect();
+  f.attach(); await f.drain();
+  let finishStop;
+  f.guards.get("a").sendCommand = method => {
+    assert.equal(method, "ServiceWorker.stopAllWorkers");
+    return new Promise(resolve => { finishStop = resolve; });
+  };
+  f.intercept(async method => {
+    if (method === "Target.closeTarget") return new Promise(() => {});
+    if (method === "Target.detachFromTarget") { f.destroy(); finishStop(); }
+  });
+  await protection.stop();
+  assert.equal(protection.isActive(), false);
+  assert.deepEqual(f.failures, []);
+});
+
+test("shared-worker shutdown requires actual destruction, not closeTarget success", async () => {
+  const f = fixture();
+  const { protection } = await f.protect();
+  f.attach({ type: "shared_worker" }); await f.drain();
+  let completed = false;
+  const closing = protection.stop().then(() => { completed = true; });
+  await f.drain();
+  assert.equal(completed, false);
+  f.destroy(); await closing;
+  assert.equal(completed, true);
 });
 
 test("failed startup closes only a confirmed paused worker, fresh attachment is protected", async () => {

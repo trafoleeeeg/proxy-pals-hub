@@ -84,6 +84,30 @@ test("encrypted snapshots retain session cookies and reject tampering without ov
   assert.deepEqual(await fs.readFile(filename), encrypted);
 });
 
+test("unclean checkpoint restores local cookies against the exact cloud base, not machine clocks", async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "umbra-cookie-recovery-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const store = createCookieStore({ safeStorage: encryption(), userData: directory });
+  // Even a locally older timestamp must win when based on this exact cloud revision.
+  await store.write(ID, [cookie("local-checkpoint")], OLD, { pending: true, baseRevision: NEW });
+  const result = await initializeCookies(session(), store, { profileId: ID, cookiesUpdatedAt: NEW, cookies: JSON.stringify([cookie("cloud-base")]) });
+  assert.equal(result.source, "local-recovery");
+  assert.equal((await store.read(ID)).cookies[0].value, "local-checkpoint");
+  assert.equal((await store.read(ID)).pending, true);
+  await store.markClosed(ID);
+  assert.equal((await store.read(ID)).pending, undefined);
+});
+
+test("conflicting cloud import cannot overwrite an unclean checkpoint or native cookies", async () => {
+  const local = { cookies: [cookie("local")], cookiesUpdatedAt: NEW, pending: true, baseRevision: OLD };
+  const ses = session([cookie("native")]);
+  let written = false;
+  const store = { read: async () => local, write: async () => { written = true; } };
+  await assert.rejects(initializeCookies(ses, store, { profileId: ID, cookiesUpdatedAt: "2026-03-01T00:00:00.000Z", cookies: "[]" }), /recovery conflict/);
+  assert.equal(written, false);
+  assert.equal((await ses.cookies.get({}))[0].value, "native");
+});
+
 test("confirmed cloud cookies override local cache while unversioned launches keep local data", async () => {
   let local = { cookies: [cookie("local")], cookiesUpdatedAt: NEW };
   const store = { read: async () => local, write: async (_id, cookies, cookiesUpdatedAt) => { local = { cookies, cookiesUpdatedAt }; } };

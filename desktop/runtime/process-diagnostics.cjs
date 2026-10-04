@@ -8,6 +8,7 @@ const EVENTS = new Set([
   "coordinator-start", "coordinator-before-quit", "coordinator-child-error", "coordinator-child-exit",
   "coordinator-disconnect", "renderer-gone", "child-process-gone",
   "profile-close-phase",
+  "profile-cleanup-failed",
   "background-worker",
 ]);
 const CLOSE_PHASES = new Set(["begin", "workers", "tabs", "cookies", "outbox", "done", "failed"]);
@@ -33,6 +34,10 @@ function recordProcessEvent(userData, event, details = {}, options = {}) {
     const row = { at: new Date().toISOString(), event, pid: process.pid };
     if (ROLES.has(details.role)) row.role = details.role;
     if (event === "profile-close-phase" && CLOSE_PHASES.has(details.phase)) row.phase = details.phase;
+    if (event === "profile-cleanup-failed") {
+      if (["workers", "connections", "proxy"].includes(details.operation)) row.operation = details.operation;
+      if (Number.isSafeInteger(details.elapsedMs) && details.elapsedMs >= 0) row.elapsedMs = details.elapsedMs;
+    }
     if (REASONS.has(details.reason)) row.reason = details.reason;
     if (event === "background-worker") {
       if (WORKER_REASONS.has(details.reason)) row.reason = details.reason;

@@ -9,6 +9,7 @@ function fixture() {
   const protocol = new EventEmitter();
   const calls = [];
   let intercept = async () => undefined;
+  const guards = new Map();
   protocol.send = async (method, args, id) => {
     calls.push({ method, args, id });
     const result = await intercept(method, args, id);
@@ -16,13 +17,16 @@ function fixture() {
   };
   class WebContentsView {
     constructor({ webPreferences: { session } }) {
+      const debuggerApi = new EventEmitter();
+      guards.set(session.contextId, debuggerApi);
+      debuggerApi.attach = () => {};
+      debuggerApi.sendCommand = async method => {
+        if (method === "ServiceWorker.enable") debuggerApi.emit("message", {}, "ServiceWorker.workerVersionUpdated", { versions: [] });
+        return method === "Target.getTargetInfo" ? { targetInfo: { browserContextId: session.contextId } } : {};
+      };
       this.webContents = {
         setWindowOpenHandler() {}, loadURL: async () => {}, close() {},
-        debugger: {
-          attach() {},
-          sendCommand: async (method) => method === "Target.getTargetInfo"
-            ? { targetInfo: { browserContextId: session.contextId } } : {},
-        },
+        debugger: debuggerApi,
       };
     }
   }
@@ -47,6 +51,7 @@ function fixture() {
   const fp = { timezone: "UTC", languages: ["en-US"], hardwareConcurrency: 8 };
   return {
     protocol, calls, diagnostics, failures,
+    versions(versions, contextId = "a") { guards.get(contextId).emit("message", {}, "ServiceWorker.workerVersionUpdated", { versions }); },
     intercept(fn) { intercept = fn; },
     async protect(contextId = "a") {
       const policy = { blocked: false, connectionsClosed: false };
@@ -70,6 +75,10 @@ function fixture() {
         targetInfo: { targetId: `target-${id}`, browserContextId: contextId, type },
       }, parent);
     },
+    destroy(id = "sw") {
+      protocol.emit("message", "Target.detachedFromTarget", { sessionId: id });
+      protocol.emit("message", "Target.targetDestroyed", { targetId: `target-${id}` });
+    },
     async drain() { for (let i = 0; i < 12; i++) await new Promise(setImmediate); },
   };
 }
@@ -92,6 +101,7 @@ test("failed startup closes only a confirmed paused worker, fresh attachment is 
     if (method === "Emulation.setTimezoneOverride" && id === "sw") throw new Error("startup race");
     if (method === "Target.closeTarget") {
       f.protocol.emit("message", "Inspector.targetCrashed", {}, "sw");
+      f.destroy();
       return { success: true };
     }
   });
@@ -172,7 +182,10 @@ test("worker termination racing setup rejection does not stop the profile", asyn
 test("preload exception cannot resume the unprotected worker", async () => {
   const f = fixture();
   const { protection } = await f.protect();
-  f.intercept(async (method) => method === "Runtime.evaluate" ? { exceptionDetails: {} } : undefined);
+  f.intercept(async (method) => {
+    if (method === "Target.closeTarget") f.destroy();
+    return method === "Runtime.evaluate" ? { exceptionDetails: {} } : undefined;
+  });
   f.attach();
   await f.drain();
   assert.equal(protection.isActive(), true);
@@ -180,7 +193,7 @@ test("preload exception cannot resume the unprotected worker", async () => {
   assert.equal(f.diagnostics[0].outcome, "worker-closed");
 });
 
-test("running service-worker crash still fails closed, other profiles stay active", async () => {
+test("unconfirmed service-worker stop keeps traffic blocked and then fails closed", async () => {
   const f = fixture();
   const a = await f.protect();
   const b = await f.protect("b");
@@ -189,9 +202,12 @@ test("running service-worker crash still fails closed, other profiles stay activ
   f.protocol.emit("message", "Inspector.targetCrashed", {}, "sw");
   await f.drain();
   assert.equal(a.protection.isActive(), false);
+  assert.equal(a.policy.connectionsClosed, true);
+  assert.equal(f.failures.length, 0);
+  await new Promise(resolve => setTimeout(resolve, 1100));
   assert.equal(a.policy.blocked, true);
   assert.equal(b.protection.isActive(), true);
-  assert.equal(f.diagnostics[0].reason, "worker-crashed");
+  assert.equal(f.diagnostics[0].reason, "termination-unconfirmed");
 });
 
 test("shared-worker restart reapplies protection before resuming", async () => {
@@ -207,6 +223,123 @@ test("shared-worker restart reapplies protection before resuming", async () => {
   assert.ok(f.calls.slice(before).some((c) => c.method === "Runtime.evaluate"));
   assert.equal(f.calls.at(-1).method, "Runtime.runIfWaitingForDebugger");
   assert.equal(f.failures.length, 0);
+});
+
+test("retired service worker must be destroyed, not merely detached, before traffic resumes", async () => {
+  const f = fixture();
+  const a = await f.protect();
+  const b = await f.protect("b");
+  f.attach();
+  await f.drain();
+  f.protocol.emit("message", "Inspector.targetCrashed", {}, "sw");
+  f.protocol.emit("message", "Target.detachedFromTarget", { sessionId: "sw" });
+  await f.drain();
+  assert.equal(a.protection.isActive(), false);
+  assert.equal(b.protection.isActive(), true);
+  f.protocol.emit("message", "Target.targetDestroyed", { targetId: "target-sw" });
+  await f.drain();
+  assert.equal(a.protection.isActive(), true);
+  assert.equal(f.failures.length, 0);
+  assert.equal(f.diagnostics[0].reason, "worker-retired");
+  f.attach({ id: "new-version" });
+  await f.drain();
+  assert.equal(f.calls.at(-1).id, "new-version");
+  assert.equal(f.calls.at(-1).method, "Runtime.runIfWaitingForDebugger");
+});
+
+test("confirmed redundant version retires without interrupting replacement connections", async () => {
+  const f = fixture();
+  const a = await f.protect();
+  f.attach();
+  await f.drain();
+  f.versions([{ versionId: "old", targetId: "target-sw", status: "activated" }]);
+  // Chromium can omit targetId once the process has stopped.
+  f.versions([{ versionId: "old", status: "redundant" }]);
+  f.protocol.emit("message", "Inspector.targetCrashed", {}, "sw");
+  await f.drain();
+  assert.equal(a.protection.isActive(), true);
+  assert.equal(a.policy.connectionsClosed, false);
+  assert.equal(f.failures.length, 0);
+  f.destroy();
+  await f.drain();
+  assert.equal(f.diagnostics[0].reason, "worker-retired");
+});
+
+test("in-place service-worker restart remains fail-closed even if destroyed later", async () => {
+  const f = fixture();
+  const a = await f.protect();
+  f.attach();
+  await f.drain();
+  f.protocol.emit("message", "Inspector.targetCrashed", {}, "sw");
+  f.protocol.emit("message", "Inspector.targetReloadedAfterCrash", {}, "sw");
+  f.destroy();
+  await f.drain();
+  assert.equal(a.protection.isActive(), false);
+  assert.equal(a.policy.blocked, true);
+  assert.deepEqual(f.failures, ["a"]);
+});
+
+test("accepted close without destruction never reopens the network gate", async () => {
+  const f = fixture();
+  const a = await f.protect();
+  f.intercept(async (method) => { if (method === "Runtime.enable") throw new Error("setup failed"); });
+  f.attach();
+  await f.drain();
+  assert.equal(a.protection.isActive(), false);
+  assert.equal(f.calls.some(c => c.method === "Runtime.runIfWaitingForDebugger"), false);
+  await new Promise(resolve => setTimeout(resolve, 1100));
+  assert.deepEqual(f.failures, ["a"]);
+  assert.equal(a.policy.blocked, true);
+});
+
+for (const staleReply of ["Target.closeTarget", "Target.detachFromTarget"]) {
+  test(`terminal destruction supersedes a late ${staleReply} error`, async () => {
+    const f = fixture();
+    const a = await f.protect();
+    f.intercept(async method => {
+      if (method === "Runtime.enable") throw new Error("setup failed");
+      if (method === "Target.closeTarget") {
+        f.protocol.emit("message", "Inspector.targetCrashed", {}, "sw");
+        f.destroy();
+        if (staleReply === method) throw new Error("Target no longer exists");
+      }
+      if (method === "Target.detachFromTarget" && staleReply === method) {
+        f.destroy();
+        throw new Error("Session no longer exists");
+      }
+    });
+    f.attach();
+    await f.drain();
+    assert.equal(a.protection.isActive(), true);
+    assert.equal(f.failures.length, 0);
+    assert.equal(f.calls.some(c => c.method === "Runtime.runIfWaitingForDebugger"), false);
+  });
+}
+
+test("a stopped setup continuation cannot resume the replacement shared worker", async () => {
+  const f = fixture();
+  const a = await f.protect();
+  let oldSetup;
+  let replacementSetup;
+  let evaluations = 0;
+  f.intercept(async (method) => {
+    if (method === "Runtime.evaluate") {
+      evaluations++;
+      return new Promise(resolve => { if (evaluations === 1) oldSetup = resolve; else replacementSetup = resolve; });
+    }
+  });
+  f.attach({ type: "shared_worker" });
+  await f.drain();
+  f.protocol.emit("message", "Inspector.targetCrashed", {}, "sw");
+  f.protocol.emit("message", "Inspector.targetReloadedAfterCrash", {}, "sw");
+  await f.drain();
+  oldSetup({});
+  await f.drain();
+  assert.equal(f.calls.some(c => c.method === "Runtime.runIfWaitingForDebugger"), false);
+  replacementSetup({});
+  await f.drain();
+  assert.equal(f.calls.filter(c => c.method === "Runtime.runIfWaitingForDebugger").length, 1);
+  assert.equal(a.protection.isActive(), true);
 });
 
 test("private protocol disconnect revokes all protected profiles", async () => {
@@ -229,6 +362,7 @@ test("nested dedicated-worker setup failure uses the parent profile policy", asy
   await f.drain();
   f.intercept(async (method, args, id) => {
     if (method === "Runtime.enable" && id === "nested") throw new Error("startup race");
+    if (method === "Target.closeTarget") f.destroy("nested");
   });
   f.attach({ id: "nested", contextId: undefined, type: "worker", parent: "sw" });
   await f.drain();

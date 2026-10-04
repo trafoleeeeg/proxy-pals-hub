@@ -51,4 +51,13 @@ describe("minimal graphite design", () => {
     expect(shell).toContain('aria-label="Развернуть меню"');
     expect(shell).toContain('aria-label="Свернуть меню"');
   });
+
+  test("long navigation scrolls instead of compressing links or the account block", () => {
+    expect(shell).toContain("flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto");
+    expect(shell).toContain("flex h-10 shrink-0 items-center");
+    expect(shell).toContain("mt-3 shrink-0 border-t border-sidebar-border/70");
+    expect(shell).toContain("mx-3 shrink-0 border-t border-sidebar-border/70");
+    const folders = readFileSync(new URL("../src/components/folders-nav.tsx", import.meta.url), "utf8");
+    expect(folders).toContain("mt-4 shrink-0 border-t border-sidebar-border/70");
+  });
 });

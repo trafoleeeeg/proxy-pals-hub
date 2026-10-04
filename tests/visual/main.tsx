@@ -9,6 +9,10 @@ import { ProfilesPage } from "../../src/routes/_authenticated/app.index";
 import { TeamPage } from "../../src/routes/_authenticated/app.team";
 import { ClientPage } from "../../src/routes/_authenticated/app.desktop";
 import { ProxiesPage } from "../../src/routes/_authenticated/app.proxies";
+import { FoldersPage } from "../../src/routes/_authenticated/app.folders";
+import { TrashPage } from "../../src/routes/_authenticated/app.trash";
+import { AuditPage } from "../../src/routes/_authenticated/app.audit";
+import { Route as AgentsRoute } from "../../src/routes/_authenticated/app.agents";
 import "../../src/styles.css";
 
 const root = createRootRoute();
@@ -17,7 +21,11 @@ const profiles = createRoute({ getParentRoute: () => app, path: "/", component: 
 const team = createRoute({ getParentRoute: () => app, path: "team", component: TeamPage });
 const desktop = createRoute({ getParentRoute: () => app, path: "desktop", component: ClientPage });
 const proxies = createRoute({ getParentRoute: () => app, path: "proxies", component: ProxiesPage });
+const folders = createRoute({ getParentRoute: () => app, path: "folders", component: FoldersPage });
+const trash = createRoute({ getParentRoute: () => app, path: "trash", component: TrashPage });
+const audit = createRoute({ getParentRoute: () => app, path: "audit", component: AuditPage });
+const agents = createRoute({ getParentRoute: () => app, path: "agents", component: AgentsRoute.options.component });
 const auth = createRoute({ getParentRoute: () => root, path: "auth", component: () => <p>Выход выполнен</p> });
-const router = createRouter({ routeTree: root.addChildren([app.addChildren([profiles, team, desktop, proxies]), auth]) });
+const router = createRouter({ routeTree: root.addChildren([app.addChildren([profiles, team, desktop, proxies, folders, trash, audit, agents]), auth]) });
 const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
 createRoot(document.getElementById("root")!).render(<StrictMode><QueryClientProvider client={client}><RouterProvider router={router} /><Toaster /></QueryClientProvider></StrictMode>);

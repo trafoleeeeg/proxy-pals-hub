@@ -86,7 +86,7 @@ export function FoldersNav({ collapsed = false }: { collapsed?: boolean }) {
     if (!ws || !window.confirm(`Удалить папку «${row.name}»? Профили перейдут в вашу Основную.`)) return;
     void deleteFn({ data: { teamId: ws.teamId, id: row.id } }).then(() => { if (folder === row.name) setFolder(MAIN_FOLDER); refresh(); }).catch((error: Error) => toast.error(error.message));
   };
-  return <div className="mt-4 border-t border-sidebar-border/70 pt-3">
+  return <div className="mt-4 shrink-0 border-t border-sidebar-border/70 pt-3">
     <Link to="/app/folders" title="Управление папками" aria-label="Папки" aria-current={pathname === "/app/folders" ? "page" : undefined}
       className={"mb-1 flex items-center gap-3 rounded-lg px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent/60 hover:text-foreground " + (collapsed ? "justify-center px-0" : "")}>
       <FolderCog className="size-4 shrink-0" />{!collapsed && "Папки"}

@@ -142,17 +142,17 @@ function AppShell() {
         {!collapsed && <><span className="text-base font-semibold tracking-tight">Umbra</span>
           <Button variant="ghost" size="icon" className="ml-auto size-7 text-muted-foreground" title="Свернуть меню" aria-label="Свернуть меню" onClick={() => toggleCollapsed()}><PanelLeftClose className="size-4" /></Button></>}
       </div>
-      <nav aria-label="Разделы приложения" className="scroll-thin flex flex-1 flex-col gap-1 overflow-y-auto px-3 pb-3">{NAV.map((item) => {
+      <nav aria-label="Разделы приложения" className="scroll-thin flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-3 pb-3">{NAV.map((item) => {
         if (item.to === "/app/trash" && ws?.scope !== "owner") return null;
         const active = item.exact ? pathname === item.to || pathname === "/app/" : pathname.startsWith(item.to);
         const Icon = item.icon;
         return <Link key={item.to} to={item.to} title={item.label} aria-label={item.label} aria-current={active ? "page" : undefined}
-          className={"flex h-10 items-center gap-3 rounded-lg px-3 text-sm transition-colors " + (collapsed ? "justify-center px-0" : "") + " " + (active ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground")}>
+          className={"flex h-10 shrink-0 items-center gap-3 rounded-lg px-3 text-sm transition-colors " + (collapsed ? "justify-center px-0" : "") + " " + (active ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground")}>
           <Icon className="size-[18px] shrink-0" />{!collapsed && <span>{item.label}</span>}
         </Link>;
       })}
         <FoldersNav collapsed={collapsed} />
-        <div className="mt-3 border-t border-sidebar-border/70 pt-3">
+        <div className="mt-3 shrink-0 border-t border-sidebar-border/70 pt-3">
           <button type="button" aria-label="Приложение" aria-expanded={appExpanded} title="Приложение" onClick={() => setAppExpanded((value) => !value)}
             className={"flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm transition-colors hover:bg-sidebar-accent/60 " + (collapsed ? "justify-center px-0" : "") + (APP_NAV.some((item) => pathname.startsWith(item.to)) ? " bg-sidebar-accent text-sidebar-accent-foreground" : " text-muted-foreground")}>
             <Monitor className="size-4 shrink-0" />{!collapsed && <><span>Приложение</span><ChevronDown className={"ml-auto size-4 transition-transform " + (appExpanded ? "rotate-180" : "")} /></>}
@@ -167,7 +167,7 @@ function AppShell() {
           })}</div>}
         </div>
       </nav>
-      <div className="mx-3 border-t border-sidebar-border/70 py-3">
+      <div className="mx-3 shrink-0 border-t border-sidebar-border/70 py-3">
         <div className={"min-w-0 space-y-2 " + (collapsed ? "hidden" : "block")}>
           <p className="truncate text-xs">{ws?.email ?? ""}</p>
           <Select value={ws?.teamId ?? ""} disabled={selection.workspaces.isPending || signingOut} onValueChange={selection.select}>

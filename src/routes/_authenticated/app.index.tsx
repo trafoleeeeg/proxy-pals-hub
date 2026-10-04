@@ -100,8 +100,12 @@ function ProfilesWorkspace() {
   const [metadataOpen, setMetadataOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const { widths: savedWidths, setWidth, reset: resetWidths } = useColumnWidths();
-  // Keep names readable at laptop widths without overriding saved column sizes.
-  const widths = { name: 180, ...savedWidths } as Record<string, number>;
+  // Fixed-layout tables ignore CSS min-width on unset columns. Provide readable
+  // defaults (scrolling stays inside the table), then honor the user's widths.
+  const widths: Record<string, number> = {
+    name: 180, folder: 110, status: 120, proxy: 224, notes: 140,
+    fingerprint: 160, updated: 140, created: 140, ...savedWidths,
+  };
   const [visibleColumns, setVisibleColumns] = useState<FixedColumn[]>(DEFAULT_COLUMNS);
   const [visibleFields, setVisibleFields] = useState<string[]>([]);
   const profiles = useQuery({ queryKey: ["profiles", ws?.teamId], queryFn: () => { if (!ws) throw new Error("Команда не загружена"); return listFn({ data: { teamId: ws.teamId } }); }, enabled: !!ws, refetchInterval: 20_000 });

@@ -428,6 +428,34 @@ describe("mobile proxy rotation", () => {
       expect(network.mock.calls[0]![1]).toMatchObject({ redirect: "follow" });
     } finally { network.mockRestore(); }
   });
+  test.each(["failed", "unchecked", "expired"])("rotation can recover a %s proxy, without inventing a baseline", async (state) => {
+    const f = ready();
+    if (state === "failed") await invoke("recordProxyCheck", { ...target, ok: false }, f);
+    if (state === "unchecked") Object.assign(f.tables.proxies[0]!, { last_checked_at: null, last_check_ok: null, last_check_ip: null });
+    if (state === "expired") f.tables.proxies[0]!.last_checked_at = "2000-01-01T00:00:00Z";
+    const network = spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
+    try {
+      const request = await invoke("rotateProxyIp", target, f);
+      expect(network).toHaveBeenCalledTimes(1);
+      expect(request.previousIp).toBeNull();
+      expect(f.tables.proxies[0]).toMatchObject({ rotation_status: "changing", rotation_previous_ip: null });
+      await invoke("recordProxyCheck", { ...target, ok: false, rotationRequestedAt: request.requestedAt }, f);
+      expect(f.tables.proxies[0]!.rotation_status).toBe("changing");
+      await invoke("recordProxyCheck", { ...target, ok: true, ip: "1.2.3.5", rotationRequestedAt: request.requestedAt, rotationFinal: true, rotationConfirmed: true }, f);
+      expect(f.tables.proxies[0]).toMatchObject({ rotation_status: "success", rotation_previous_ip: null, rotation_new_ip: "1.2.3.5", last_check_ok: true, last_check_error: null });
+      expect((await invoke("listProxies", { teamId }, f))[0]).toMatchObject({ rotationStatus: "success", rotationPreviousIp: null, rotationNewIp: "1.2.3.5" });
+    } finally { network.mockRestore(); }
+  });
+  test("provider failure remains an error even when starting from an unavailable proxy", async () => {
+    const f = ready();
+    await invoke("recordProxyCheck", { ...target, ok: false }, f);
+    const network = spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 503 }));
+    try {
+      await expect(invoke("rotateProxyIp", target, f)).rejects.toThrow("503");
+      expect(network).toHaveBeenCalledTimes(1);
+      expect(f.tables.proxies[0]).toMatchObject({ rotation_status: "error", rotation_last_error: "provider" });
+    } finally { network.mockRestore(); }
+  });
   test("failed or zero-row claims never call the provider", async () => {
     for (const missing of [false, true]) {
       const f = ready();
@@ -493,5 +521,27 @@ describe("mobile proxy rotation", () => {
     });
     await invoke("recordProxyCheck", { ...target, ok: true, ip: "1.2.3.4" }, f);
     expect(f.tables.proxies[0]!.rotation_status).toBe("error");
+  });
+  test.each([true, false])("late recovery without a baseline reconciles its timeout (token: %s)", async (withToken) => {
+    const f = ready();
+    const requestedAt = new Date(Date.now() - 120_000).toISOString();
+    Object.assign(f.tables.proxies[0]!, {
+      rotation_status: "error", rotation_requested_at: requestedAt, rotation_previous_ip: null,
+      rotation_last_error: "not_confirmed", last_check_ok: false, last_check_ip: null,
+    });
+    await invoke("recordProxyCheck", {
+      ...target, ok: true, ip: "1.2.3.9", ...(withToken ? { rotationRequestedAt: requestedAt, rotationFinal: true, rotationConfirmed: true } : {}),
+    }, f);
+    expect(f.tables.proxies[0]).toMatchObject({ rotation_status: "success", rotation_previous_ip: null, rotation_new_ip: "1.2.3.9", rotation_last_error: null });
+  });
+  test("connectivity alone cannot hide a provider rejection when there was no baseline", async () => {
+    const f = ready();
+    Object.assign(f.tables.proxies[0]!, {
+      rotation_status: "error", rotation_requested_at: new Date(Date.now() - 120_000).toISOString(),
+      rotation_previous_ip: null, rotation_last_error: "provider",
+    });
+    await invoke("recordProxyCheck", { ...target, ok: true, ip: "1.2.3.9" }, f);
+    expect(f.tables.proxies[0]).toMatchObject({ rotation_status: "error", rotation_last_error: "provider" });
+    expect((await invoke("listProxies", { teamId }, f))[0]!.rotationStatus).toBe("error");
   });
 });

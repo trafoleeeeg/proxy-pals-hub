@@ -12,7 +12,7 @@ import {
   proxyAddress, validateProxyInput, normalizeProxyCheck, parseProxyBundle,
 } from "@/lib/proxy-input";
 import { IpCountryFlag } from "@/components/ip-country-flag";
-import { confirmRotation } from "@/lib/proxy-rotation";
+import { confirmRotation, prepareRotation } from "@/lib/proxy-rotation";
 import type { PasswordAction, ProxyImportIssue, ProxyProtocol, RotationAction } from "@/lib/proxy-input";
 import { desktop } from "@/lib/desktop";
 import { Button } from "@/components/ui/button";
@@ -211,14 +211,15 @@ export function ProxiesPage() {
         if (!response.ok || !response.result) throw new Error("Не удалось проверить прокси в приложении");
         return normalizeProxyCheck(response.result);
       };
-      const before = await probe();
-      await record({ data: { id, teamId: selectedTeam, ...before } });
-      if (!before.ok || !before.ip) throw new Error("Текущий IP недоступен. Сначала восстановите подключение к прокси");
-      const request = await rotate({ data: { id, teamId: selectedTeam } });
+      const request = await prepareRotation({
+        probe,
+        record: (before) => record({ data: { id, teamId: selectedTeam, ...before } }),
+        request: () => rotate({ data: { id, teamId: selectedTeam } }),
+      });
       toast.info("Запрос отправлен. Ожидаю новый IP…");
       void invalidate();
       return confirmRotation({
-        previousIp: request.previousIp!,
+        previousIp: request.previousIp,
         probe,
         record: async (result, final, confirmed) => {
           const saved = await record({ data: { id, teamId: selectedTeam, ...result, rotationRequestedAt: request.requestedAt, rotationFinal: final, rotationConfirmed: confirmed } });
@@ -227,9 +228,12 @@ export function ProxiesPage() {
         },
       });
     },
-    onSuccess: (result) => result.rotationConfirmed
-      ? toast.success("Новый IP подтверждён: " + result.ip)
-      : toast.info("Состояние смены IP изменилось. Обновляю данные прокси…"),
+    onSuccess: (result, id) => {
+      if (result.rotationConfirmed || result.connectionRestored) {
+        setCheckErrors((old) => { const next = { ...old }; delete next[id]; return next; });
+        toast.success((result.connectionRestored ? "Подключение восстановлено. IP: " : "Новый IP подтверждён: ") + result.ip);
+      } else toast.info("Состояние смены IP изменилось. Обновляю данные прокси…");
+    },
     onError: (error: Error) => toast.error(error.message),
     onSettled: () => invalidate(),
   });
@@ -416,7 +420,7 @@ export function ProxiesPage() {
               <TableCell className="min-w-44 max-w-64">
                 {proxy.rotationUrlConfigured ? <>
                   <Badge variant="outline" className={proxy.rotationStatus === "changing" ? "text-warning" : proxy.rotationStatus === "error" ? "text-destructive" : "text-primary"}>
-                    {proxy.rotationStatus === "changing" ? "меняем IP" : proxy.rotationStatus === "error" ? "ошибка смены" : proxy.rotationStatus === "success" ? "смена подтверждена" : "готово к смене"}
+                    {proxy.rotationStatus === "changing" ? "меняем IP" : proxy.rotationStatus === "error" ? "ошибка смены" : proxy.rotationStatus === "success" ? proxy.rotationPreviousIp ? "смена подтверждена" : "подключение восстановлено" : "готово к смене"}
                   </Badge>
                   {proxy.rotationPreviousIp && <div className="mono mt-1 break-all text-xs text-muted-foreground">Был: {proxy.rotationPreviousIp}</div>}
                   {proxy.rotationStatus === "success" && proxy.rotationNewIp && <div className="mono break-all text-xs">Стал: {proxy.rotationNewIp}</div>}

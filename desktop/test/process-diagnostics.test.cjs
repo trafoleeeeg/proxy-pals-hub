@@ -60,3 +60,22 @@ test("process diagnostics rotate bounded local logs and do not throw on failed w
   assert.ok(fs.statSync(file).size < 320);
   assert.equal(recordProcessEvent("\0", "browser-start"), false);
 });
+
+test("worker diagnostics retain only approved stages, reasons and outcomes", (t) => {
+  const { directory, file } = fixture(t);
+  recordProcessEvent(directory, "background-worker", {
+    reason: "close-failed", stage: "Runtime.enable", workerType: "service_worker", outcome: "stopped",
+    url: "https://private.example", error: "secret", targetId: "private-target", fingerprint: "private-device",
+  });
+  recordProcessEvent(directory, "background-worker", {
+    reason: "private", stage: "private", workerType: "private", outcome: "private",
+  });
+  const raw = fs.readFileSync(file, "utf8");
+  const rows = raw.trim().split("\n").map(JSON.parse);
+  assert.equal(rows[0].reason, "close-failed");
+  assert.equal(rows[0].stage, "Runtime.enable");
+  assert.equal(rows[0].workerType, "service_worker");
+  assert.equal(rows[0].outcome, "stopped");
+  for (const key of ["reason", "stage", "workerType", "outcome"]) assert.equal(Object.hasOwn(rows[1], key), false);
+  assert.doesNotMatch(raw, /private|secret|fingerprint|targetId|https/);
+});

@@ -18,7 +18,7 @@ const migrationSchema = z.object({
   os: z.literal("windows"),
   osVersion: z.enum(["10", "11"]).optional(),
   screen: z.object({ width: z.number().int().min(320).max(7680), height: z.number().int().min(240).max(4320),
-    colorDepth: z.number().int().min(1).max(64).optional() }).strict().optional(),
+    colorDepth: z.number().int().min(8).max(48).optional() }).strict().optional(),
   hardwareConcurrency: z.number().int().min(1).max(128).optional(),
   physicalMemoryGB: z.number().finite().positive().max(1024).optional(),
   deviceMemory: z.number().finite().positive().max(1024).optional(),

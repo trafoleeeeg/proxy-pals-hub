@@ -63,4 +63,13 @@ describe("public Windows migration settings", () => {
     expect(current.languages).not.toContain("fr"); expect(current.gpu.renderer).toBe("");
     expect(TG_CHANNEL_SETTINGS.screen?.width).toBe(1600);
   });
+  test("screen color depth follows the saved profile schema", () => {
+    for (const colorDepth of [1, 7, 49, 64]) {
+      expect(() => parseMigrationSettings(JSON.stringify({ ...TG_CHANNEL_SETTINGS,
+        screen: { width: 1600, height: 900, colorDepth } }))).toThrow();
+    }
+    const fp = previewMigration(generateFingerprint(), parseMigrationSettings(JSON.stringify({ ...TG_CHANNEL_SETTINGS,
+      screen: { width: 1600, height: 900, colorDepth: 30 } }))).fingerprint;
+    expect(fingerprintSchema.safeParse(fp).success).toBe(true);
+  });
 });

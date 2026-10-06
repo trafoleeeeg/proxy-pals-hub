@@ -15,7 +15,7 @@ const paths = [ENTRY, "/favicon.ico", ...fs.readdirSync(path.join(publicDirector
 const clientCode = paths.filter(resource => resource.endsWith(".js")).map(resource => fs.readFileSync(path.join(publicDirectory, resource.slice(1)), "utf8")).join("\n");
 for (const [module, name] of [["team", "listWorkspaces"], ["profiles", "listProfiles"], ["profiles", "saveProfile"], ["proxies", "listProxies"]]) {
   const id = sha256(`src/lib/${module}.functions.ts--${name}_createServerFn_handler`);
-  if (!clientCode.includes('"' + id + '"')) throw new Error("Local panel RPC ID is incompatible: " + name);
+  if (!["\"", "'", "`"].some(quote => clientCode.includes(quote + id + quote))) throw new Error("Local panel RPC ID is incompatible: " + name);
 }
 const manifest = validateManifest({ schema: 1, entry: ENTRY, minimumDesktopVersion: require("../desktop/package.json").version, revision: new Date().toISOString(), files: paths.map(resource => {
   const bytes = fs.readFileSync(path.join(publicDirectory, resource.slice(1)));

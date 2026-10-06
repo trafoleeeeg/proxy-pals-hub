@@ -8,6 +8,7 @@ const trustedOrigin = decodeURIComponent(readArgument("--umbra-app-origin=") || 
 
 if (window.location.origin === trustedOrigin) contextBridge.exposeInMainWorld("umbra", {
   isDesktop: true,
+  panelReady: () => ipcRenderer.invoke("umbra:panel-ready"),
   version,
   platform: process.platform,
   engine: { electron: process.versions.electron, chromium: process.versions.chrome },

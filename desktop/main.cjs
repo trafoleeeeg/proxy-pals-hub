@@ -1,5 +1,6 @@
 if (require("./runtime/browser-pipe.cjs").superviseBrowser()) return;
-const { app, BrowserWindow, ipcMain, session, shell, dialog, safeStorage, Notification } = require("electron");
+const electron = require("electron");
+const { app, BrowserWindow, ipcMain, session, shell, dialog, safeStorage, Notification } = electron;
 const { initializeBackgroundWorkers, allowBackgroundWorkers } = require("./runtime/background-workers.cjs");
 const path = require("node:path");
 const { autoUpdater } = require("electron-updater");
@@ -14,6 +15,7 @@ const { createUpdateController } = require("./update-controller.cjs");
 const { createSessionOutbox } = require("./session-outbox.cjs");
 const { checkEngineVersions } = require("./runtime/engine-status.cjs");
 const { recordProcessEvent } = require("./runtime/process-diagnostics.cjs");
+const { createPanelStartup, panelBackground } = require("./runtime/panel-startup.cjs");
 
 const DEFAULT_APP_URL = "https://proxy-pals-hub.lovable.app/app";
 // A packaged client must never let a local environment variable replace the
@@ -29,6 +31,7 @@ app.commandLine.appendSwitch("force-webrtc-ip-handling-policy", "disable_non_pro
 app.setAppUserModelId("dev.umbra.desktop");
 
 let mainWindow = null;
+let panelStartup = null;
 let updates = null;
 let updateTimer = null;
 let outbox = null;
@@ -47,10 +50,10 @@ function profileClosed(payload) {
   send("umbra:profile-closed", entry);
 }
 
-function createWindow() {
+function createWindow(prepare = Promise.resolve()) {
   const window = new BrowserWindow({
     width: 1440, height: 900, minWidth: 900, minHeight: 620,
-    backgroundColor: "#111317", autoHideMenuBar: true, title: "Umbra", show: false,
+    backgroundColor: panelBackground, autoHideMenuBar: true, title: "Umbra", show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true, sandbox: true, nodeIntegration: false,
@@ -76,52 +79,29 @@ function createWindow() {
     if (!isWebUrl(url) || new URL(url).origin !== APP_ORIGIN) event.preventDefault();
   });
   window.webContents.on("will-attach-webview", (event) => event.preventDefault());
-  const splashStatus = (text) => {
-    if (window.isDestroyed()) return;
-    const safe = JSON.stringify(String(text));
-    window.webContents
-      .executeJavaScript(`(()=>{const el=document.getElementById("umbra-status");if(el)el.textContent=${safe};})()`)
-      .catch(() => {});
-  };
-  const loadPanel = async (attempt = 0) => {
-    // Заставка показывается сразу, пока панель грузится по сети.
-    if (attempt === 0) {
-      try { await window.loadFile(path.join(__dirname, "splash.html")); } catch { /* заставка не критична */ }
-      if (!window.isDestroyed()) {
-        window.maximize();
-        window.show();
-      }
-    } else {
-      splashStatus("Соединение нестабильно, пробуем ещё раз…");
-    }
-    try {
-      const panelUrl = new URL(APP_URL);
-      panelUrl.searchParams.set("desktop", app.getVersion());
-      panelUrl.searchParams.set("boot", String(Date.now()));
-      await window.loadURL(panelUrl.href, { extraHeaders: "Cache-Control: no-cache\r\nPragma: no-cache" });
-    }
-    catch {
-      if (window.isDestroyed() || quitting) return;
-      if (attempt < 2) {
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-        if (window.isDestroyed() || quitting) return;
-        return void loadPanel(attempt + 1);
-      }
+  const startup = createPanelStartup(electron, window, {
+    appUrl: APP_URL, version: app.getVersion(), prepare,
+    isClosing: () => quitting || closing,
+    showError: async () => {
       const result = await dialog.showMessageBox(window, {
         type: "error", title: "Umbra", message: "Не удалось загрузить панель",
         detail: "Проверьте подключение к интернету. Локальные данные профилей сохранены.",
         buttons: ["Повторить", "Закрыть"], defaultId: 0, cancelId: 1,
       });
-      if (result.response === 0) void loadPanel();
-      else window.close();
-    }
-  };
+      return result.response === 0;
+    },
+  });
+  panelStartup = startup;
 
   window.on("close", (event) => {
     if (!quitting && listRunningProfiles().length) { event.preventDefault(); app.quit(); }
   });
-  window.on("closed", () => { if (mainWindow === window) mainWindow = null; });
-  void loadPanel();
+  window.on("closed", () => { if (mainWindow === window) { mainWindow = null; panelStartup = null; } });
+  void startup.start().catch((error) => {
+    if (window.isDestroyed() || quitting || closing) return;
+    dialog.showErrorBox("Umbra", String(error.message || error));
+    app.quit();
+  });
 }
 
 function handle(channel, handler) {
@@ -132,6 +112,9 @@ function handle(channel, handler) {
   });
 }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// The skeleton never receives a preload or privileged bridge. Only the trusted
+// panel's top frame can reveal its own already-painted interface.
+handle("umbra:panel-ready", () => { panelStartup?.ready(); return { ok: true }; });
 function profileId(value) {
   if (typeof value !== "string" || !UUID.test(value)) throw new Error("Invalid profile ID");
   return value;
@@ -247,12 +230,16 @@ else {
     }
   });
   app.whenReady().then(async () => {
-    await initializeBackgroundWorkers();
     outbox = createSessionOutbox(path.join(app.getPath("userData"), "session-outbox"), safeStorage);
-    const panelSession = session.fromPartition("persist:umbra-app");
-    await allowBackgroundWorkers(panelSession);
-    panelSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
-    panelSession.setPermissionCheckHandler(() => false);
+    const preparePanel = (async () => {
+      // Show the harmless local shell now, but do not load any remote renderer
+      // before its worker policy and permission handlers have been installed.
+      await initializeBackgroundWorkers();
+      const panelSession = session.fromPartition("persist:umbra-app");
+      panelSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+      panelSession.setPermissionCheckHandler(() => false);
+      await allowBackgroundWorkers(panelSession);
+    })();
     updates = createUpdateController({
       updater: autoUpdater,
       enabled: app.isPackaged && process.platform === "win32" && !process.env.PORTABLE_EXECUTABLE_FILE,
@@ -267,7 +254,7 @@ else {
         }
       },
     });
-    createWindow();
+    createWindow(preparePanel);
     app.on("umbra:profile-protection-failed", ({ saved }) => {
       const body = saved
         ? "Защита фонового процесса потеряна. Профиль остановлен, локальные данные сохранены. Откройте профиль снова."

@@ -23,6 +23,9 @@ app.whenReady().then(async () => {
   panelSession.protocol.handle("https", request => { localResources++; return bundle.handler(request); });
   const window = new BrowserWindow({ show: false, webPreferences: { session: panelSession,
     preload: path.join(__dirname, "../preload.cjs"), sandbox: true, nodeIntegration: false, contextIsolation: true } });
+  // Production shows its owner window before loading the panel. Xvfb correctly
+  // suspends rAF in a hidden window: exercise an actual paint, without focus.
+  window.showInactive();
   const errors = [];
   window.webContents.on("console-message", (event) => { if (event.level === "error") errors.push(event.message); });
   await window.loadURL(origin + "/app");

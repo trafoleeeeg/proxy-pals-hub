@@ -1,5 +1,5 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
-import { getAuthenticatedUser } from "@/lib/auth-session";
+import { getPanelUser } from "@/lib/panel-bootstrap";
 import { recoverVerifiedUser } from "@/lib/panel-connectivity";
 import type { User } from "@supabase/supabase-js";
 
@@ -11,7 +11,7 @@ export const Route = createFileRoute("/_authenticated")({
       queryFn: async () => {
         // A locally persisted user is not proof that its access/refresh token
         // is still accepted. Validate it before protected queries can mount.
-        const user = await getAuthenticatedUser();
+        const user = await getPanelUser(context.queryClient);
         if (!user) throw redirect({ to: "/auth", search: { next: "/app" } });
         return user;
       },

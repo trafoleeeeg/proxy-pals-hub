@@ -51,6 +51,7 @@
       "ipc-policy.cjs",
       "session-outbox.cjs",
       "runtime/**/*.cjs",
+      { "from": ".panel", "to": "panel", "filter": ["**/*"] },
       "engine/font-bundle-lock.json",
       "runtime/lark-bot.bookmarklet.txt"
     ],

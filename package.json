@@ -7,7 +7,7 @@
     "predev": "node scripts/generate-geoip.cjs",
     "dev": "vite dev",
     "prebuild": "node scripts/generate-geoip.cjs",
-    "build": "vite build",
+    "build": "vite build && node scripts/build-panel-bundle.cjs",
     "prebuild:dev": "node scripts/generate-geoip.cjs",
     "build:dev": "vite build --mode development",
     "preview": "vite preview",

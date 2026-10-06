@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { createContext, createElement, useContext, useState, type ReactNode } from "react";
-import { getWorkspace, listWorkspaces } from "./team.functions";
+import { listWorkspaces, type Workspace } from "./team.functions";
 
 const Selection = createContext<{ teamId: string | undefined; select: (teamId: string) => void }>({ teamId: undefined, select: () => {} });
 const WORKSPACE_TIMEOUT_MS = 8_000;
@@ -33,11 +33,18 @@ export function useWorkspaceSelection() {
 }
 
 export function useWorkspace() {
-  const fn = useServerFn(getWorkspace);
+  const fn = useServerFn(listWorkspaces);
   const { teamId } = useContext(Selection);
   return useQuery({
-    queryKey: ["workspace", teamId],
-    queryFn: () => withWorkspaceTimeout(fn({ data: teamId ? { teamId } : {} })),
+    // Shares one server-verified request with the workspace selector. Selection
+    // is not a new authorization grant: every operation still passes server RLS.
+    queryKey: ["workspaces"],
+    queryFn: () => withWorkspaceTimeout(fn({})),
+    select: (workspaces: Workspace[]) => {
+      const workspace = teamId ? workspaces.find(item => item.teamId === teamId) : workspaces[0];
+      if (!workspace) throw new Error("Команда недоступна");
+      return workspace;
+    },
     staleTime: 60_000,
     retry: false,
     refetchOnReconnect: true,

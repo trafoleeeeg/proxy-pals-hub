@@ -6,6 +6,7 @@ const yaml = require("js-yaml");
 const pkg = require("../package.json");
 const { verifyEngine } = require("./verify-engine.cjs");
 const { verifyFontBundle } = require("../runtime/font-isolation.cjs");
+const { verifyPanelArchive } = require("../runtime/panel-archive.cjs");
 
 async function verifyRelease(directory = path.join(__dirname, "../dist")) {
   await verifyEngine();
@@ -63,6 +64,7 @@ async function verifyRelease(directory = path.join(__dirname, "../dist")) {
     assert.deepEqual(JSON.parse(asar.extractFile(archive, "engine/font-bundle-lock.json").toString("utf8")),
       require("../engine/font-bundle-lock.json"), "Packaged font manifest differs from the verified source");
     assert.equal(JSON.parse(asar.extractFile(archive, "package.json").toString("utf8")).version, pkg.version);
+    verifyPanelArchive(asar, archive, pkg.version);
   }
   console.log("Verified Windows installer, version, SHA-512 and blockmap: " + expected);
 }

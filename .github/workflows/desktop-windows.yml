@@ -103,6 +103,16 @@ jobs:
         working-directory: desktop
         run: node -e "if (process.env.GITHUB_REF_NAME !== 'v' + require('./package.json').version) throw new Error('Tag must match desktop version')"
 
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Build and verify anonymous local panel
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+          bun run typecheck
+
       - name: Install dependencies
         working-directory: desktop
         run: |

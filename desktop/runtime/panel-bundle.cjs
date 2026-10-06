@@ -101,6 +101,21 @@ function createPanelBundle({ panelSession, origin, bundledDirectory, cacheDirect
       // Never substitute a different generation for a missing hashed chunk.
       if (resource.startsWith("/assets/")) return new Response(null, { status: 404 });
     }
+    // Chromium supplies Origin/Fetch Metadata later in the normal network
+    // path. protocol.handle runs before that: forwarding with net.fetch loses
+    // them. Restore same-origin RPC metadata only after proving the renderer's
+    // native initiator supplied by our pinned engine. Referrer alone is not
+    // proof: an opaque sandboxed iframe can have a same-origin parent referrer.
+    // Never turn an opaque/cross-origin request into a trusted panel request.
+    if (url.origin === origin && resource.startsWith("/_serverFn/")) {
+      const trusted = Object.hasOwn(request, "initiatorOrigin") && request.initiatorOrigin === origin;
+      if (!trusted) return new Response("Forbidden", { status: 403 });
+      const headers = new Headers(request.headers);
+      if (!headers.has("Origin")) headers.set("Origin", origin);
+      if (!headers.has("Sec-Fetch-Site")) headers.set("Sec-Fetch-Site", "same-origin");
+      if (!headers.has("Referer") && request.referrer) headers.set("Referer", request.referrer);
+      return fetchNetwork(request, { headers });
+    }
     // POST/RPC/auth, other origins and profile sessions never use this cache.
     return fetchNetwork(request);
   };

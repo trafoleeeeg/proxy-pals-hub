@@ -89,6 +89,10 @@ app.whenReady().then(async () => {
   assert(!text.includes(synthetic.user.email), "Stored identity never appears before verification");
   release(); pendingWindow.destroy();
 
+  // Exercise the real protocol.handle -> session.fetch network boundary, not
+  // a fetch mock. Only synthetic credentials and a loopback fixture are used.
+  await require("./panel-rpc-fixture.cjs").runPanelRpcFixture(electron);
+
   const osProtection = safeStorage.isEncryptionAvailable() && safeStorage.getSelectedStorageBackend?.() !== "basic_text";
   if (process.env.UMBRA_REQUIRE_DPAPI === "1") assert(osProtection, "Windows OS cache protection must be available");
   if (osProtection) {

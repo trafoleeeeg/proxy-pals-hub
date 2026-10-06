@@ -34,11 +34,42 @@ test("only public documents and verified assets are local; API/auth/private POST
   const f = fixture(t); const panel = createPanelBundle(f.options);
   for (const route of ["/app", "/app/team", "/auth?next=/app"]) assert.equal(await (await panel.handler(documentRequest(route))).text(), "<html>anonymous v1</html>");
   assert.equal(f.requests.length, 0);
-  for (const request of [new Request("https://panel.example.test/_serverFn/test", { method: "POST", body: "fixture" }), new Request("https://auth.example.test/user"), new Request("https://panel.example.test/api/private")]) await panel.handler(request);
+  const rpc = new Request("https://panel.example.test/_serverFn/test", { method: "POST", body: "fixture" });
+  Object.defineProperty(rpc, "initiatorOrigin", { value: "https://panel.example.test" });
+  for (const request of [rpc, new Request("https://auth.example.test/user"), new Request("https://panel.example.test/api/private")]) await panel.handler(request);
   assert.equal(f.requests.length, 3);
   assert(f.requests.every(item => item.options.bypassCustomProtocolHandlers));
   assert.equal(await f.requests[0].input.text(), "fixture");
   assert.equal((await panel.handler(new Request("https://panel.example.test/assets/missing.js"))).status, 404);
+});
+
+test("RPC forwarding restores missing CSRF metadata without upgrading untrusted initiators", async t => {
+  const f = fixture(t); const panel = createPanelBundle(f.options);
+  const make = (referrer, initiator) => {
+    const request = new Request("https://panel.example.test/_serverFn/test", { method: "POST", body: "fixture-body", referrer,
+      headers: { Authorization: "Bearer fixture-token", "x-tsr-serverFn": "true" } });
+    if (initiator !== undefined) Object.defineProperty(request, "initiatorOrigin", { value: initiator });
+    return request;
+  };
+  for (const request of [make("", "https://panel.example.test"), make("https://panel.example.test/app", "https://panel.example.test")]) {
+    assert.equal((await panel.handler(request)).status, 200);
+    const forwarded = f.requests.at(-1);
+    assert.equal(forwarded.options.headers.get("Origin"), "https://panel.example.test");
+    assert.equal(forwarded.options.headers.get("Sec-Fetch-Site"), "same-origin");
+    assert.equal(forwarded.options.headers.get("Authorization"), "Bearer fixture-token");
+    assert.equal(await forwarded.input.text(), "fixture-body");
+  }
+  const before = f.requests.length;
+  for (const request of [make(""), make("https://panel.example.test/app"), make("https://evil.test/page"), make("https://panel.example.test/app", "null"), make("https://panel.example.test/app", "https://evil.test")]) {
+    assert.equal((await panel.handler(request)).status, 403);
+  }
+  assert.equal(f.requests.length, before, "Untrusted RPC never reaches the network");
+  const contradictory = make("", "https://panel.example.test");
+  contradictory.headers.set("Origin", "https://evil.test");
+  contradictory.headers.set("Sec-Fetch-Site", "cross-site");
+  await panel.handler(contradictory);
+  assert.equal(f.requests.at(-1).options.headers.get("Origin"), "https://evil.test");
+  assert.equal(f.requests.at(-1).options.headers.get("Sec-Fetch-Site"), "cross-site");
 });
 
 test("rejects traversal, external URLs, duplicates, oversize manifests and rollback", t => {

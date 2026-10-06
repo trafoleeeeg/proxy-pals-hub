@@ -5,6 +5,10 @@ const http = require("node:http");
 const { once } = require("node:events");
 const { createPanelStartup, panelBackground } = require("../runtime/panel-startup.cjs");
 app.setPath("userData", process.env.UMBRA_STARTUP_TEST_DIR);
+// Hosted CI has a virtual display rather than a physical GPU. Match the other
+// native UI fixtures; renderer sandbox and production graphics remain unchanged.
+app.disableHardwareAcceleration();
+app.commandLine.appendSwitch("in-process-gpu");
 app.enableSandbox();
 
 app.whenReady().then(async () => {
@@ -34,7 +38,16 @@ app.whenReady().then(async () => {
   if (overlayContents.isLoading()) await once(overlayContents, "did-finish-load");
   assert.equal(overlayContents.getLastWebPreferences().sandbox, true, "skeleton sandbox");
   assert.equal(overlayContents.getLastWebPreferences().javascript, false, "skeleton JS disabled");
-  const skeletonImage = await overlayContents.capturePage();
+  // did-finish-load is not a compositor paint notification. Capture the first
+  // available real frame, with a bounded wait rather than assuming same-tick paint.
+  let skeletonImage;
+  let paintError;
+  for (let attempt = 0; attempt < 40; attempt++) {
+    try { skeletonImage = await overlayContents.capturePage(); if (!skeletonImage.isEmpty()) break; }
+    catch (error) { if (!/UnknownVizError/.test(error.message)) throw error; paintError = error; }
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  if (!skeletonImage) throw paintError || new Error("Native skeleton did not paint");
   assert.equal(skeletonImage.isEmpty(), false);
   release(); await loading;
   assert.ok(requests > 0);

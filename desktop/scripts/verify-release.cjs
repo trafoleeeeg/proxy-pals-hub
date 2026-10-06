@@ -6,7 +6,7 @@ const yaml = require("js-yaml");
 const pkg = require("../package.json");
 const { verifyEngine } = require("./verify-engine.cjs");
 const { verifyFontBundle } = require("../runtime/font-isolation.cjs");
-const { validateManifest, sha256 } = require("../runtime/panel-bundle.cjs");
+const { verifyPanelArchive } = require("../runtime/panel-archive.cjs");
 
 async function verifyRelease(directory = path.join(__dirname, "../dist")) {
   await verifyEngine();
@@ -64,18 +64,7 @@ async function verifyRelease(directory = path.join(__dirname, "../dist")) {
     assert.deepEqual(JSON.parse(asar.extractFile(archive, "engine/font-bundle-lock.json").toString("utf8")),
       require("../engine/font-bundle-lock.json"), "Packaged font manifest differs from the verified source");
     assert.equal(JSON.parse(asar.extractFile(archive, "package.json").toString("utf8")).version, pkg.version);
-    const panel = validateManifest(JSON.parse(asar.extractFile(archive, "panel/umbra-panel.json").toString("utf8")), "", pkg.version);
-    const expectedPanelFiles = new Set(["/panel/umbra-panel.json", ...panel.files.map(file => "/panel" + file.path)]);
-    for (const name of files) {
-      if (name.startsWith("/panel/") && !asar.statFile(archive, name.slice(1)).files) {
-        assert(expectedPanelFiles.has(name), "Unexpected file in public panel bundle: " + name);
-      }
-    }
-    for (const file of panel.files) {
-      const bytes = asar.extractFile(archive, "panel" + file.path);
-      assert.equal(bytes.length, file.size, "Packaged panel asset size mismatch");
-      assert.equal(sha256(bytes), file.sha256, "Packaged panel asset integrity mismatch");
-    }
+    verifyPanelArchive(asar, archive, pkg.version);
   }
   console.log("Verified Windows installer, version, SHA-512 and blockmap: " + expected);
 }

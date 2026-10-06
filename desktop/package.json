@@ -51,7 +51,7 @@
       "ipc-policy.cjs",
       "session-outbox.cjs",
       "runtime/**/*.cjs",
-      { "from": ".panel", "to": "panel", "filter": ["umbra-panel.json", "_umbra-panel.html", "assets/**/*", "favicon.ico"] },
+      { "from": ".panel", "to": "panel", "filter": ["**/*"] },
       "engine/font-bundle-lock.json",
       "runtime/lark-bot.bookmarklet.txt"
     ],

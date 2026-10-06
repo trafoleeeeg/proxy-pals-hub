@@ -65,6 +65,12 @@ async function verifyRelease(directory = path.join(__dirname, "../dist")) {
       require("../engine/font-bundle-lock.json"), "Packaged font manifest differs from the verified source");
     assert.equal(JSON.parse(asar.extractFile(archive, "package.json").toString("utf8")).version, pkg.version);
     const panel = validateManifest(JSON.parse(asar.extractFile(archive, "panel/umbra-panel.json").toString("utf8")), "", pkg.version);
+    const expectedPanelFiles = new Set(["/panel/umbra-panel.json", ...panel.files.map(file => "/panel" + file.path)]);
+    for (const name of files) {
+      if (name.startsWith("/panel/") && !asar.statFile(archive, name.slice(1)).files) {
+        assert(expectedPanelFiles.has(name), "Unexpected file in public panel bundle: " + name);
+      }
+    }
     for (const file of panel.files) {
       const bytes = asar.extractFile(archive, "panel" + file.path);
       assert.equal(bytes.length, file.size, "Packaged panel asset size mismatch");

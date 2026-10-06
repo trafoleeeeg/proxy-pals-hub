@@ -22,6 +22,11 @@ const manifest = validateManifest({ schema: 1, entry: ENTRY, minimumDesktopVersi
   return { path: resource, size: bytes.length, sha256: sha256(bytes) };
 }) });
 fs.writeFileSync(path.join(publicDirectory, MANIFEST.slice(1)), JSON.stringify(manifest));
+// Generated public build output only, never a user-data/session/cache directory.
+// Prevent obsolete chunks (or unrelated files) accumulating in the installer.
+if (path.dirname(desktopDirectory) !== path.join(root, "desktop") || path.basename(desktopDirectory) !== ".panel") throw new Error("Invalid generated panel output path");
+if (fs.existsSync(desktopDirectory) && fs.lstatSync(desktopDirectory).isSymbolicLink()) throw new Error("Generated panel output must not be a symlink");
+fs.rmSync(desktopDirectory, { recursive: true, force: true });
 // Copy only explicit public resources. No server bundle, env files or source maps.
 for (const file of [...manifest.files, { path: MANIFEST }]) {
   const target = path.join(desktopDirectory, file.path.slice(1));

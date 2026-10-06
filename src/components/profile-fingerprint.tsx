@@ -9,6 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { fingerprintError } from "./profile-model";
 import { desktop } from "@/lib/desktop";
 import { isSupportedProfileMemory, SUPPORTED_PROFILE_MEMORY } from "@/lib/fingerprint-memory";
+import { ProfileMigration } from "./profile-migration";
 
 export function ProfileFingerprint({ value, onChange, disabled = false, country, proxyTimezone, proxyIp }: {
   value: Fingerprint; onChange: (fp: Fingerprint) => void; disabled?: boolean; country?: string | null | undefined;
@@ -42,6 +43,7 @@ export function ProfileFingerprint({ value, onChange, disabled = false, country,
     </div>
     <p className="text-xs text-muted-foreground">Обновлённый клиент согласует User-Agent и Client Hints с ОС профиля и установленным Chromium, включая фоновые workers. Имитация системного набора шрифтов и шум WebGL не поддерживаются. Отпечаток macOS на Windows не эмулирует настоящее устройство Mac и не гарантирует нераспознаваемость.</p>
     <p role="note" className="text-xs text-warning">На Windows обновлённый движок согласует размеры, DPI и ориентацию экрана с CSS в сторонних iframe. Цветовые параметры экрана проверяются отдельно. GPU, Canvas, аудио и установленные шрифты в обычном режиме могут раскрывать устройство; полная нераспознаваемость не гарантируется.</p>
+    {value.os === "windows" && <ProfileMigration value={value} onChange={onChange} disabled={disabled} />}
     {value.os === "windows" && <div className="grid gap-2 rounded-md border border-border p-3">
       <Label htmlFor="windows-configuration">Набор параметров Windows</Label>
       <Select disabled={disabled} value={windowsConfigurationId(value)} onValueChange={(id) => onChange(applyWindowsConfiguration(value, id))}>

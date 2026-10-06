@@ -57,7 +57,7 @@ async function verifyRelease(directory = path.join(__dirname, "../dist")) {
   if (fs.existsSync(archive)) {
     const asar = require("@electron/asar");
     const files = new Set(asar.listPackage(archive).map((name) => name.split(path.sep).join("/")));
-    for (const name of ["/extensions.cjs", "/runtime/profile-home.cjs", "/runtime/theme.cjs", "/theme/styles.css", "/runtime/browser-pipe.cjs", "/runtime/background-workers.cjs", "/runtime/fingerprint.cjs", "/fingerprint-preload.cjs", "/runtime/font-isolation.cjs", "/engine/font-bundle-lock.json"]) {
+    for (const name of ["/extensions.cjs", "/runtime/profile-home.cjs", "/runtime/panel-startup.cjs", "/runtime/theme.cjs", "/theme/styles.css", "/runtime/browser-pipe.cjs", "/runtime/background-workers.cjs", "/runtime/fingerprint.cjs", "/fingerprint-preload.cjs", "/runtime/font-isolation.cjs", "/engine/font-bundle-lock.json"]) {
       assert(files.has(name), "Packaged application is missing " + name);
     }
     assert.deepEqual(JSON.parse(asar.extractFile(archive, "engine/font-bundle-lock.json").toString("utf8")),

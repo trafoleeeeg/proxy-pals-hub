@@ -33,6 +33,9 @@ app.whenReady().then(async () => {
   }
   assert.equal(await window.webContents.executeJavaScript("!!document.querySelector('input#email')"), true, "Local SPA hydrates and redirects unsigned user to login: " + errors.join("; "));
   assert.equal(await window.webContents.executeJavaScript("typeof window.umbra?.panelReady"), "function", "Trusted origin and sandbox preload remain intact");
+  // The login form can commit before the two compositor frames required by
+  // notifyPanelPainted, especially under Xvfb. Wait for the real IPC assertion.
+  for (let n = 0; n < 100 && !ready; n++) await new Promise(resolve => setTimeout(resolve, 50));
   assert.equal(ready, true, "Real local UI sends paint-ready IPC");
   assert.equal(window.webContents.getLastWebPreferences().sandbox, true);
   assert(localResources > 3);

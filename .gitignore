@@ -10,6 +10,7 @@ lerna-debug.log*
 node_modules
 desktop/.npm-cache/
 desktop/.engine/
+desktop/.panel/
 dist
 dist-ssr
 .output

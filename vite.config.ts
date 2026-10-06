@@ -11,5 +11,16 @@ export default defineConfig({
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this
     server: { entry: "server" },
+    // Anonymous root-only SPA shell, not authenticated SSR or a page snapshot.
+    // The website keeps SSR; only the desktop entry is prerendered.
+    prerender: { enabled: true, autoStaticPathsDiscovery: false },
+    pages: [{
+      path: "/app",
+      sitemap: { exclude: true },
+      prerender: {
+        outputPath: "/_umbra-panel.html", autoSubfolderIndex: false,
+        crawlLinks: false, headers: { "X-TSS_SHELL": "true" },
+      },
+    }],
   },
 });

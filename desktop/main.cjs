@@ -16,6 +16,7 @@ const { createSessionOutbox } = require("./session-outbox.cjs");
 const { checkEngineVersions } = require("./runtime/engine-status.cjs");
 const { recordProcessEvent } = require("./runtime/process-diagnostics.cjs");
 const { createPanelStartup, panelBackground } = require("./runtime/panel-startup.cjs");
+const { createPanelBundle } = require("./runtime/panel-bundle.cjs");
 
 const DEFAULT_APP_URL = "https://proxy-pals-hub.lovable.app/app";
 // A packaged client must never let a local environment variable replace the
@@ -32,6 +33,7 @@ app.setAppUserModelId("dev.umbra.desktop");
 
 let mainWindow = null;
 let panelStartup = null;
+let panelBundle = null;
 let updates = null;
 let updateTimer = null;
 let outbox = null;
@@ -81,6 +83,7 @@ function createWindow(prepare = Promise.resolve()) {
   window.webContents.on("will-attach-webview", (event) => event.preventDefault());
   const startup = createPanelStartup(electron, window, {
     appUrl: APP_URL, version: app.getVersion(), prepare,
+    localPanel: () => !!panelBundle,
     isClosing: () => quitting || closing,
     showError: async () => {
       const result = await dialog.showMessageBox(window, {
@@ -239,6 +242,16 @@ else {
       panelSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
       panelSession.setPermissionCheckHandler(() => false);
       await allowBackgroundWorkers(panelSession);
+      if (app.isPackaged) {
+        try {
+          panelBundle = createPanelBundle({ panelSession, origin: APP_ORIGIN, desktopVersion: app.getVersion(),
+            bundledDirectory: path.join(__dirname, "panel"),
+            cacheDirectory: path.join(app.getPath("userData"), "panel-bundles"), safeStorage });
+          // Downloads never block first paint or hot-swap a working session.
+          const timer = setTimeout(() => { void panelBundle.update(); }, 15_000);
+          timer.unref();
+        } catch { diagnose("panel-bundle-fallback"); }
+      }
     })();
     updates = createUpdateController({
       updater: autoUpdater,

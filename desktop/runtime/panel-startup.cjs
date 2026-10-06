@@ -32,6 +32,7 @@ function startupUrl() {
 
 function createPanelStartup({ WebContentsView, session }, window, {
   appUrl, version, prepare = Promise.resolve(), showError, isClosing = () => false,
+  localPanel = () => false,
   schedule = setTimeout, cancel = clearTimeout, loadTimeout = 20_000, legacyTimeout = 10_000,
 }) {
   const localSession = session.fromPartition(`panel-startup-${randomUUID()}`, { cache: false });
@@ -108,6 +109,9 @@ function createPanelStartup({ WebContentsView, session }, window, {
         window.loadURL(url.href).then(resolve, reject);
       }).finally(() => cancel(attemptDeadline));
       loaded = true;
+      // A verified root-only local document is safe to show before network auth
+      // completes hydration. Do not hold its first paint behind getUser().
+      if (localPanel()) reveal();
       // Compatibility with panels predating the ready IPC and failed hydration.
       if (!ready && !disposed) legacyTimer = schedule(reveal, legacyTimeout);
     } catch {

@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
 const { createPanelStartup, startupUrl, panelBackground } = require("../runtime/panel-startup.cjs");
 
-function fixture({ loadURL = async () => {}, localFailure = false, prepare, showError = async () => false } = {}) {
+function fixture({ loadURL = async () => {}, localFailure = false, localPanel = () => false, prepare, showError = async () => false } = {}) {
   const calls = [];
   const timers = new Map();
   let nextTimer = 0;
@@ -42,6 +42,7 @@ function fixture({ loadURL = async () => {}, localFailure = false, prepare, show
   });
   const startup = createPanelStartup(electron, window, {
     appUrl: "https://panel.example/app", version: "0.4.42", prepare, showError,
+    localPanel,
     schedule: (cb, delay) => { const id = ++nextTimer; timers.set(id, { cb, delay }); return id; },
     cancel: id => timers.delete(id),
   });
@@ -68,6 +69,14 @@ test("one native window is visible before preparation or the first network reque
   assert.equal(f.window.listenerCount("resize"), 0);
   f.startup.ready();
   assert.equal(f.calls.filter(([action]) => action === "dispose").length, 1);
+});
+
+test("verified anonymous local UI is revealed without waiting for network auth/hydration IPC", async () => {
+  const f = fixture({ localPanel: () => true });
+  await f.startup.start();
+  assert.equal(f.startup.state().ready, true);
+  assert.equal(f.startup.state().disposed, true);
+  assert.equal(f.timers.size, 0);
 });
 
 test("local skeleton has no secrets, preload, JS, persistent storage or network", () => {

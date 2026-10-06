@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { supabase as primaryClient } from "@/integrations/supabase/client";
+import { primaryClient, sessionFetch } from "./primary-auth-client";
 import type { Database } from "@/integrations/supabase/types";
 import { clearEmployeePreview, employeeAuthKey, EMPLOYEE_EXIT_KEY, LEGACY_PREVIEW_KEY, readEmployeePreview, saveEmployeePreview, type EmployeePreview } from "./employee-session-storage";
 
@@ -44,13 +44,7 @@ function temporaryClient(preview: EmployeePreview): Client {
   const key = import.meta.env["VITE_SUPABASE_PUBLISHABLE_KEY"] || process.env["SUPABASE_PUBLISHABLE_KEY"];
   if (!url || !key) throw new Error("Сервис авторизации не настроен");
   return createClient<Database>(url, key, {
-    global: { fetch: (input, init) => {
-      const headers = new Headers(input instanceof Request ? input.headers : undefined);
-      if (init?.headers) new Headers(init.headers).forEach((value, name) => headers.set(name, value));
-      if ((key.startsWith("sb_publishable_") || key.startsWith("sb_secret_")) && headers.get("Authorization") === `Bearer ${key}`) headers.delete("Authorization");
-      headers.set("apikey", key);
-      return fetch(input, { ...init, headers });
-    } },
+    global: { fetch: sessionFetch(key) },
     auth: { storageKey: employeeAuthKey(preview), storage: sessionStorage, persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
   });
 }

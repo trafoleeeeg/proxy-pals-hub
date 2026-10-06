@@ -32,6 +32,8 @@ const stub = `
     setSession: async tokens => { state.primarySets.push(tokens); state.primaryUserId = tokens.access_token; return { error: null, data: { user: { id: tokens.access_token } } }; },
     signOut: async options => { state.primarySignouts.push(options); state.primaryUserId = null; return { error: null }; }
   } };
+  export const primaryClient = supabase;
+  export function sessionFetch() { return fetch; }
   export function createClient(url, key, options) {
     const storage = options.auth.storage, storageKey = options.auth.storageKey;
     const client = { options, realtime: { disconnect: async () => {} }, auth: {
@@ -46,7 +48,7 @@ const built = await Bun.build({
   define: { "import.meta.env": JSON.stringify({ VITE_SUPABASE_URL: "https://auth.example.test", VITE_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_fixture" }) },
   plugins: [{ name: "isolated-employee-auth", setup(build) {
     build.onResolve({ filter: /^employee-test:entry$/ }, () => ({ path: "entry", namespace: "employee-test" }));
-    build.onResolve({ filter: /^@supabase\/supabase-js$|^@\/integrations\/supabase\/client$/ }, () => ({ path: "stub", namespace: "employee-test" }));
+    build.onResolve({ filter: /^@supabase\/supabase-js$|^\.\/primary-auth-client$/ }, () => ({ path: "stub", namespace: "employee-test" }));
     build.onLoad({ filter: /.*/, namespace: "employee-test" }, ({ path }) => ({ contents: path === "stub" ? stub : `export * from ${JSON.stringify(source)}; export { state } from "@supabase/supabase-js";`, loader: "ts", resolveDir: fileURLToPath(new URL("..", import.meta.url)) }));
   } }],
 });

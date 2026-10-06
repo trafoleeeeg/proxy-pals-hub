@@ -13,6 +13,8 @@ import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { isPrimarySignInPending, supabase } from "@/lib/app-supabase";
 import { Toaster } from "@/components/ui/sonner";
+import { PanelConnection } from "@/components/panel-connection";
+import { isConnectionUnavailable } from "@/lib/panel-connectivity";
 import "@/lib/desktop";
 
 function NotFoundComponent() {
@@ -38,36 +40,37 @@ function NotFoundComponent() {
 }
 
 function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
-  console.error(error);
   const router = useRouter();
   useEffect(() => {
-    reportLovableError(error, { boundary: "tanstack_root_error_component" });
+    if (!isConnectionUnavailable(error)) reportLovableError(error, { boundary: "tanstack_root_error_component" });
   }, [error]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
         <h1 className="text-xl font-semibold tracking-tight text-foreground">
-          This page didn't load
+          {isConnectionUnavailable(error) ? "Восстанавливаем подключение" : "Не удалось загрузить панель"}
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Something went wrong on our end. You can try refreshing or head back home.
+          Панель можно перезагрузить отдельно от приложения. Открытые окна профилей не закрываются.
         </p>
         <div className="mt-6 flex flex-wrap justify-center gap-2">
+          {isConnectionUnavailable(error) && <PanelConnection fullPage recovered={async () => { await router.invalidate(); reset(); }} />}
           <button
             onClick={() => {
-              router.invalidate();
-              reset();
+              const url = new URL(window.location.href);
+              url.searchParams.set("panel-recovery", String(Date.now()));
+              window.location.replace(url.href);
             }}
             className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           >
-            Try again
+            Перезагрузить панель
           </button>
           <a
-            href="/"
+            href="/app"
             className="inline-flex items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
           >
-            Go home
+            На главную
           </a>
         </div>
       </div>
@@ -184,10 +187,15 @@ function AuthSync({ queryClient }: { queryClient: QueryClient }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const router = useRouter();
 
   return (
     <QueryClientProvider client={queryClient}>
       <AuthSync queryClient={queryClient} />
+      <PanelConnection recovered={async () => {
+        await router.invalidate();
+        await queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] !== "authenticated-user" });
+      }} />
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <Outlet />
       <Toaster position="top-right" richColors />

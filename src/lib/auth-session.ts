@@ -1,5 +1,6 @@
 import type { Session, User } from "@supabase/supabase-js";
 import { recoverLegacyOwnerSession, supabase } from "./app-supabase";
+import { ConnectionUnavailableError, setConnectionUnavailable } from "./panel-connectivity";
 
 const REFRESH_MARGIN_SECONDS = 60;
 export const AUTH_OPERATION_TIMEOUT_MS = 8_000;
@@ -19,7 +20,7 @@ export function sessionNeedsRefresh(session: Pick<Session, "expires_at">, now = 
 
 export function isDefinitiveAuthFailure(error: AuthFailure): boolean {
   if (!error) return false;
-  if (error.status != null && error.status >= 400 && error.status < 500) return true;
+  if (error.status === 401 || error.status === 403) return true;
   const value = `${error.code ?? ""} ${error.message ?? ""}`.toLowerCase();
   return /invalid.*refresh|refresh.*not.*found|refresh.*already.*used|session.*not.*found|bad_jwt|jwt.*expired/.test(value);
 }
@@ -27,7 +28,7 @@ export function isDefinitiveAuthFailure(error: AuthFailure): boolean {
 export async function withAuthTimeout<T>(operation: PromiseLike<T>, timeoutMs = AUTH_OPERATION_TIMEOUT_MS): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error("Сервер авторизации не ответил вовремя.")), timeoutMs);
+    timer = setTimeout(() => reject(new ConnectionUnavailableError("Сервер авторизации не ответил вовремя.")), timeoutMs);
   });
   try { return await Promise.race([Promise.resolve(operation), timeout]); }
   finally { if (timer) clearTimeout(timer); }
@@ -49,7 +50,7 @@ async function refreshStoredSession(): Promise<Session> {
       await clearExpiredSession();
       throw new Error("Сессия истекла. Войдите снова.");
     }
-    throw new Error("Не удалось обновить сессию. Проверьте подключение.");
+    throw new ConnectionUnavailableError("Не удалось обновить сессию. Повторим подключение автоматически.");
   }
   if (!result.data.session) {
     await clearExpiredSession();
@@ -74,7 +75,7 @@ export async function getUsableSession(): Promise<Session | null> {
       await clearExpiredSession();
       return null;
     }
-    throw new Error("Не удалось прочитать сессию. Проверьте подключение.");
+    throw new ConnectionUnavailableError("Не удалось прочитать сессию. Повторим подключение автоматически.");
   }
   if (!data.session) return null;
   return sessionNeedsRefresh(data.session) ? refreshStoredSession() : data.session;
@@ -84,12 +85,12 @@ export async function getAuthenticatedUser(): Promise<User | null> {
   const session = await getUsableSession();
   if (!session) return null;
   const { data, error } = await withAuthTimeout(supabase.auth.getUser(session.access_token));
-  if (!error && data.user) return data.user;
+  if (!error && data.user) { setConnectionUnavailable(false); return data.user; }
   if (isDefinitiveAuthFailure(error)) {
     await clearExpiredSession();
     return null;
   }
-  if (error) throw new Error("Не удалось проверить сессию. Проверьте подключение.");
+  if (error) throw new ConnectionUnavailableError("Не удалось проверить сессию. Повторим подключение автоматически.");
   await clearExpiredSession();
   return null;
 }

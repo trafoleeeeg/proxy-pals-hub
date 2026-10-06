@@ -12,6 +12,7 @@ export default defineConfig({
   cacheDir: local("./.vite"),
   plugins: [
     { name: "fixture-api", enforce: "pre", resolveId(source) {
+      if (/(?:^|\/)primary-auth-client$/.test(source)) return local("./mock-auth.ts");
       if (/(?:^|\/)(?:team|profiles|proxies|session|profile-metadata|folders|presence|bookmark-defaults|trash|agent-keys)\.functions$/.test(source)) return local("./mock-api.ts");
       return null;
     } },

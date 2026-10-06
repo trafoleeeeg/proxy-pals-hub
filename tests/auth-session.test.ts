@@ -14,6 +14,9 @@ describe("persisted authentication session", () => {
     expect(isDefinitiveAuthFailure({ status: 401, message: "JWT expired" })).toBe(true);
     expect(isDefinitiveAuthFailure({ code: "refresh_token_not_found" })).toBe(true);
     expect(isDefinitiveAuthFailure({ status: 0, message: "Failed to fetch" })).toBe(false);
+    expect(isDefinitiveAuthFailure({ status: 408 })).toBe(false);
+    expect(isDefinitiveAuthFailure({ status: 429 })).toBe(false);
+    expect(isDefinitiveAuthFailure({ status: 503 })).toBe(false);
   });
 
   test("stops waiting when the authentication service does not answer", async () => {

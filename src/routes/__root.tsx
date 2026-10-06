@@ -7,19 +7,21 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { isPrimarySignInPending, supabase } from "@/lib/app-supabase";
 import { Toaster } from "@/components/ui/sonner";
 import { PanelConnection } from "@/components/panel-connection";
+import { PanelPainted } from "@/components/panel-painted";
 import { isConnectionUnavailable } from "@/lib/panel-connectivity";
 import "@/lib/desktop";
 
 function NotFoundComponent() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <PanelPainted />
       <div className="max-w-md text-center">
         <h1 className="text-7xl font-bold text-foreground">404</h1>
         <h2 className="mt-4 text-xl font-semibold text-foreground">Page not found</h2>
@@ -47,6 +49,7 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <PanelPainted />
       <div className="max-w-md text-center">
         <h1 className="text-xl font-semibold tracking-tight text-foreground">
           {isConnectionUnavailable(error) ? "Восстанавливаем подключение" : "Не удалось загрузить панель"}
@@ -114,32 +117,6 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   errorComponent: ErrorComponent,
 });
 
-/** Заставка видна с первого кадра и исчезает, когда интерфейс готов. */
-function BootScreen() {
-  const [done, setDone] = useState(false);
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => setDone(true));
-    return () => cancelAnimationFrame(frame);
-  }, []);
-  if (done) return null;
-  return (
-    <div
-      role="status"
-      aria-live="polite"
-      className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-3 bg-background"
-    >
-      <span className="flex size-11 items-center justify-center rounded-xl bg-primary text-lg font-bold text-primary-foreground">
-        U
-      </span>
-      <p className="text-sm font-semibold text-foreground">Umbra запускается</p>
-      <span className="h-[3px] w-44 overflow-hidden rounded-full bg-secondary">
-        <span className="block h-full w-2/5 animate-[boot_1.1s_ease-in-out_infinite] rounded-full bg-primary" />
-      </span>
-      <p className="text-xs text-muted-foreground">Загружаем панель и ваши профили…</p>
-    </div>
-  );
-}
-
 function RootShell({ children }: { children: ReactNode }) {
   return (
     <html lang="ru">
@@ -147,7 +124,6 @@ function RootShell({ children }: { children: ReactNode }) {
         <HeadContent />
       </head>
       <body>
-        <BootScreen />
         {children}
         <Scripts />
       </body>
@@ -191,6 +167,7 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
+      <PanelPainted />
       <AuthSync queryClient={queryClient} />
       <PanelConnection recovered={async () => {
         await router.invalidate();

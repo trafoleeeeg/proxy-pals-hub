@@ -33,15 +33,21 @@ async function runPanelRpcFixture({ app, BrowserWindow, session }) {
       panelSession: rpcSession,
     });
     rpcSession.protocol.unhandle("https");
-    rpcSession.protocol.handle("https", request => new URL(request.url).pathname === "/rpc-fixture"
-      ? new Response("<!doctype html><p>RPC fixture</p>", { headers: { "Content-Type": "text/html" } }) : bundle.handler(request));
+    let nativeOrigin = false;
+    rpcSession.protocol.handle("https", request => {
+      if (new URL(request.url).pathname === "/rpc-fixture") return new Response("<!doctype html><p>RPC fixture</p>", { headers: { "Content-Type": "text/html" } });
+      if (new URL(request.url).pathname === "/_serverFn/fixture" && request.headers.has("authorization")) {
+        nativeOrigin = Object.hasOwn(request, "initiatorOrigin") && request.initiatorOrigin === origin;
+      }
+      return bundle.handler(request);
+    });
     const window = new BrowserWindow({ show: false, webPreferences: { session: rpcSession, sandbox: true, contextIsolation: true, nodeIntegration: false } });
     try {
       await window.loadURL(origin + "/rpc-fixture");
       const result = await window.webContents.executeJavaScript(`fetch('/_serverFn/fixture', {method:'POST',headers:{Authorization:'Bearer synthetic-rpc-only'},body:'fixture-body'}).then(async r=>({status:r.status,body:await r.text()}))`);
-      // Production pins the patched Windows engine with native initiatorOrigin.
-      // Stock Linux Electron cannot prove provenance and must fail closed.
-      const nativeOrigin = typeof rpcSession.setUmbraScreenMetrics === "function";
+      // Inspect actual native request provenance, not an unrelated graphics API.
+      // Upstream Electron can also expose initiatorOrigin without Umbra APIs.
+      if (process.platform === "win32") assert(nativeOrigin, "Pinned Windows engine must supply native RPC provenance");
       assert.equal(result.status, nativeOrigin ? 200 : 403, "Actual forwarded RPC must retain CSRF metadata on the pinned engine");
       assert.equal(rpcHits, nativeOrigin ? 1 : 0);
       if (nativeOrigin) assert.deepEqual(JSON.parse(result.body), { ok: true });

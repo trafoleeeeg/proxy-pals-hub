@@ -1,5 +1,6 @@
 import { createMiddleware } from "@tanstack/react-start";
 import { expireLocalSession, forceRefreshSession, getUsableSession } from "./auth-session";
+import { panelRpcFetch } from "./panel-connectivity";
 
 function authorization(token: string): HeadersInit {
   return { Authorization: `Bearer ${token}` };
@@ -24,12 +25,12 @@ export const attachFreshSupabaseAuth = createMiddleware({ type: "function" }).cl
     const authenticatedFetch: typeof fetch = async (input, init) => {
       const firstRequest = requestWithAuthorization(input, init, session.access_token);
       const retryRequest = firstRequest.clone();
-      const response = await fetch(firstRequest);
+      const response = await panelRpcFetch(firstRequest);
       if (response.status !== 401) return response;
       // A network failure during refresh is not rejection of the credentials.
       // forceRefreshSession clears only definitively expired/rejected sessions.
       const refreshed = await forceRefreshSession();
-      const retryResponse = await fetch(requestWithAuthorization(retryRequest, undefined, refreshed.access_token));
+      const retryResponse = await panelRpcFetch(requestWithAuthorization(retryRequest, undefined, refreshed.access_token));
       if (retryResponse.status === 401) await expireLocalSession();
       return retryResponse;
     };

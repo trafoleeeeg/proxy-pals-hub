@@ -163,9 +163,18 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       <PanelPainted />
       <AuthSync queryClient={queryClient} />
-      <PanelConnection recovered={async () => {
-        await router.invalidate();
-        await queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] !== "authenticated-user" });
+      <PanelConnection recovered={async (signal) => {
+        const predicate = (query: { queryKey: readonly unknown[] }) => query.queryKey[0] !== "authenticated-user";
+        const cancel = () => { void queryClient.cancelQueries({ predicate }); };
+        signal.addEventListener("abort", cancel, { once: true });
+        try {
+          await queryClient.cancelQueries({ predicate });
+          signal.throwIfAborted();
+          await router.invalidate();
+          signal.throwIfAborted();
+          await queryClient.invalidateQueries({ predicate }, { throwOnError: true });
+          signal.throwIfAborted();
+        } finally { signal.removeEventListener("abort", cancel); }
       }} />
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <Outlet />

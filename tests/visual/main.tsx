@@ -1,4 +1,4 @@
-import "./mock-api";
+import { fixture } from "./mock-api";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
@@ -14,6 +14,7 @@ import { TrashPage } from "../../src/routes/_authenticated/app.trash";
 import { AuditPage } from "../../src/routes/_authenticated/app.audit";
 import { Route as AgentsRoute } from "../../src/routes/_authenticated/app.agents";
 import "../../src/styles.css";
+import { PanelConnection } from "../../src/components/panel-connection";
 
 const root = createRootRoute();
 const app = createRoute({ getParentRoute: () => root, path: "app", component: AppLayout });
@@ -24,8 +25,12 @@ const proxies = createRoute({ getParentRoute: () => app, path: "proxies", compon
 const folders = createRoute({ getParentRoute: () => app, path: "folders", component: FoldersPage });
 const trash = createRoute({ getParentRoute: () => app, path: "trash", component: TrashPage });
 const audit = createRoute({ getParentRoute: () => app, path: "audit", component: AuditPage });
-const agents = createRoute({ getParentRoute: () => app, path: "agents", component: AgentsRoute.options.component });
+const agents = createRoute({ getParentRoute: () => app, path: "agents", component: AgentsRoute.options.component! });
 const auth = createRoute({ getParentRoute: () => root, path: "auth", component: () => <p>Выход выполнен</p> });
 const router = createRouter({ routeTree: root.addChildren([app.addChildren([profiles, team, desktop, proxies, folders, trash, audit, agents]), auth]) });
 const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-createRoot(document.getElementById("root")!).render(<StrictMode><QueryClientProvider client={client}><RouterProvider router={router} /><Toaster /></QueryClientProvider></StrictMode>);
+fixture.refreshWorkspaces = async () => { await client.invalidateQueries({ queryKey: ["workspaces"] }); };
+createRoot(document.getElementById("root")!).render(<StrictMode><QueryClientProvider client={client}><PanelConnection recovered={async (signal) => {
+  signal.throwIfAborted();
+  await client.invalidateQueries({}, { throwOnError: true });
+}} /><RouterProvider router={router} /><Toaster /></QueryClientProvider></StrictMode>);

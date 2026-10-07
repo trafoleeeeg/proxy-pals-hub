@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { createHash, randomUUID } = require("node:crypto");
+const { fetchPanelResponse } = require("./panel-network.cjs");
 
 const ENTRY = "/_umbra-panel.html";
 const MANIFEST = "/umbra-panel.json";
@@ -114,7 +115,7 @@ function createPanelBundle({ panelSession, origin, bundledDirectory, cacheDirect
       if (!headers.has("Origin")) headers.set("Origin", origin);
       if (!headers.has("Sec-Fetch-Site")) headers.set("Sec-Fetch-Site", "same-origin");
       if (!headers.has("Referer") && request.referrer) headers.set("Referer", request.referrer);
-      return fetchNetwork(request, { headers });
+      return fetchPanelResponse(fetchNetwork, request, { headers });
     }
     // POST/RPC/auth, other origins and profile sessions never use this cache.
     return fetchNetwork(request);

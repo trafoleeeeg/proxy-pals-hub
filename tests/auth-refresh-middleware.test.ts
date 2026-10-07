@@ -55,7 +55,7 @@ test.each([200, 401])("replays only a rejected token and expires only a second 4
 test("server errors are not automatically replayed or treated as logout", async () => {
   const network = spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 503 }));
   try {
-    await api.attachFreshSupabaseAuth({ next: ({ fetch }: { fetch: typeof globalThis.fetch }) => fetch("https://panel.example.test/action") });
+    await expect(api.attachFreshSupabaseAuth({ next: ({ fetch }: { fetch: typeof globalThis.fetch }) => fetch("https://panel.example.test/action") })).rejects.toThrow("Нет связи с сервером");
     expect(network).toHaveBeenCalledTimes(1);
     expect(api.state.expired).toBe(0);
     expect(api.state.refreshes).toBe(0);

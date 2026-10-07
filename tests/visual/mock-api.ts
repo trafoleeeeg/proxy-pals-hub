@@ -1,4 +1,5 @@
 import { generateFingerprint } from "../../src/lib/fingerprint";
+import { ConnectionUnavailableError } from "../../src/lib/panel-connectivity";
 import type { LaunchPayload, ProfileClosed, RunningProfile, UmbraBridge, UpdateStatus } from "../../src/lib/desktop";
 
 const scenario = new URLSearchParams(location.search).get("scenario");
@@ -15,10 +16,15 @@ const profiles = [
 profiles.push({ ...profiles[0]!, id: "p5", teamId: "team-b", name: "Профиль второй команды" });
 const closedListeners = new Set<(event: ProfileClosed) => void>();
 const updateListeners = new Set<(status: UpdateStatus) => void>();
+const resumeListeners = new Set<() => void>();
 
 export const fixture = {
   calls: [] as { method: string; data: any }[],
   failures: [] as string[],
+  networkFailures: [] as string[],
+  authOffline: false,
+  refreshWorkspaces: async () => {},
+  emitResume() { resumeListeners.forEach((listener) => listener()); },
   delay: 0,
   profiles,
   access: [] as { profile_id: string; user_id: string }[],
@@ -44,6 +50,7 @@ function api<T>(method: string, handler: (data: any) => T) {
   return async (input: { data?: any } = {}): Promise<Awaited<T>> => {
     fixture.calls.push({ method, data: structuredClone(input.data ?? {}) });
     if (fixture.delay) await new Promise((resolve) => setTimeout(resolve, fixture.delay));
+    if (fixture.networkFailures.includes(method)) throw new ConnectionUnavailableError();
     if (fixture.failures.includes(method)) throw new Error("Mock request failure");
     return structuredClone(await handler(input.data ?? {}));
   };
@@ -108,6 +115,7 @@ export const saveProfileSession = api("saveProfileSession", () => ({ ok: true })
 
 const bridge: UmbraBridge = {
   isDesktop: true, platform: "win32",
+  onPanelResume: (listener) => { resumeListeners.add(listener); return () => { resumeListeners.delete(listener); }; },
   pushBrowserSettings: async () => ({ ok: true }),
   onBrowserSettingsChanged: () => () => {},
   launchProfile: async (payload) => { fixture.running.push({ profileId: payload.profileId, name: payload.name, lockToken: payload.lockToken }); return { ok: true }; },

@@ -8,6 +8,9 @@ app.setPath("userData", process.env.UMBRA_STARTUP_TEST_DIR);
 app.enableSandbox();
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch("in-process-gpu");
+// This fixture shows its window without stealing focus. Windows may classify
+// it as occluded behind the real app and suspend rAF; keep fixture paints live.
+app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
 app.whenReady().then(async () => {
   const started = performance.now();
   const origin = "https://proxy-pals-hub.lovable.app";

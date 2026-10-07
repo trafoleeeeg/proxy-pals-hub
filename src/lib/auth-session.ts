@@ -1,6 +1,6 @@
 import type { Session, User } from "@supabase/supabase-js";
 import { recoverLegacyOwnerSession, supabase } from "./app-supabase";
-import { ConnectionUnavailableError, setConnectionUnavailable } from "./panel-connectivity";
+import { ConnectionUnavailableError } from "./panel-connectivity";
 
 const REFRESH_MARGIN_SECONDS = 60;
 export const AUTH_OPERATION_TIMEOUT_MS = 8_000;
@@ -85,7 +85,8 @@ export async function getAuthenticatedUser(): Promise<User | null> {
   const session = await getUsableSession();
   if (!session) return null;
   const { data, error } = await withAuthTimeout(supabase.auth.getUser(session.access_token));
-  if (!error && data.user) { setConnectionUnavailable(false); return data.user; }
+  // Auth success alone is not workspace recovery: RPC refetch can still fail.
+  if (!error && data.user) return data.user;
   if (isDefinitiveAuthFailure(error)) {
     await clearExpiredSession();
     return null;

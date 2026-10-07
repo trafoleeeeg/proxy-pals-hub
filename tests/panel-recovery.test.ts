@@ -1,8 +1,91 @@
 import { afterEach, expect, test } from "bun:test";
-import { boundedFetch, ConnectionUnavailableError, connectionUnavailable, recoverVerifiedUser, setConnectionUnavailable } from "../src/lib/panel-connectivity";
+import { boundedFetch, panelRpcFetch, ConnectionUnavailableError, connectionUnavailable, recoverVerifiedUser, setConnectionUnavailable } from "../src/lib/panel-connectivity";
 import { createPanelRecovery } from "../src/lib/panel-recovery";
 
 afterEach(() => setConnectionUnavailable(false));
+
+test("resume during a coalesced online auth check still refetches the workspace", async () => {
+  let complete!: (value: unknown) => void, refetches = 0;
+  const task = createPanelRecovery({
+    verify: () => new Promise((resolve) => { complete = resolve; }),
+    recovered: async () => { refetches++; }, expired: () => {},
+  });
+  const focus = task.run();
+  setConnectionUnavailable(true);
+  expect(task.run()).toBe(focus);
+  complete({ id: "owner" }); await focus;
+  expect(refetches).toBe(1);
+  expect(connectionUnavailable()).toBe(false);
+  task.dispose();
+});
+
+test("hung recovery releases its slot, aborts refetch, and ignores late completion", async () => {
+  let complete!: () => void;
+  let refetches = 0, checks = 0;
+  let abandoned: AbortSignal | undefined;
+  setConnectionUnavailable(true);
+  const task = createPanelRecovery({
+    timeoutMs: 10,
+    verify: async () => { checks++; return { id: "owner" }; },
+    recovered: (signal) => {
+      if (++refetches === 1) { abandoned = signal; return new Promise<void>((resolve) => { complete = resolve; }); }
+      return Promise.resolve();
+    },
+    expired: () => { throw new Error("must not sign out on network failure"); },
+  });
+  await task.run();
+  expect(abandoned?.aborted).toBe(true);
+  expect(connectionUnavailable()).toBe(true);
+  await task.run();
+  expect(checks).toBe(2);
+  expect(connectionUnavailable()).toBe(false);
+  setConnectionUnavailable(true);
+  complete();
+  await new Promise((resolve) => setTimeout(resolve, 1));
+  expect(connectionUnavailable()).toBe(true);
+  task.dispose();
+});
+
+test("hung verification cannot block recovery or sign out on a late null result", async () => {
+  let complete!: (value: unknown) => void;
+  let checks = 0, exits = 0;
+  setConnectionUnavailable(true);
+  const task = createPanelRecovery({
+    timeoutMs: 5,
+    verify: () => ++checks === 1 ? new Promise((resolve) => { complete = resolve; }) : Promise.resolve({ id: "owner" }),
+    recovered: async () => {}, expired: () => { exits++; },
+  });
+  await task.run(); await task.run(); complete(null);
+  await new Promise((resolve) => setTimeout(resolve, 1));
+  expect(checks).toBe(2); expect(exits).toBe(0); expect(connectionUnavailable()).toBe(false);
+  task.dispose();
+});
+
+test("RPC body stalls are aborted, not replayed; a fresh request succeeds", async () => {
+  let signal: AbortSignal | undefined, attempts = 0;
+  const hung: typeof fetch = async (_input, init) => {
+    attempts++; signal = init?.signal ?? undefined;
+    return new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode("partial")); } }));
+  };
+  await expect(panelRpcFetch("https://panel.example.test/_serverFn/test", undefined, 5, hung)).rejects.toBeInstanceOf(ConnectionUnavailableError);
+  expect(attempts).toBe(1); expect(signal?.aborted).toBe(true); expect(connectionUnavailable()).toBe(true);
+  const healthy: typeof fetch = async () => new Response('{"ok":true}', { headers: { "Content-Type": "application/json" } });
+  expect(await (await panelRpcFetch("https://panel.example.test/_serverFn/test", undefined, 50, healthy)).json()).toEqual({ ok: true });
+});
+
+test("RPC distinguishes gateway failure from denied access and caller cancellation", async () => {
+  for (const status of [502, 503, 504]) {
+    await expect(panelRpcFetch("https://panel.example.test/rpc", undefined, 50, async () => new Response(null, { status }))).rejects.toBeInstanceOf(ConnectionUnavailableError);
+  }
+  setConnectionUnavailable(false);
+  for (const status of [401, 403]) {
+    expect((await panelRpcFetch("https://panel.example.test/rpc", undefined, 50, async () => new Response(null, { status }))).status).toBe(status);
+    expect(connectionUnavailable()).toBe(false);
+  }
+  const caller = new AbortController(); caller.abort();
+  await expect(panelRpcFetch("https://panel.example.test/rpc", { signal: caller.signal }, 50, async () => { throw new DOMException("Cancelled", "AbortError"); })).rejects.toThrow("Cancelled");
+  expect(connectionUnavailable()).toBe(false);
+});
 
 test("a timed-out auth request is aborted and the next request can succeed", async () => {
   let signal: AbortSignal | undefined;

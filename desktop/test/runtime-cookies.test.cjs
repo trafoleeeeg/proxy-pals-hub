@@ -4,7 +4,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { createCookieStore, initializeCookies, parseCookieImport, restoreCookies, applyImportedCookies } = require("../runtime/cookies.cjs");
+const { createCookieStore, initializeCookies, parseCookieImport, restoreCookies, applyImportedCookies, registerCookieTransport, readSessionCookies } = require("../runtime/cookies.cjs");
 const { profileId, startUrl, proxyConfig } = require("../runtime/validation.cjs");
 const ID = "10000000-0000-4000-8000-000000000001";
 const OLD = "2026-01-01T00:00:00.000Z";
@@ -12,13 +12,36 @@ const NEW = "2026-02-01T00:00:00.000Z";
 const cookie = (value) => ({ name: "session", value, domain: "localhost", path: "/", hostOnly: true, session: true, secure: true, httpOnly: true, sameSite: "lax" });
 
 test("unsupported CHIPS import and restore fail before clearing cookies", async () => {
-  for (const fields of [{ partitionKey: { topLevelSite: "https://example.test" } }, { partitioned: true }, { partitionKeyOpaque: true }]) {
+  for (const fields of [{ partitionKey: {} }, { partitioned: true }, { partitionKeyOpaque: true }]) {
     const input = { ...cookie("synthetic-value"), ...fields };
     assert.throws(() => parseCookieImport(JSON.stringify([input])), /CHIPS/);
     let cleared = false;
     await assert.rejects(restoreCookies({ clearStorageData: async () => { cleared = true; } }, [input]), /CHIPS/);
     assert.equal(cleared, false);
   }
+});
+
+test("CHIPS require a partition-aware transport before clearing or writing", async () => {
+  const input = { ...cookie("synthetic"), partitionKey: { topLevelSite: "https://site.test", hasCrossSiteAncestor: true } };
+  assert.equal(parseCookieImport(JSON.stringify([input]))[0].partitionKey.hasCrossSiteAncestor, true);
+  let cleared = false, written = false;
+  const ses = { clearStorageData: async () => { cleared = true; }, cookies: { set: async () => { written = true; } } };
+  await assert.rejects(restoreCookies(ses, [input]), /CHIPS/);
+  await assert.rejects(applyImportedCookies(ses, [input]), /CHIPS/);
+  assert.equal(cleared, false); assert.equal(written, false);
+});
+
+test("retained counts never confuse partitioned cookies with ordinary or another ancestor bit", async () => {
+  const ordinary = cookie("same-synthetic-value");
+  const chip = { ...ordinary, partitionKey: { topLevelSite: "https://site.test", hasCrossSiteAncestor: true } };
+  const ses = session();
+  registerCookieTransport(ses, { read: async () => [ordinary], write: async () => {} });
+  await assert.rejects(applyImportedCookies(ses, [chip]), /ни одного/);
+  registerCookieTransport(ses, { read: async () => [{ ...chip, partitionKey: { ...chip.partitionKey, hasCrossSiteAncestor: false } }], write: async () => {} });
+  await assert.rejects(applyImportedCookies(ses, [chip]), /ни одного/);
+  registerCookieTransport(ses, { read: async () => [chip], write: async () => {} });
+  assert.equal((await applyImportedCookies(ses, [chip])).imported, 1);
+  assert.deepEqual((await readSessionCookies(ses))[0].partitionKey, chip.partitionKey);
 });
 
 function encryption() {
@@ -38,6 +61,25 @@ function encryption() {
     },
   };
 }
+
+test("partial CHIPS restore cannot overwrite its recoverable snapshot", async () => {
+  const ordinary = cookie("synthetic");
+  const chips = { ...ordinary, partitionKey: { topLevelSite: "https://example.test", hasCrossSiteAncestor: true } };
+  const ses = session();
+  let rows = [], writes = 0;
+  registerCookieTransport(ses, { read: async () => rows, write: async entry => { if (!entry.partitionKey) rows.push(entry); } });
+  await assert.rejects(initializeCookies(ses, { read: async () => null, write: async () => { writes++; } },
+    { profileId: ID, cookies: JSON.stringify([ordinary, chips]), cookiesUpdatedAt: NEW }), /CHIPS/);
+  assert.equal(writes, 0);
+});
+
+test("transport failure aborts import instead of swallowing a timeout for every cookie", async () => {
+  const ses = session();
+  let calls = 0;
+  registerCookieTransport(ses, { read: async () => [], write: async () => { calls++; throw Object.assign(new Error("unavailable"), { code: "COOKIE_TRANSPORT_UNAVAILABLE" }); } });
+  await assert.rejects(applyImportedCookies(ses, [cookie("one"), cookie("two")]), { code: "COOKIE_TRANSPORT_UNAVAILABLE" });
+  assert.equal(calls, 1);
+});
 
 function session(initial = []) {
   let data = initial;

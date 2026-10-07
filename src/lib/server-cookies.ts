@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { cookiesTextSchema } from "./server-validation";
+import { normalizeCookiePartition, PARTITION_COOKIE_ERROR } from "./cookie-partition";
 
 const cookieSchema = z.object({
   name: z.string().max(4096).refine((s) => !/[\x00-\x20\x7f;,=]/.test(s)),
@@ -10,8 +11,18 @@ const cookieSchema = z.object({
   hostOnly: z.boolean().optional(), session: z.boolean().optional(),
   expirationDate: z.number().finite().min(0).max(253402300799).optional(),
   sameSite: z.enum(["unspecified", "no_restriction", "lax", "strict"]).optional(),
+  partitionKey: z.object({ topLevelSite: z.string(), hasCrossSiteAncestor: z.boolean() }).strict().optional(),
 }).strip();
 export type ProfileCookie = z.infer<typeof cookieSchema>;
+
+/** UI allowlist, never display arbitrary parser/server errors or cookie values. */
+export function cookieImportErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  if (message === PARTITION_COOKIE_ERROR) return PARTITION_COOKIE_ERROR;
+  const position = /^Invalid cookie at position (\d+)$/.exec(message)?.[1];
+  if (position) return `Некорректная запись cookie №${position}. Проверьте типы полей и срок действия.`;
+  return "Формат cookies не распознан. Нужен JSON-массив, объект с полем cookies или файл Netscape.";
+}
 
 function expirationDate(item: Record<string, unknown>): number | undefined {
   const raw = item["expirationDate"] ?? item["expiration"] ?? item["expires"];
@@ -52,9 +63,9 @@ export function parseCookieImport(text: string): ProfileCookie[] {
   return raw.map((item, index) => {
     if (!item || typeof item !== "object") throw new Error(`Invalid cookie at position ${index + 1}`);
     const value = { ...item };
-    if (value.partitionKey != null || value.partitioned === true || value.partitionKeyOpaque === true) {
-      throw new Error("Partitioned cookies (CHIPS) пока не поддерживаются. Импорт отменён; существующие cookies сохранены");
-    }
+    const partitionKey = normalizeCookiePartition(value);
+    if (partitionKey) value.partitionKey = partitionKey;
+    else delete value.partitionKey;
     const expires = expirationDate(value);
     if (expires !== undefined) value.expirationDate = expires;
     if (value.sameSite != null && value.sameSite !== "") {

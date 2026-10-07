@@ -78,6 +78,7 @@ function harness() {
     } },
   };
   const runtime = createProfileRuntime(electron, {
+    cookieTransport: ses => ({ read: () => ses.cookies.get({}), write: cookie => ses.cookies.set({ ...cookie, url: "https://" + cookie.domain.replace(/^\./, "") }) }),
     cleanupTimeoutMs: 25,
     shutdownTimeoutMs: 100,
     protectBackgroundWorkers: async () => ({ stop: () => workerStop(), isActive: () => true }),

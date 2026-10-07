@@ -2,7 +2,8 @@ const path = require("node:path");
 const { profileId, startUrl, revision } = require("./validation.cjs");
 const { createProfileBrowser } = require("./browser.cjs");
 const { createRuntimeProxy, blockSession } = require("./proxy.cjs");
-const { createCookieStore, initializeCookies, canonicalCookies, parseCookieImport, applyImportedCookies } = require("./cookies.cjs");
+const { createCookieStore, initializeCookies, canonicalCookies, parseCookieImport, applyImportedCookies, registerCookieTransport, readSessionCookies, disposeCookieTransport } = require("./cookies.cjs");
+const { createCookieTransport } = require("./cookie-transport.cjs");
 const { createTabStore, sanitizeTabs } = require("./tabs.cjs");
 const { createBookmarkStore, defaultBookmarks, sanitizeBookmarks } = require("./bookmarks.cjs");
 const { normalizeFingerprint, applyNativeScreenMetrics, applyNativeHardwareMetrics, applyFingerprint, installSessionPrivacy } = require("./fingerprint.cjs");
@@ -10,7 +11,7 @@ const { createPrivacyStore, privacyOrigin } = require("./privacy-policy.cjs");
 const { sanitizeBrowserSettings } = require("./browser-settings.cjs");
 const { SAFE_WEBRTC } = require("./leak-check.cjs");
 const { createFaviconLoader } = require("./favicons.cjs");
-const { protectBackgroundWorkers, quarantineBackgroundWorkers, backgroundWorkerSessionSafe } = require("./background-workers.cjs");
+const { protectBackgroundWorkers, quarantineBackgroundWorkers, backgroundWorkerSessionSafe, cookieProtocolForSession } = require("./background-workers.cjs");
 const { applyFontIsolation } = require("./font-isolation.cjs");
 const { recordProcessEvent } = require("./process-diagnostics.cjs");
 
@@ -62,6 +63,7 @@ function createProfileRuntime(electron, options = {}) {
   const setupProxy = options.setupProxy || createRuntimeProxy;
   const configureFingerprint = options.applyFingerprint || applyFingerprint;
   const configureBackgroundWorkers = options.protectBackgroundWorkers || protectBackgroundWorkers;
+  const cookieTransport = options.cookieTransport || (ses => createCookieTransport(cookieProtocolForSession(ses)));
   const cleanupTimeoutMs = options.cleanupTimeoutMs ?? 4000;
   const shutdownTimeoutMs = options.shutdownTimeoutMs ?? 15000;
   const profiles = new Map();
@@ -101,7 +103,7 @@ function createProfileRuntime(electron, options = {}) {
     entry.snapshotQueue = entry.snapshotQueue.catch(() => {}).then(async () => {
       await entry.ses.cookies.flushStore();
       entry.ses.flushStorageData();
-      const cookies = await entry.ses.cookies.get({});
+      const cookies = await readSessionCookies(entry.ses);
       const signature = canonicalCookies(cookies);
       if (signature !== entry.cookieSignature) {
         const next = new Date(Math.max(Date.now(), Date.parse(entry.cookiesUpdatedAt || 0) + 1)).toISOString();
@@ -747,6 +749,7 @@ function createProfileRuntime(electron, options = {}) {
           try { entry.ses.setWebRTCIPHandlingPolicy?.(SAFE_WEBRTC); } catch { /* политика недоступна в этой сборке */ }
         }
          installResourceRecovery(entry);
+        registerCookieTransport(entry.ses, cookieTransport(entry.ses));
         const initialized = await initializeCookies(entry.ses, cookieStore(), { ...payload, profileId: id });
         entry.cookiesUpdatedAt = initialized.cookiesUpdatedAt;
         entry.cookieSignature = initialized.signature;
@@ -799,6 +802,7 @@ function createProfileRuntime(electron, options = {}) {
         if (warmedBrowser && warmedBrowser !== entry.browser) warmedBrowser.destroy();
         if (entry.ses) blockSession(entry.ses);
         await entry.backgroundWorkers?.stop().catch(() => {});
+        if (entry.ses) disposeCookieTransport(entry.ses);
         if (entry.proxyRuntime) await entry.proxyRuntime.dispose().catch(() => {});
         if (!entry.closingRequested) profiles.delete(id);
         // Errors from Electron can include navigation URLs and cookie values.
@@ -891,6 +895,7 @@ function createProfileRuntime(electron, options = {}) {
       }
       for (const win of entry.windows) if (!win.isDestroyed()) win.destroy();
       entry.browser?.destroy();
+      if (entry.ses) disposeCookieTransport(entry.ses);
       profiles.delete(entry.profileId);
       closePhase("done");
       return result;

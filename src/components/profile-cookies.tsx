@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cookiesToNetscape } from "./profile-model";
-import { parseCookieImport } from "@/lib/server-cookies";
+import { parseCookieImport, cookieImportErrorMessage } from "@/lib/server-cookies";
 
 const MAX_COOKIE_IMPORT_BYTES = 5_000_000;
 
@@ -32,8 +32,8 @@ export function ProfileCookies({ profileId, name, isOwner, locked, onClose, onSa
     if (!text.trim() || bytes > MAX_COOKIE_IMPORT_BYTES) return null;
     try {
       const cookies = parseCookieImport(text);
-      return { count: cookies.length, expired: cookies.filter((cookie) => cookie.expirationDate != null && cookie.expirationDate <= Date.now() / 1000).length, error: false };
-    } catch { return { count: 0, expired: 0, error: true }; }
+      return { count: cookies.length, partitions: cookies.filter(cookie => cookie.partitionKey).length, expired: cookies.filter((cookie) => cookie.expirationDate != null && cookie.expirationDate <= Date.now() / 1000).length, error: false };
+    } catch (error) { return { count: 0, partitions: 0, expired: 0, error: true, message: cookieImportErrorMessage(error) }; }
   }, [text, bytes]);
 
   async function importCookies() {
@@ -82,7 +82,8 @@ export function ProfileCookies({ profileId, name, isOwner, locked, onClose, onSa
         }} /></Label>
         <div className="grid min-w-0 gap-2"><Label htmlFor={contentId}>Содержимое</Label><Textarea id={contentId} rows={7} value={text} autoComplete="off" spellCheck={false} disabled={!allowed || busy} onChange={(e) => { setText(e.target.value); setConfirmed(false); }} className="font-mono text-xs" /></div>
         {bytes > MAX_COOKIE_IMPORT_BYTES && <p role="alert" className="text-sm text-destructive">Содержимое превышает 5 МБ.</p>}
-        {preview?.error && <p role="alert" className="text-sm text-destructive">Формат cookies не распознан. Нужен JSON-массив, объект с полем cookies или файл Netscape.</p>}
+        {preview?.error && <p role="alert" className="text-sm text-destructive">{preview.message}</p>}
+        {!!preview?.partitions && !preview.error && <p className="text-xs text-muted-foreground">CHIPS cookies: {preview.partitions}. Нужен обновлённый клиент Umbra с поддержкой разделённых cookies. Для старых ключей без hasCrossSiteAncestor применяется правило совместимости Chrome; точное исходное значение отсутствует в экспорте.</p>}
         {preview && !preview.error && <p role="status" className="text-xs text-muted-foreground">Распознано: {preview.count} · истекли: {preview.expired} · пригодны для установки: {preview.count - preview.expired}{preview.count === preview.expired ? ". Нужны действующие cookies." : ""}</p>}
         <label className="flex items-start gap-2 text-sm"><Checkbox checked={confirmed} disabled={!allowed || busy} onCheckedChange={(v) => setConfirmed(v === true)} /> Заменить облачные cookies профиля содержимым импорта</label>
         <Button disabled={!allowed || busy || !confirmed || !preview || preview.error || preview.count === preview.expired || bytes > MAX_COOKIE_IMPORT_BYTES} onClick={importCookies}><Upload className="size-4" />{busy ? "Выполняется…" : "Импортировать"}</Button>

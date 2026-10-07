@@ -10,7 +10,7 @@ const statusColor: Record<string, string> = {
 };
 import { toast } from "sonner";
 import { useWorkspace } from "@/lib/useWorkspace";
-import { parseCookieImport } from "@/lib/server-cookies";
+import { parseCookieImport, cookieImportErrorMessage } from "@/lib/server-cookies";
 import { MAIN_FOLDER, useProfileFolder } from "@/lib/useProfileFolder";
 import { listProfiles, saveProfile, cloneProfile, bulkCreateProfiles, getProfileCookieStatus } from "@/lib/profiles.functions";
 import { listProxies } from "@/lib/proxies.functions";
@@ -133,8 +133,8 @@ function ProfilesWorkspace() {
     if (!editing?.cookies?.trim() || editingCookiesBytes > MAX_COOKIE_IMPORT_BYTES) return null;
     try {
       const cookies = parseCookieImport(editing.cookies);
-      return { count: cookies.length, expired: cookies.filter((cookie) => cookie.expirationDate != null && cookie.expirationDate <= Date.now() / 1000).length, error: false };
-    } catch { return { count: 0, expired: 0, error: true }; }
+      return { count: cookies.length, partitions: cookies.filter(cookie => cookie.partitionKey).length, expired: cookies.filter((cookie) => cookie.expirationDate != null && cookie.expirationDate <= Date.now() / 1000).length, error: false };
+    } catch (error) { return { count: 0, partitions: 0, expired: 0, error: true, message: cookieImportErrorMessage(error) }; }
   }, [editing?.cookies, editingCookiesBytes]);
   useEffect(() => {
     if (!profiles.data) return;
@@ -323,7 +323,8 @@ function ProfilesWorkspace() {
           }} /></Label>
           <Textarea id="new-profile-cookies" rows={5} className="font-mono text-xs" value={editing.cookies ?? ""} onChange={(event) => setEditing({ ...editing, cookies: event.target.value })} placeholder={'[{"domain":".example.com","name":"session","value":"..."}] или Netscape cookies'} />
           {editingCookiesBytes > MAX_COOKIE_IMPORT_BYTES && <p role="alert" className="text-xs text-destructive">Cookies больше 5 МБ.</p>}
-          {cookiePreview?.error && <p role="alert" className="text-xs text-destructive">Формат cookies не распознан. Нужен JSON-массив, объект с полем cookies или файл Netscape.</p>}
+          {cookiePreview?.error && <p role="alert" className="text-xs text-destructive">{cookiePreview.message}</p>}
+          {!!cookiePreview?.partitions && !cookiePreview.error && <p className="text-xs text-muted-foreground">CHIPS cookies: {cookiePreview.partitions}. Нужен обновлённый клиент с поддержкой разделения cookies; для отсутствующего в старом экспорте флага hasCrossSiteAncestor применяется правило совместимости Chrome.</p>}
           {cookiePreview && !cookiePreview.error && <p role="status" className="text-xs text-muted-foreground">Распознано: {cookiePreview.count} · истекли: {cookiePreview.expired} · пригодны для установки: {cookiePreview.count - cookiePreview.expired}{cookiePreview.count === cookiePreview.expired ? ". Нужны действующие cookies." : ""}</p>}
         </div>}
         <ProfileFingerprint value={editing.fingerprint} onChange={(fingerprint) => setEditing({ ...editing, fingerprint })} disabled={!!busy}

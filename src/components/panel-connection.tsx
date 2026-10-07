@@ -26,7 +26,7 @@ export function PanelConnection({ recovered, fullPage = false }: { recovered: (s
       void task.run();
     };
     const lost = () => setConnectionUnavailable(true);
-    const resume = () => { lost(); wake(); };
+    const resume = () => { lost(); lastWake = 0; wake(); };
     const offResume = desktop()?.onPanelResume?.(resume);
     window.addEventListener("online", wake);
     window.addEventListener("offline", lost);

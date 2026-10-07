@@ -4,6 +4,21 @@ import { createPanelRecovery } from "../src/lib/panel-recovery";
 
 afterEach(() => setConnectionUnavailable(false));
 
+test("resume during a coalesced online auth check still refetches the workspace", async () => {
+  let complete!: (value: unknown) => void, refetches = 0;
+  const task = createPanelRecovery({
+    verify: () => new Promise((resolve) => { complete = resolve; }),
+    recovered: async () => { refetches++; }, expired: () => {},
+  });
+  const focus = task.run();
+  setConnectionUnavailable(true);
+  expect(task.run()).toBe(focus);
+  complete({ id: "owner" }); await focus;
+  expect(refetches).toBe(1);
+  expect(connectionUnavailable()).toBe(false);
+  task.dispose();
+});
+
 test("hung recovery releases its slot, aborts refetch, and ignores late completion", async () => {
   let complete!: () => void;
   let refetches = 0, checks = 0;

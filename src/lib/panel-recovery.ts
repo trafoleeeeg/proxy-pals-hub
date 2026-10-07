@@ -30,7 +30,9 @@ export function createPanelRecovery({ verify, recovered, expired, paused = () =>
         const user = await verify(signal);
         if (signal.aborted || disposed || paused()) return;
         if (!user) { setConnectionUnavailable(false); expired(); return; }
-        if (wasOffline) await recovered(signal);
+        // Resume/offline can arrive while a focus-triggered auth check is in
+        // flight. Coalescing must still refetch the workspace in that case.
+        if (wasOffline || connectionUnavailable()) await recovered(signal);
         if (!signal.aborted && !disposed && !paused()) setConnectionUnavailable(false);
       })();
       // Bound *both* auth and refetch. A hung recovered() must not permanently

@@ -20,8 +20,11 @@ test("sleep/network recovery keeps profiles visible and does not close working t
   await expect(page.getByRole("heading", { name: "Профили", exact: false })).toBeVisible();
   await expect(page.getByText("Не удалось загрузить рабочее пространство.", { exact: true })).toHaveCount(0);
   expect(await page.evaluate(() => window.fixture.running.map(item => item.profileId))).toContain("p1");
-  await page.evaluate(() => { window.fixture.authOffline = false; window.fixture.networkFailures = []; });
-  await page.getByRole("button", { name: "Повторить", exact: true }).click();
+  await page.evaluate(() => {
+    window.fixture.authOffline = false;
+    window.fixture.networkFailures = [];
+    window.fixture.emitResume(); // No manual retry or online event required.
+  });
   await expect(page.getByText("Нет связи с сервером", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Закрыть Рабочий профиль", exact: true })).toBeVisible();
   expect(await page.evaluate(() => window.fixture.calls.filter(item => item.method === "signOut"))).toEqual([]);

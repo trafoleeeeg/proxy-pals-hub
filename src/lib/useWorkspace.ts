@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { createContext, createElement, useContext, useState, type ReactNode } from "react";
 import { listWorkspaces, type Workspace } from "./team.functions";
+import { ConnectionUnavailableError } from "./panel-connectivity";
 
 const Selection = createContext<{ teamId: string | undefined; select: (teamId: string) => void }>({ teamId: undefined, select: () => {} });
 const WORKSPACE_TIMEOUT_MS = 8_000;
@@ -9,7 +10,7 @@ const WORKSPACE_TIMEOUT_MS = 8_000;
 async function withWorkspaceTimeout<T>(operation: Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error("Сервер не ответил вовремя")), WORKSPACE_TIMEOUT_MS);
+    timer = setTimeout(() => reject(new ConnectionUnavailableError("Сервер не ответил вовремя")), WORKSPACE_TIMEOUT_MS);
   });
   try { return await Promise.race([operation, timeout]); }
   finally { if (timer) clearTimeout(timer); }

@@ -3,8 +3,9 @@ import { getAuthenticatedUser } from "@/lib/auth-session";
 import { isPrimarySignInPending } from "@/lib/app-supabase";
 import { connectionUnavailable, setConnectionUnavailable, subscribeConnection } from "@/lib/panel-connectivity";
 import { createPanelRecovery } from "@/lib/panel-recovery";
+import { desktop } from "@/lib/desktop";
 
-export function PanelConnection({ recovered, fullPage = false }: { recovered: () => Promise<unknown>; fullPage?: boolean }) {
+export function PanelConnection({ recovered, fullPage = false }: { recovered: (signal: AbortSignal) => Promise<unknown>; fullPage?: boolean }) {
   const offline = useSyncExternalStore(subscribeConnection, connectionUnavailable, () => false);
   const callback = useRef(recovered);
   callback.current = recovered;
@@ -13,7 +14,7 @@ export function PanelConnection({ recovered, fullPage = false }: { recovered: ()
   useEffect(() => {
     const task = createPanelRecovery({
       verify: getAuthenticatedUser,
-      recovered: () => callback.current(),
+      recovered: (signal) => callback.current(signal),
       paused: isPrimarySignInPending,
       expired: () => { if (location.pathname !== "/auth") location.replace("/auth?next=%2Fapp"); },
     });
@@ -25,15 +26,26 @@ export function PanelConnection({ recovered, fullPage = false }: { recovered: ()
       void task.run();
     };
     const lost = () => setConnectionUnavailable(true);
+    const resume = () => { lost(); wake(); };
+    const offResume = desktop()?.onPanelResume?.(resume);
     window.addEventListener("online", wake);
     window.addEventListener("offline", lost);
     window.addEventListener("focus", wake);
     window.addEventListener("pageshow", wake);
     document.addEventListener("visibilitychange", wake);
-    const timer = window.setInterval(() => { if (connectionUnavailable()) wake(); }, 15_000);
+    let lastTick = Date.now();
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      // Also works in the web panel / older desktops without the native wake
+      // event, including sleep without a navigator.onLine transition.
+      if (now - lastTick > 45_000) lost();
+      lastTick = now;
+      if (connectionUnavailable()) wake();
+    }, 15_000);
     if (offline) wake();
     return () => {
       task.dispose();
+      offResume?.();
       recovery.current = null;
       window.clearInterval(timer);
       window.removeEventListener("online", wake);

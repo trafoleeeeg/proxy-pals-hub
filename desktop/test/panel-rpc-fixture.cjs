@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const path = require("node:path");
 const https = require("node:https");
+const { gzipSync } = require("node:zlib");
 const fs = require("node:fs");
 const { testCertificate } = require("./runtime-proxy-fixtures.cjs");
 const { createPanelBundle } = require("../runtime/panel-bundle.cjs");
@@ -18,8 +19,8 @@ async function runPanelRpcFixture({ app, BrowserWindow, session }) {
       rpcHits++;
       const valid = request.headers.origin === origin && request.headers["sec-fetch-site"] === "same-origin"
         && request.headers.authorization === "Bearer synthetic-rpc-only" && body === "fixture-body";
-      response.writeHead(valid ? 200 : 403, { "Content-Type": "application/json", "Access-Control-Allow-Origin": origin });
-      response.end(JSON.stringify({ ok: valid }));
+      response.writeHead(valid ? 200 : 403, { "Content-Type": "application/json", "Content-Encoding": "gzip", "Access-Control-Allow-Origin": origin });
+      response.end(gzipSync(JSON.stringify({ ok: valid })));
     });
   });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));

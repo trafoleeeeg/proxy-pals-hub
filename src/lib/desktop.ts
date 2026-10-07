@@ -36,6 +36,7 @@ export type ProfileClosed = ProfileRuntimeSnapshot & { snapshotId: string };
 export type UmbraBridge = {
   isDesktop: true;
   panelReady?: () => Promise<{ ok: boolean }>;
+  onPanelResume?: (cb: () => void) => () => void;
   version?: string;
   platform: string;
   engine?: { electron: string; chromium: string };

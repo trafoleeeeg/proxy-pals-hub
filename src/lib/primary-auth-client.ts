@@ -12,7 +12,7 @@ export function sessionFetch(key: string): typeof fetch {
     const url = input instanceof Request ? input.url : String(input);
     // Bound background auth too: a hung refresh otherwise holds the SDK lock
     // and subsequent getSession/refresh calls cannot recover after network return.
-    return /\/auth\/v1\//.test(url) ? boundedFetch(input, { ...init, headers }).catch((error) => {
+    return /\/auth\/v1\//.test(url) ? boundedFetch(input, { ...init, headers }, 6_000, fetch, true).catch((error) => {
       setConnectionUnavailable(true);
       throw error;
     }) : fetch(input, { ...init, headers });

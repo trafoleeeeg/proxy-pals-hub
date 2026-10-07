@@ -32,7 +32,7 @@ export async function recoverVerifiedUser<T>(verify: () => Promise<T>, cached: T
 }
 
 /** Abort the actual request, not only the caller's wait. Never log URLs or credentials. */
-export async function boundedFetch(input: RequestInfo | URL, init?: RequestInit, timeoutMs = 6_000, fetcher: typeof fetch = fetch): Promise<Response> {
+export async function boundedFetch(input: RequestInfo | URL, init?: RequestInit, timeoutMs = 6_000, fetcher: typeof fetch = fetch, bufferBody = false): Promise<Response> {
   const controller = new AbortController();
   const callerSignal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
   const signal = callerSignal ? AbortSignal.any([controller.signal, callerSignal]) : controller.signal;
@@ -44,6 +44,33 @@ export async function boundedFetch(input: RequestInfo | URL, init?: RequestInit,
       reject(error);
     }, timeoutMs);
   });
-  try { return await Promise.race([fetcher(input, { ...init, signal }), deadline]); }
+  try {
+    const operation = (async () => {
+      const response = await fetcher(input, { ...init, signal });
+      // Finite JSON/RPC replies can stall after headers. Keep the same deadline
+      // until their contents arrive, not just until the first byte arrives.
+      if (!bufferBody || !response.body) return response;
+      const body = await response.arrayBuffer();
+      return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
+    })();
+    return await Promise.race([operation, deadline]);
+  }
   finally { if (timer) clearTimeout(timer); }
+}
+
+/** Finite server-function transport. Never replay mutations after network loss. */
+export async function panelRpcFetch(input: RequestInfo | URL, init?: RequestInit, timeoutMs = 20_000, fetcher: typeof fetch = fetch): Promise<Response> {
+  try {
+    const response = await boundedFetch(input, init, timeoutMs, fetcher, true);
+    if ([502, 503, 504].includes(response.status)) throw new ConnectionUnavailableError();
+    return response;
+  } catch (error) {
+    const callerSignal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+    if (callerSignal?.aborted) throw error;
+    if (isConnectionUnavailable(error)) throw error;
+    if (error instanceof TypeError || (error instanceof DOMException && ["AbortError", "TimeoutError"].includes(error.name))) {
+      throw new ConnectionUnavailableError();
+    }
+    throw error;
+  }
 }

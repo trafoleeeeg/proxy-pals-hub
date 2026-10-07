@@ -44,7 +44,9 @@ const APP_NAV = [
 function UpdateBar() {
   const { available, update, updateAction } = useDesktopProfileLifecycle();
   const { status, busy, error } = update;
-  if (!available || (!error && status?.state !== "available" && status?.state !== "downloading" && status?.state !== "downloaded")) return null;
+  // Background update-check failures belong to the Updates section, not the
+  // workspace. Installation/download progress and explicit install errors stay visible.
+  if (!available || (status?.state !== "available" && status?.state !== "downloading" && status?.state !== "downloaded")) return null;
   return <div className="flex flex-wrap items-center gap-3 border-b border-border bg-secondary/40 px-4 py-2 text-sm" role={error ? "alert" : "status"}>
     <span className={error ? "min-w-0 break-words text-destructive" : "min-w-0 break-words"}>
       {error || (status?.state === "available" ? "Доступна версия " + status.version : status?.state === "downloading" ? "Загрузка обновления: " + status.percent + "%" : status?.state === "downloaded" ? "Версия " + status.version + " готова к установке" : "")}

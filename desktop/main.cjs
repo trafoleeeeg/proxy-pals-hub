@@ -1,6 +1,6 @@
 if (require("./runtime/browser-pipe.cjs").superviseBrowser()) return;
 const electron = require("electron");
-const { app, BrowserWindow, ipcMain, session, shell, dialog, safeStorage, Notification } = electron;
+const { app, BrowserWindow, ipcMain, session, shell, dialog, safeStorage, Notification, powerMonitor } = electron;
 const { initializeBackgroundWorkers, allowBackgroundWorkers } = require("./runtime/background-workers.cjs");
 const path = require("node:path");
 const { autoUpdater } = require("electron-updater");
@@ -268,6 +268,9 @@ else {
       },
     });
     createWindow(preparePanel);
+    // Wake the control panel only. Do not reload/close working profile tabs or
+    // replay profile/proxy mutations when the laptop resumes.
+    powerMonitor.on("resume", () => send("umbra:panel-resume"));
     app.on("umbra:profile-protection-failed", ({ saved }) => {
       const body = saved
         ? "Защита фонового процесса потеряна. Профиль остановлен, локальные данные сохранены. Откройте профиль снова."

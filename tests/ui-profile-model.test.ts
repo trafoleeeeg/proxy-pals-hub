@@ -58,4 +58,8 @@ describe("profile UI data", () => {
   test("Netscape export refuses newline injection and invalid cookie collections", () => {
     for (const value of ["{}", "[null]", JSON.stringify([{ domain: "example.com", name: "test", value: "a\nb" }])]) expect(() => cookiesToNetscape(value)).toThrow();
   });
+  test("Netscape cannot silently discard a CHIPS partition", () => {
+    expect(() => cookiesToNetscape(JSON.stringify([{ domain: "example.test", name: "synthetic", value: "1", secure: true,
+      partitionKey: { topLevelSite: "https://example.test", hasCrossSiteAncestor: false } }]))).toThrow("JSON");
+  });
 });

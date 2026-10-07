@@ -42,6 +42,7 @@ export function cookiesToNetscape(json: string): string {
   const cookies: unknown = JSON.parse(json);
   if (!Array.isArray(cookies)) throw new Error("Некорректный формат cookies.");
   const lines = cookies.map((cookie: Record<string, unknown>) => {
+    if (cookie?.["partitionKey"] != null || cookie?.["partitioned"] === true || cookie?.["partitionKeyOpaque"] === true) throw new Error("Netscape не поддерживает CHIPS cookies. Выберите JSON.");
     if (!cookie || typeof cookie["domain"] !== "string" || typeof cookie["name"] !== "string" || typeof cookie["value"] !== "string") throw new Error("Некорректный формат cookies.");
     const domain = cookie["domain"];
     const path = typeof cookie["path"] === "string" ? cookie["path"] : "/";

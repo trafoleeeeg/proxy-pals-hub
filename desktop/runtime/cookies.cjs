@@ -2,14 +2,27 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 const { profileId, revision } = require("./validation.cjs");
+const { normalizeCookiePartition } = require("./cookie-partition.cjs");
+const transports = new WeakMap();
 const MAX_BYTES = 8 * 1024 * 1024;
 const MAX_IMPORT_BYTES = 5_000_000;
 const MAX_COOKIES = 10000;
 
 function assertSupportedPartition(cookie) {
-  if (cookie?.partitionKey != null || cookie?.partitioned === true || cookie?.partitionKeyOpaque === true) {
-    throw new Error("Partitioned cookies (CHIPS) пока не поддерживаются. Импорт отменён; существующие cookies сохранены");
-  }
+  return normalizeCookiePartition(cookie || {});
+}
+
+function registerCookieTransport(ses, transport) { transports.set(ses, transport); }
+function disposeCookieTransport(ses) { transports.get(ses)?.dispose?.(); transports.delete(ses); }
+async function readSessionCookies(ses) {
+  const transport = transports.get(ses);
+  return transport ? parseCookies(JSON.stringify(await transport.read())) : ses.cookies.get({});
+}
+async function writeSessionCookie(ses, cookie) {
+  const transport = transports.get(ses);
+  if (transport) return transport.write(cookie);
+  if (assertSupportedPartition(cookie)) throw new Error("Для CHIPS нужен обновлённый клиент с защищённым транспортом cookies");
+  return ses.cookies.set(cookieDetails(cookie));
 }
 
 function parseCookies(raw) {
@@ -18,7 +31,9 @@ function parseCookies(raw) {
   try { cookies = JSON.parse(raw); } catch { throw new Error("Invalid cookie snapshot"); }
   if (!Array.isArray(cookies) || cookies.length > MAX_COOKIES) throw new Error("Invalid cookie snapshot");
   for (const cookie of cookies) {
-    assertSupportedPartition(cookie);
+    const partitionKey = assertSupportedPartition(cookie);
+    if (partitionKey) cookie.partitionKey = partitionKey;
+    else delete cookie.partitionKey;
     if (!cookie || typeof cookie !== "object" || typeof cookie.name !== "string" || typeof cookie.value !== "string" || typeof cookie.domain !== "string" || !cookie.domain || /[\s/@\\?#]/.test(cookie.domain) || (cookie.path != null && (typeof cookie.path !== "string" || !cookie.path.startsWith("/")))) throw new Error("Invalid cookie entry");
     if (cookie.expirationDate != null && !Number.isFinite(cookie.expirationDate)) throw new Error("Invalid cookie expiration");
   }
@@ -47,7 +62,7 @@ function expiration(cookie) {
 
 function normalizeImportedCookie(cookie) {
   if (!cookie || typeof cookie !== "object" || Array.isArray(cookie)) throw new Error("Некорректная запись cookie");
-  assertSupportedPartition(cookie);
+  const partitionKey = assertSupportedPartition(cookie);
   let domain = typeof cookie.domain === "string" ? cookie.domain.trim() : "";
   if (!domain && typeof cookie.url === "string") {
     try { domain = new URL(cookie.url).hostname; } catch { throw new Error("Некорректный домен cookie"); }
@@ -68,6 +83,7 @@ function normalizeImportedCookie(cookie) {
     secure: cookie.secure === true,
     httpOnly: cookie.httpOnly === true,
     session,
+    ...(partitionKey ? { partitionKey } : {}),
     ...(session ? {} : { expirationDate }),
     ...(cookie.sameSite == null || cookie.sameSite === "" ? {} : { sameSite: sameSite(cookie.sameSite) }),
   };
@@ -135,6 +151,7 @@ function cookieDetails(cookie) {
 function retainedCount(actual, imported) {
   const keyOf = (cookie) => JSON.stringify([
     cookie.domain.replace(/^\./, ""), cookie.path || "/", cookie.name, cookie.value,
+    assertSupportedPartition(cookie) || null,
   ]);
   const remaining = new Map();
   for (const cookie of actual) {
@@ -153,6 +170,9 @@ function retainedCount(actual, imported) {
 async function restoreCookies(ses, cookies) {
   // Validate before clearing anything: never silently remove a partition key.
   for (const cookie of cookies) assertSupportedPartition(cookie);
+  if (cookies.some(cookie => assertSupportedPartition(cookie)) && !transports.has(ses)) throw new Error("Для CHIPS нужен обновлённый клиент с защищённым транспортом cookies");
+  // Prove that the complete partition-aware jar is readable before erasing it.
+  if (transports.has(ses)) await readSessionCookies(ses);
   // Replace, including removals; merging would revive cookies deleted elsewhere.
   await ses.clearStorageData({ storages: ["cookies"] });
   let restored = 0;
@@ -161,9 +181,10 @@ async function restoreCookies(ses, cookies) {
   for (const cookie of cookies) {
     if (cookie.expirationDate != null && cookie.expirationDate <= Date.now() / 1000) { skipped += 1; expired += 1; continue; }
     try {
-      await ses.cookies.set(cookieDetails(cookie));
+      await writeSessionCookie(ses, cookie);
       restored += 1;
-    } catch {
+    } catch (error) {
+      if (error?.code === "COOKIE_TRANSPORT_UNAVAILABLE") throw error;
       // Chromium occasionally rejects obsolete or origin-incompatible cookies
       // from an older snapshot. One bad entry must not prevent the profile from
       // opening or discard every other valid cookie.
@@ -171,17 +192,22 @@ async function restoreCookies(ses, cookies) {
     }
   }
   await ses.cookies.flushStore();
-  return { restored, skipped, expired, installed: retainedCount(await ses.cookies.get({}), cookies) };
+  const actual = await readSessionCookies(ses);
+  const chips = cookies.filter(cookie => assertSupportedPartition(cookie) && !(cookie.expirationDate != null && cookie.expirationDate <= Date.now() / 1000));
+  if (retainedCount(actual, chips) !== chips.length) throw new Error("Не все CHIPS cookies восстановлены; исходный снимок сохранён");
+  return { restored, skipped, expired, installed: retainedCount(actual, cookies) };
 }
 
 async function applyImportedCookies(ses, cookies) {
+  for (const cookie of cookies) assertSupportedPartition(cookie);
+  if (cookies.some(cookie => assertSupportedPartition(cookie)) && !transports.has(ses)) throw new Error("Для CHIPS нужен обновлённый клиент с защищённым транспортом cookies");
   for (const cookie of cookies) {
     if (cookie.expirationDate != null && cookie.expirationDate <= Date.now() / 1000) continue;
-    try { await ses.cookies.set(cookieDetails(cookie)); }
-    catch { /* The caller receives the number that Chromium actually retained. */ }
+    try { await writeSessionCookie(ses, cookie); }
+    catch (error) { if (error?.code === "COOKIE_TRANSPORT_UNAVAILABLE") throw error; /* Report cookies actually retained. */ }
   }
   await ses.cookies.flushStore();
-  const imported = retainedCount(await ses.cookies.get({}), cookies);
+  const imported = retainedCount(await readSessionCookies(ses), cookies);
   const skipped = cookies.length - imported;
   if (!imported) throw new Error("Не удалось импортировать ни одного cookie");
   return { imported, skipped };
@@ -266,12 +292,12 @@ async function initializeCookies(ses, store, payload) {
     selected = local;
     source = "local";
   } else {
-    const existing = await ses.cookies.get({});
+    const existing = await readSessionCookies(ses);
     selected = { cookies: existing.length ? existing : parseCookies(payload.cookies ?? "[]"), cookiesUpdatedAt: null };
     source = existing.length ? "native-disk" : "cloud";
   }
   const restoreResult = await restoreCookies(ses, selected.cookies);
-  const cookies = await ses.cookies.get({});
+  const cookies = await readSessionCookies(ses);
   // Never replace a nonempty cloud/local snapshot with an empty native jar.
   // Rejected or expired imports must remain recoverable for another attempt.
   if (selected.cookies.length && !restoreResult.installed) throw new Error("Unable to restore imported cookies: no cookies were accepted");
@@ -281,4 +307,4 @@ async function initializeCookies(ses, store, payload) {
     cookieRestore: { installed: restoreResult.installed, total: selected.cookies.length, expired: restoreResult.expired } };
 }
 
-module.exports = { createCookieStore, initializeCookies, canonicalCookies, parseCookies, parseCookieImport, restoreCookies, applyImportedCookies };
+module.exports = { createCookieStore, initializeCookies, canonicalCookies, parseCookies, parseCookieImport, restoreCookies, applyImportedCookies, registerCookieTransport, readSessionCookies, disposeCookieTransport };

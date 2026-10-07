@@ -303,8 +303,10 @@ async function stopState(state) {
       void protocol.send("Target.detachFromTarget", { sessionId: record.id }).catch(() => {});
     }
     await Promise.all([servicesStopped, ...sharedStopped]);
-    state.wc.close();
-    state.guard = null;
+    // The partition-aware cookie reader must survive until the final durable
+    // snapshot/outbox after workers stop. Its about:blank target has no website
+    // scripts and stays on this session's already blocked network gate.
+    if (!state.cookieLease) { state.wc.close(); state.guard = null; }
     sessions.delete(state.ses);
     // Keep only a deny-policy tombstone, not the closed profile or its settings.
     if (contexts.get(state.contextId) === state) contexts.set(state.contextId, { active: false });
@@ -338,4 +340,25 @@ function quarantineBackgroundWorkers(ses) {
 
 function backgroundWorkerSessionSafe(ses) { return !unsafeSessions.has(ses); }
 
-module.exports = { initializeBackgroundWorkers, allowBackgroundWorkers, protectBackgroundWorkers, backgroundWorkersProtected, quarantineBackgroundWorkers, backgroundWorkerSessionSafe };
+function cookieProtocolForSession(ses) {
+  const state = sessions.get(ses);
+  if (!protocol || !state?.contextId) throw new Error("Cookie partition transport unavailable");
+  // Electron does not expose its persisted contexts through root Storage.*.
+  // Network.* on the existing session-owned blank target is scoped by the
+  // target's actual StoragePartition. Never fall back to the default context.
+  state.cookieLease = true;
+  const send = (method, params = {}) => {
+    if (state.wc.isDestroyed() || !state.wc.debugger.isAttached()) throw Object.assign(new Error("Cookie partition transport unavailable"), { code: "COOKIE_TRANSPORT_UNAVAILABLE" });
+    return state.wc.debugger.sendCommand(method, params);
+  };
+  return {
+    read: () => send("Network.getAllCookies"),
+    write: (cookies) => send("Network.setCookies", { cookies }),
+    dispose: () => {
+      state.cookieLease = false;
+      if (!state.active && !state.wc.isDestroyed()) { state.wc.close(); state.guard = null; }
+    },
+  };
+}
+
+module.exports = { initializeBackgroundWorkers, allowBackgroundWorkers, protectBackgroundWorkers, backgroundWorkersProtected, quarantineBackgroundWorkers, backgroundWorkerSessionSafe, cookieProtocolForSession };

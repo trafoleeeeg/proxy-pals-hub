@@ -62,3 +62,10 @@ jobs:
           node --check desktop/launcher.cjs
           node --check desktop/proxy-check.cjs
           node --check desktop/fingerprint-preload.cjs
+
+      # The provider pins a different Nitro output layout. Leave the preceding
+      # .output build in place to catch accidental reuse of stale artifacts.
+      - name: Проверка сборки в режиме Lovable
+        env:
+          LOVABLE_SANDBOX: "1"
+        run: bun run build

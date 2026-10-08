@@ -92,3 +92,29 @@ test("an expiry already raised by the route is eligible for automatic recovery",
     expect(api.connectionUnavailable()).toBe(false);
   } finally { task.dispose(); }
 });
+
+test("an initially expired route still reloads when another tab restored the session before wake", async () => {
+  let refetches = 0, exits = 0;
+  const task = api.createPanelRecovery({
+    initialError: new api.SessionExpiredError(), verify: api.getAuthenticatedUser,
+    recovered: async () => {
+      if (++refetches === 1) throw new api.ConnectionUnavailableError();
+    },
+    expired: () => { exits++; },
+  });
+  try {
+    expect(api.connectionUnavailable()).toBe(false);
+    expect((await task.run()).status).toBe("offline");
+    expect(refetches).toBe(1);
+    // Even if another connection check clears offline, the failed initial
+    // route must still reload until its own recovery callback succeeds.
+    api.setConnectionUnavailable(false);
+    expect((await task.run()).status).toBe("recovered");
+    expect(refetches).toBe(2);
+    expect(api.connectionUnavailable()).toBe(false);
+    expect((await task.run()).status).toBe("recovered");
+    expect(refetches).toBe(2);
+    expect(api.state.signOuts).toBe(0);
+    expect(exits).toBe(0);
+  } finally { task.dispose(); }
+});

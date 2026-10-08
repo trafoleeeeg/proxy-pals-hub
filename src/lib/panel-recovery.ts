@@ -25,6 +25,7 @@ export function createPanelRecovery({ verify, recovered, expired, paused = () =>
   let disposed = false;
   let active: AbortController | undefined;
   let applicationFailed = initialError !== undefined && !isConnectionUnavailable(initialError) && !(initialError instanceof SessionExpiredError);
+  let needsInitialRouteRecovery = initialError instanceof SessionExpiredError;
   let expiryReported = false;
   const sessionExpired = (): PanelRecoveryResult => {
     applicationFailed = false;
@@ -57,8 +58,11 @@ export function createPanelRecovery({ verify, recovered, expired, paused = () =>
         // flight. Coalescing must still refetch the workspace in that case.
         // Explicit retry also refetches after a non-network failure, when the
         // global offline flag is correctly false.
-        if (retry || wasOffline || connectionUnavailable()) await recovered(signal);
+        // Another tab may have restored auth after this route failed with an
+        // expired session. Fresh auth alone does not reset the error route.
+        if (retry || needsInitialRouteRecovery || wasOffline || connectionUnavailable()) await recovered(signal);
         if (signal.aborted || disposed || paused()) return { status: "skipped" };
+        needsInitialRouteRecovery = false;
         applicationFailed = false;
         setConnectionUnavailable(false);
         return { status: "recovered" };

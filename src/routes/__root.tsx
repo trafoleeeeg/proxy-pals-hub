@@ -17,6 +17,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { PanelConnection } from "@/components/panel-connection";
 import { PanelPainted } from "@/components/panel-painted";
 import { isConnectionUnavailable } from "@/lib/panel-connectivity";
+import { assertPanelRoutesReady } from "@/lib/panel-recovery";
 import "@/lib/desktop";
 
 function NotFoundComponent() {
@@ -59,7 +60,12 @@ function ErrorComponent({ error, reset }: ErrorComponentProps) {
           Панель можно перезагрузить отдельно от приложения. Открытые окна профилей не закрываются.
         </p>
         <div className="mt-6 flex flex-wrap justify-center gap-2">
-          {isConnectionUnavailable(error) && <PanelConnection fullPage recovered={async () => { await router.invalidate(); reset(); }} />}
+          <PanelConnection fullPage initialError={error} recovered={async (signal) => {
+            await router.invalidate({ sync: true });
+            signal.throwIfAborted();
+            assertPanelRoutesReady(router.state.matches);
+            reset();
+          }} />
           <button
             onClick={() => {
               const url = new URL(window.location.href);
@@ -171,8 +177,9 @@ function RootComponent() {
         try {
           await queryClient.cancelQueries({ predicate });
           signal.throwIfAborted();
-          await router.invalidate();
+          await router.invalidate({ sync: true });
           signal.throwIfAborted();
+          assertPanelRoutesReady(router.state.matches);
           await queryClient.invalidateQueries({ predicate }, { throwOnError: true });
           signal.throwIfAborted();
         } finally { signal.removeEventListener("abort", cancel); }

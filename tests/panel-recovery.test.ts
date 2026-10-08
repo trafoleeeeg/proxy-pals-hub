@@ -1,8 +1,81 @@
 import { afterEach, expect, test } from "bun:test";
+import { createMemoryHistory, createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
 import { boundedFetch, panelRpcFetch, ConnectionUnavailableError, connectionUnavailable, recoverVerifiedUser, setConnectionUnavailable } from "../src/lib/panel-connectivity";
-import { createPanelRecovery } from "../src/lib/panel-recovery";
+import { assertPanelRoutesReady, createPanelRecovery } from "../src/lib/panel-recovery";
 
 afterEach(() => setConnectionUnavailable(false));
+
+test("a resolved router invalidation with a failed route cannot declare recovery", async () => {
+  let online = false, resets = 0;
+  const root = createRootRoute();
+  const app = createRoute({
+    getParentRoute: () => root, path: "/app",
+    beforeLoad: () => { if (!online) throw new ConnectionUnavailableError(); },
+  });
+  const router = createRouter({
+    routeTree: root.addChildren([app]),
+    history: createMemoryHistory({ initialEntries: ["/app"] }),
+  });
+  await router.load();
+  const task = createPanelRecovery({
+    verify: async () => ({ id: "owner" }),
+    recovered: async () => {
+      await router.invalidate({ sync: true });
+      assertPanelRoutesReady(router.state.matches);
+      resets++;
+    },
+    expired: () => { throw new Error("must not sign out on a route failure"); },
+  });
+  expect((await task.run()).status).toBe("offline");
+  expect(connectionUnavailable()).toBe(true);
+  expect(resets).toBe(0);
+  online = true;
+  expect((await task.run()).status).toBe("recovered");
+  expect(connectionUnavailable()).toBe(false);
+  expect(resets).toBe(1);
+  task.dispose();
+});
+
+test("application errors are reported separately and explicit retry refetches while online", async () => {
+  let fails = true, checks = 0, refetches = 0, exits = 0;
+  const error = new Error("Server function not found");
+  setConnectionUnavailable(true);
+  const task = createPanelRecovery({
+    verify: async () => { checks++; return { id: "owner" }; },
+    recovered: async () => { refetches++; if (fails) throw error; },
+    expired: () => { exits++; },
+  });
+  expect(await task.run()).toEqual({ status: "failed", error });
+  expect(connectionUnavailable()).toBe(false);
+  expect((await task.run()).status).toBe("skipped");
+  expect(checks).toBe(1);
+  expect(refetches).toBe(1);
+  expect(await task.run({ retry: true })).toEqual({ status: "failed", error });
+  expect(refetches).toBe(2);
+  fails = false;
+  expect((await task.run({ retry: true })).status).toBe("recovered");
+  expect(refetches).toBe(3);
+  expect(connectionUnavailable()).toBe(false);
+  expect(exits).toBe(0);
+  task.dispose();
+});
+
+test("an initial application error waits for explicit retry and can become a network retry", async () => {
+  let online = false, refetches = 0;
+  const task = createPanelRecovery({
+    initialError: new Error("Unable to load panel"),
+    verify: async () => { if (!online) throw new ConnectionUnavailableError(); return { id: "owner" }; },
+    recovered: async () => { refetches++; }, expired: () => {},
+  });
+  expect((await task.run()).status).toBe("skipped");
+  expect((await task.run({ retry: true })).status).toBe("offline");
+  expect(connectionUnavailable()).toBe(true);
+  online = true;
+  expect((await task.run()).status).toBe("recovered");
+  expect(refetches).toBe(1);
+  expect(connectionUnavailable()).toBe(false);
+  task.dispose();
+});
 
 test("resume during a coalesced online auth check still refetches the workspace", async () => {
   let complete!: (value: unknown) => void, refetches = 0;

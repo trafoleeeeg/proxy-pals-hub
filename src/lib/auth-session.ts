@@ -1,6 +1,7 @@
 import type { Session, User } from "@supabase/supabase-js";
 import { recoverLegacyOwnerSession, supabase } from "./app-supabase";
 import { ConnectionUnavailableError } from "./panel-connectivity";
+import { SessionExpiredError } from "./auth-errors";
 
 const REFRESH_MARGIN_SECONDS = 60;
 export const AUTH_OPERATION_TIMEOUT_MS = 8_000;
@@ -48,13 +49,13 @@ async function refreshStoredSession(): Promise<Session> {
   if (result.error) {
     if (isDefinitiveAuthFailure(result.error)) {
       await clearExpiredSession();
-      throw new Error("Сессия истекла. Войдите снова.");
+      throw new SessionExpiredError();
     }
     throw new ConnectionUnavailableError("Не удалось обновить сессию. Повторим подключение автоматически.");
   }
   if (!result.data.session) {
     await clearExpiredSession();
-    throw new Error("Сессия истекла. Войдите снова.");
+    throw new SessionExpiredError();
   }
   return result.data.session;
 }

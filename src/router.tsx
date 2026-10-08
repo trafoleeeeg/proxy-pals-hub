@@ -9,6 +9,8 @@ export const getRouter = () => {
   const router = createRouter({
     routeTree,
     context: { queryClient },
+    // Lovable prerender fetches `/app/`; avoid a /app/ -> /app redirect loop.
+    trailingSlash: "preserve",
     scrollRestoration: true,
     defaultPreload: "intent",
     defaultPreloadStaleTime: 0,

@@ -40,3 +40,20 @@ test("a background update failure stays in Updates, not above the profiles table
   await page.getByRole("link", { name: "Обновления", exact: true }).click();
   await expect(page.getByText("Не удалось выполнить обновление.", { exact: false }).first()).toBeVisible();
 });
+
+test("a server error during recovery shows a panel error and explicit retry reloads data", async ({ page }) => {
+  await page.goto("/app");
+  await expect(page.getByRole("heading", { name: "Профили", exact: false })).toBeVisible();
+  await page.evaluate(() => {
+    window.fixture.failures.push("listWorkspaces");
+    window.fixture.emitResume();
+  });
+  await expect(page.getByText("Не удалось восстановить панель", { exact: true })).toBeVisible();
+  await expect(page.getByText("Нет связи с сервером", { exact: true })).toHaveCount(0);
+  const failedCalls = await page.evaluate(() => window.fixture.calls.filter(item => item.method === "listWorkspaces").length);
+  await page.evaluate(() => { window.fixture.failures = []; });
+  await page.getByRole("button", { name: "Повторить", exact: true }).click();
+  await expect(page.getByText("Не удалось восстановить панель", { exact: true })).toHaveCount(0);
+  expect(await page.evaluate(() => window.fixture.calls.filter(item => item.method === "listWorkspaces").length)).toBeGreaterThan(failedCalls);
+  expect(await page.evaluate(() => window.fixture.calls.filter(item => item.method === "signOut"))).toEqual([]);
+});

@@ -3,8 +3,21 @@ const path = require("node:path");
 const { ENTRY, MANIFEST, sha256, validateManifest, loadBundled } = require("../desktop/runtime/panel-bundle.cjs");
 
 const root = path.resolve(__dirname, "..");
-const publicDirectory = path.join(root, ".output/public");
+const publicDirectory = [".output/public", "dist/client"].map(dir => path.join(root, dir)).find(dir => fs.existsSync(path.join(dir, "assets"))) || path.join(root, ".output/public");
 const desktopDirectory = path.join(root, "desktop/.panel");
+// Lovable's build forces autoSubfolderIndex, writing `<outputPath>/index.html`
+// (or `app/index.html`). Normalize to the flat ENTRY file the client expects.
+{
+  const flat = path.join(publicDirectory, ENTRY.slice(1));
+  const isFile = p => fs.existsSync(p) && fs.lstatSync(p).isFile();
+  if (!isFile(flat)) {
+    const candidate = [path.join(flat, "index.html"), path.join(publicDirectory, "app/index.html"), path.join(publicDirectory, "app.html")].find(isFile);
+    if (!candidate) throw new Error("Prerendered panel shell not found");
+    const html = fs.readFileSync(candidate);
+    if (fs.existsSync(flat)) fs.rmSync(flat, { recursive: true, force: true });
+    fs.writeFileSync(flat, html);
+  }
+}
 const shell = fs.readFileSync(path.join(publicDirectory, ENTRY.slice(1)), "utf8");
 // Root-only TanStack SPA state: no protected route SSR, user or cookies.
 if (!shell.includes('lastMatchId:"__root__') || /access_token|refresh_token|cookies_enc/.test(shell)) throw new Error("Panel shell must be anonymous");

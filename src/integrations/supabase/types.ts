@@ -125,12 +125,15 @@ export type Database = {
           created_at: string
           created_by: string | null
           custom_fields: Json
+          deleted_at: string | null
+          deleted_by: string | null
           fingerprint: Json
           folder: string
           id: string
           name: string
           notes: string
           proxy_id: string | null
+          sort_order: number
           status_id: string | null
           tags: string[]
           team_id: string
@@ -142,12 +145,15 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           custom_fields?: Json
+          deleted_at?: string | null
+          deleted_by?: string | null
           fingerprint?: Json
           folder?: string
           id?: string
           name: string
           notes?: string
           proxy_id?: string | null
+          sort_order?: number
           status_id?: string | null
           tags?: string[]
           team_id: string
@@ -159,12 +165,15 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           custom_fields?: Json
+          deleted_at?: string | null
+          deleted_by?: string | null
           fingerprint?: Json
           folder?: string
           id?: string
           name?: string
           notes?: string
           proxy_id?: string | null
+          sort_order?: number
           status_id?: string | null
           tags?: string[]
           team_id?: string
@@ -451,6 +460,7 @@ export type Database = {
           id: string
           is_default: boolean
           name: string
+          position: number
           team_id: string
           updated_at: string
         }
@@ -460,6 +470,7 @@ export type Database = {
           id?: string
           is_default?: boolean
           name: string
+          position?: number
           team_id: string
           updated_at?: string
         }
@@ -469,6 +480,7 @@ export type Database = {
           id?: string
           is_default?: boolean
           name?: string
+          position?: number
           team_id?: string
           updated_at?: string
         }
@@ -880,6 +892,10 @@ export type Database = {
         }
         Returns: number
       }
+      delete_team_folder: {
+        Args: { _folder_id: string; _team_id: string }
+        Returns: boolean
+      }
       ensure_workspace: { Args: never; Returns: string }
       force_profile_unlock: { Args: { _profile_id: string }; Returns: boolean }
       get_team_bookmark_defaults: { Args: { _team_id: string }; Returns: Json }
@@ -888,6 +904,15 @@ export type Database = {
         Returns: string
       }
       is_superadmin: { Args: never; Returns: boolean }
+      list_trashed_profiles: {
+        Args: { _team_id: string }
+        Returns: {
+          deleted_at: string
+          folder: string
+          id: string
+          name: string
+        }[]
+      }
       mutate_profile_lease: {
         Args: {
           _cookies_enc?: string
@@ -898,8 +923,25 @@ export type Database = {
         }
         Returns: Json
       }
+      prune_team_audit_log: { Args: { _team_id: string }; Returns: number }
       remove_team_member: {
         Args: { _team_id: string; _user_id: string }
+        Returns: boolean
+      }
+      rename_team_folder: {
+        Args: { _folder_id: string; _name: string; _team_id: string }
+        Returns: boolean
+      }
+      reorder_team_folders: {
+        Args: { _folder_ids: string[]; _team_id: string }
+        Returns: boolean
+      }
+      reorder_team_profiles: {
+        Args: { _folder: string; _profile_ids: string[]; _team_id: string }
+        Returns: boolean
+      }
+      restore_trashed_profile: {
+        Args: { _profile_id: string; _team_id: string }
         Returns: boolean
       }
       save_profile_browser_settings: {
@@ -989,6 +1031,14 @@ export type Database = {
           _team_id: string
           _user_id?: string
         }
+        Returns: number
+      }
+      trash_agent_profile: {
+        Args: { _profile_id: string; _team_id: string }
+        Returns: boolean
+      }
+      trash_profiles: {
+        Args: { _profile_ids: string[]; _team_id: string }
         Returns: number
       }
     }

@@ -16,9 +16,12 @@ import { Route as AuthenticatedAppRouteImport } from './routes/_authenticated/ap
 import { Route as InviteTokenRouteImport } from './routes/invite.$token'
 import { Route as AuthenticatedAppIndexRouteImport } from './routes/_authenticated/app.index'
 import { Route as AuthenticatedAppAgentsRouteImport } from './routes/_authenticated/app.agents'
+import { Route as AuthenticatedAppAuditRouteImport } from './routes/_authenticated/app.audit'
 import { Route as AuthenticatedAppDesktopRouteImport } from './routes/_authenticated/app.desktop'
+import { Route as AuthenticatedAppFoldersRouteImport } from './routes/_authenticated/app.folders'
 import { Route as AuthenticatedAppProxiesRouteImport } from './routes/_authenticated/app.proxies'
 import { Route as AuthenticatedAppTeamRouteImport } from './routes/_authenticated/app.team'
+import { Route as AuthenticatedAppTrashRouteImport } from './routes/_authenticated/app.trash'
 import { Route as ApiPublicAgentMeRouteImport } from './routes/api/public/agent/me'
 import { Route as ApiPublicAgentProfilesRouteImport } from './routes/api/public/agent/profiles'
 import { Route as ApiPublicAgentProxiesRouteImport } from './routes/api/public/agent/proxies'
@@ -58,9 +61,19 @@ const AuthenticatedAppAgentsRoute = AuthenticatedAppAgentsRouteImport.update({
   path: '/agents',
   getParentRoute: () => AuthenticatedAppRoute,
 } as any)
+const AuthenticatedAppAuditRoute = AuthenticatedAppAuditRouteImport.update({
+  id: '/audit',
+  path: '/audit',
+  getParentRoute: () => AuthenticatedAppRoute,
+} as any)
 const AuthenticatedAppDesktopRoute = AuthenticatedAppDesktopRouteImport.update({
   id: '/desktop',
   path: '/desktop',
+  getParentRoute: () => AuthenticatedAppRoute,
+} as any)
+const AuthenticatedAppFoldersRoute = AuthenticatedAppFoldersRouteImport.update({
+  id: '/folders',
+  path: '/folders',
   getParentRoute: () => AuthenticatedAppRoute,
 } as any)
 const AuthenticatedAppProxiesRoute = AuthenticatedAppProxiesRouteImport.update({
@@ -71,6 +84,11 @@ const AuthenticatedAppProxiesRoute = AuthenticatedAppProxiesRouteImport.update({
 const AuthenticatedAppTeamRoute = AuthenticatedAppTeamRouteImport.update({
   id: '/team',
   path: '/team',
+  getParentRoute: () => AuthenticatedAppRoute,
+} as any)
+const AuthenticatedAppTrashRoute = AuthenticatedAppTrashRouteImport.update({
+  id: '/trash',
+  path: '/trash',
   getParentRoute: () => AuthenticatedAppRoute,
 } as any)
 const ApiPublicAgentMeRoute = ApiPublicAgentMeRouteImport.update({
@@ -101,9 +119,12 @@ export interface FileRoutesByFullPath {
   '/app': typeof AuthenticatedAppRouteWithChildren
   '/invite/$token': typeof InviteTokenRoute
   '/app/agents': typeof AuthenticatedAppAgentsRoute
+  '/app/audit': typeof AuthenticatedAppAuditRoute
   '/app/desktop': typeof AuthenticatedAppDesktopRoute
+  '/app/folders': typeof AuthenticatedAppFoldersRoute
   '/app/proxies': typeof AuthenticatedAppProxiesRoute
   '/app/team': typeof AuthenticatedAppTeamRoute
+  '/app/trash': typeof AuthenticatedAppTrashRoute
   '/app/': typeof AuthenticatedAppIndexRoute
   '/api/public/agent/me': typeof ApiPublicAgentMeRoute
   '/api/public/agent/profiles': typeof ApiPublicAgentProfilesRouteWithChildren
@@ -115,9 +136,12 @@ export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
   '/invite/$token': typeof InviteTokenRoute
   '/app/agents': typeof AuthenticatedAppAgentsRoute
+  '/app/audit': typeof AuthenticatedAppAuditRoute
   '/app/desktop': typeof AuthenticatedAppDesktopRoute
+  '/app/folders': typeof AuthenticatedAppFoldersRoute
   '/app/proxies': typeof AuthenticatedAppProxiesRoute
   '/app/team': typeof AuthenticatedAppTeamRoute
+  '/app/trash': typeof AuthenticatedAppTrashRoute
   '/app': typeof AuthenticatedAppIndexRoute
   '/api/public/agent/me': typeof ApiPublicAgentMeRoute
   '/api/public/agent/profiles': typeof ApiPublicAgentProfilesRouteWithChildren
@@ -132,9 +156,12 @@ export interface FileRoutesById {
   '/_authenticated/app': typeof AuthenticatedAppRouteWithChildren
   '/invite/$token': typeof InviteTokenRoute
   '/_authenticated/app/agents': typeof AuthenticatedAppAgentsRoute
+  '/_authenticated/app/audit': typeof AuthenticatedAppAuditRoute
   '/_authenticated/app/desktop': typeof AuthenticatedAppDesktopRoute
+  '/_authenticated/app/folders': typeof AuthenticatedAppFoldersRoute
   '/_authenticated/app/proxies': typeof AuthenticatedAppProxiesRoute
   '/_authenticated/app/team': typeof AuthenticatedAppTeamRoute
+  '/_authenticated/app/trash': typeof AuthenticatedAppTrashRoute
   '/_authenticated/app/': typeof AuthenticatedAppIndexRoute
   '/api/public/agent/me': typeof ApiPublicAgentMeRoute
   '/api/public/agent/profiles': typeof ApiPublicAgentProfilesRouteWithChildren
@@ -149,9 +176,12 @@ export interface FileRouteTypes {
     | '/app'
     | '/invite/$token'
     | '/app/agents'
+    | '/app/audit'
     | '/app/desktop'
+    | '/app/folders'
     | '/app/proxies'
     | '/app/team'
+    | '/app/trash'
     | '/app/'
     | '/api/public/agent/me'
     | '/api/public/agent/profiles'
@@ -163,9 +193,12 @@ export interface FileRouteTypes {
     | '/auth'
     | '/invite/$token'
     | '/app/agents'
+    | '/app/audit'
     | '/app/desktop'
+    | '/app/folders'
     | '/app/proxies'
     | '/app/team'
+    | '/app/trash'
     | '/app'
     | '/api/public/agent/me'
     | '/api/public/agent/profiles'
@@ -179,9 +212,12 @@ export interface FileRouteTypes {
     | '/_authenticated/app'
     | '/invite/$token'
     | '/_authenticated/app/agents'
+    | '/_authenticated/app/audit'
     | '/_authenticated/app/desktop'
+    | '/_authenticated/app/folders'
     | '/_authenticated/app/proxies'
     | '/_authenticated/app/team'
+    | '/_authenticated/app/trash'
     | '/_authenticated/app/'
     | '/api/public/agent/me'
     | '/api/public/agent/profiles'
@@ -250,11 +286,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAppAgentsRouteImport
       parentRoute: typeof AuthenticatedAppRoute
     }
+    '/_authenticated/app/audit': {
+      id: '/_authenticated/app/audit'
+      path: '/audit'
+      fullPath: '/app/audit'
+      preLoaderRoute: typeof AuthenticatedAppAuditRouteImport
+      parentRoute: typeof AuthenticatedAppRoute
+    }
     '/_authenticated/app/desktop': {
       id: '/_authenticated/app/desktop'
       path: '/desktop'
       fullPath: '/app/desktop'
       preLoaderRoute: typeof AuthenticatedAppDesktopRouteImport
+      parentRoute: typeof AuthenticatedAppRoute
+    }
+    '/_authenticated/app/folders': {
+      id: '/_authenticated/app/folders'
+      path: '/folders'
+      fullPath: '/app/folders'
+      preLoaderRoute: typeof AuthenticatedAppFoldersRouteImport
       parentRoute: typeof AuthenticatedAppRoute
     }
     '/_authenticated/app/proxies': {
@@ -269,6 +319,13 @@ declare module '@tanstack/react-router' {
       path: '/team'
       fullPath: '/app/team'
       preLoaderRoute: typeof AuthenticatedAppTeamRouteImport
+      parentRoute: typeof AuthenticatedAppRoute
+    }
+    '/_authenticated/app/trash': {
+      id: '/_authenticated/app/trash'
+      path: '/trash'
+      fullPath: '/app/trash'
+      preLoaderRoute: typeof AuthenticatedAppTrashRouteImport
       parentRoute: typeof AuthenticatedAppRoute
     }
     '/api/public/agent/me': {
@@ -304,17 +361,23 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedAppRouteChildren {
   AuthenticatedAppAgentsRoute: typeof AuthenticatedAppAgentsRoute
+  AuthenticatedAppAuditRoute: typeof AuthenticatedAppAuditRoute
   AuthenticatedAppDesktopRoute: typeof AuthenticatedAppDesktopRoute
+  AuthenticatedAppFoldersRoute: typeof AuthenticatedAppFoldersRoute
   AuthenticatedAppProxiesRoute: typeof AuthenticatedAppProxiesRoute
   AuthenticatedAppTeamRoute: typeof AuthenticatedAppTeamRoute
+  AuthenticatedAppTrashRoute: typeof AuthenticatedAppTrashRoute
   AuthenticatedAppIndexRoute: typeof AuthenticatedAppIndexRoute
 }
 
 const AuthenticatedAppRouteChildren: AuthenticatedAppRouteChildren = {
   AuthenticatedAppAgentsRoute: AuthenticatedAppAgentsRoute,
+  AuthenticatedAppAuditRoute: AuthenticatedAppAuditRoute,
   AuthenticatedAppDesktopRoute: AuthenticatedAppDesktopRoute,
+  AuthenticatedAppFoldersRoute: AuthenticatedAppFoldersRoute,
   AuthenticatedAppProxiesRoute: AuthenticatedAppProxiesRoute,
   AuthenticatedAppTeamRoute: AuthenticatedAppTeamRoute,
+  AuthenticatedAppTrashRoute: AuthenticatedAppTrashRoute,
   AuthenticatedAppIndexRoute: AuthenticatedAppIndexRoute,
 }
 

@@ -50,3 +50,4 @@ for (const file of [...manifest.files, { path: MANIFEST }]) {
 }
 loadBundled(desktopDirectory);
 console.log(`Verified anonymous local panel: ${manifest.files.length} public assets`);
+})().catch(error => { console.error(error); process.exit(1); });

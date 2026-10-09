@@ -40,7 +40,22 @@ app.whenReady().then(async () => {
   assert.equal(failures, 0);
   await guard.stop();
   browser.destroy();
-  const runtime = createProfileRuntime(electron, { show: false,
+  let runtimeElectron = electron;
+  if (process.platform === "win32") {
+    assert.equal(electron.safeStorage.isEncryptionAvailable(), true, "Windows startup must exercise real DPAPI");
+  } else {
+    // Linux CI has no OS keyring. This isolated fixture cipher is not an app
+    // fallback; the mandatory Windows run continues to use real DPAPI.
+    const crypto = require("node:crypto");
+    const key = crypto.createHash("sha256").update("synthetic startup fixture only").digest();
+    runtimeElectron = Object.create(electron);
+    Object.defineProperty(runtimeElectron, "safeStorage", { value: {
+      isEncryptionAvailable: () => true,
+      encryptString(value) { const iv = crypto.randomBytes(12); const cipher = crypto.createCipheriv("aes-256-gcm", key, iv); const data = Buffer.concat([cipher.update(value), cipher.final()]); return Buffer.concat([iv, cipher.getAuthTag(), data]); },
+      decryptString(value) { const cipher = crypto.createDecipheriv("aes-256-gcm", key, value.subarray(0, 12)); cipher.setAuthTag(value.subarray(12, 28)); return Buffer.concat([cipher.update(value.subarray(28)), cipher.final()]).toString(); },
+    } });
+  }
+  const runtime = createProfileRuntime(runtimeElectron, { show: false,
     tabStore: { read: async () => ({ tabs: ["about:blank", "about:blank"], activeIndex: 0 }), write: async () => {} },
     bookmarkStore: { readState: async () => ({ bookmarks: [], barVisible: true, stored: true }), write: async () => {} },
   });

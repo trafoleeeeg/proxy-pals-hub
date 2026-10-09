@@ -424,6 +424,56 @@ const cookieAcknowledgement = (snapshot, cloudRevision = CLOUD_SAVED) => ({
   snapshotRevision: snapshot.snapshotRevision, cloudRevision,
 });
 
+test("save identity is durable before upload and server proof rebases C without replacing it", async t => {
+  const h = harness(); t.after(() => h.runtime.closeAllProfiles());
+  await h.runtime.launchProfileWindow({ ...payload(), cookiesUpdatedAt: CLOUD_BASE });
+  const ses = h.sessions.get(`persist:profile-${ID}`);
+  ses.cookies.update([savedCookie("B")]);
+  const sent = await h.runtime.snapshotProfileCookies(ID);
+  assert.equal(h.records.get(ID).saveAttempts[0].saveId, sent.snapshotId);
+  assert.equal(h.records.get(ID).saveAttempts[0].cookieHash, sent.cookieHash);
+  assert.equal(sent.baseRevision, CLOUD_BASE);
+  ses.cookies.update([savedCookie("C")]);
+  const newer = await h.runtime.snapshotProfileCookies(ID);
+  const proof = { saveId: sent.snapshotId, cookieHash: sent.cookieHash, cookiesUpdatedAt: CLOUD_SAVED };
+  for (const invalid of [{ ...proof, saveId: crypto.randomUUID() }, { ...proof, cookieHash: "0".repeat(64) }]) {
+    assert.equal(await h.runtime.reconcileProfileCookieSave({ profileId: ID, lockToken: "test-lock-token", proof: invalid }), false);
+  }
+  h.setSnapshotFailure(true);
+  await assert.rejects(h.runtime.reconcileProfileCookieSave({ profileId: ID, lockToken: "test-lock-token", proof }), /disk failure/);
+  assert.equal(h.records.get(ID).baseRevision, CLOUD_BASE);
+  assert.equal(h.records.get(ID).saveAttempts.length, 2);
+  h.setSnapshotFailure(false);
+  assert.equal(await h.runtime.reconcileProfileCookieSave({ profileId: ID, lockToken: "test-lock-token", proof }), true);
+  assert.equal(h.records.get(ID).cookies[0].value, "C");
+  assert.equal(h.records.get(ID).cookiesUpdatedAt, newer.cookiesUpdatedAt);
+  assert.equal(h.records.get(ID).baseRevision, CLOUD_SAVED);
+  assert.equal(h.records.get(ID).saveAttempts.length, 0);
+  assert.equal((await h.runtime.snapshotProfileCookies(ID)).unchanged, false, "C still needs saving");
+});
+
+test("long offline journal is bounded without forgetting the oldest possible committed save", async t => {
+  const h = harness(); t.after(() => h.runtime.closeAllProfiles());
+  await h.runtime.launchProfileWindow({ ...payload(), cookiesUpdatedAt: CLOUD_BASE });
+  const ses = h.sessions.get(`persist:profile-${ID}`);
+  assert.equal((await h.runtime.snapshotProfileCookies(ID)).unchanged, true);
+  assert.equal(h.records.get(ID).saveAttempts.length, 0);
+  const attempts = [];
+  for (let i = 0; i < 16; i++) {
+    ses.cookies.update([savedCookie(String(i))]); attempts.push(await h.runtime.snapshotProfileCookies(ID));
+  }
+  assert.equal((await h.runtime.snapshotProfileCookies(ID)).snapshotId, attempts[15].snapshotId, "same content reuses its identity");
+  ses.cookies.update([savedCookie("latest")]);
+  await assert.rejects(h.runtime.snapshotProfileCookies(ID), /flush encrypted/);
+  assert.equal(h.records.get(ID).saveAttempts.length, 16);
+  assert.equal(h.records.get(ID).cookies[0].value, "latest", "local checkpoint remains durable even when journal is full");
+  const proof = { saveId: attempts[0].snapshotId, cookieHash: attempts[0].cookieHash, cookiesUpdatedAt: CLOUD_SAVED };
+  assert.equal(await h.runtime.reconcileProfileCookieSave({ profileId: ID, lockToken: "test-lock-token", proof }), true);
+  const current = await h.runtime.snapshotProfileCookies(ID);
+  assert.equal(current.baseRevision, CLOUD_SAVED);
+  assert.equal(h.records.get(ID).saveAttempts.length, 1);
+});
+
 test("a late cloud acknowledgement rebases the latest checkpoint without losing newer cookies", async (t) => {
   const h = harness();
   t.after(() => h.runtime.closeAllProfiles());

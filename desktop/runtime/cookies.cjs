@@ -3,6 +3,7 @@ const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 const { profileId, revision } = require("./validation.cjs");
 const { normalizeCookiePartition } = require("./cookie-partition.cjs");
+const { saveAttempts } = require("./cookie-save-journal.cjs");
 const transports = new WeakMap();
 const MAX_BYTES = 8 * 1024 * 1024;
 const MAX_IMPORT_BYTES = 5_000_000;
@@ -236,7 +237,7 @@ function createCookieStore({ safeStorage, userData }) {
         const data = JSON.parse(safeStorage.decryptString(encrypted));
         if (data.version !== 1 || data.profileId !== profileId(id) || !revision(data.cookiesUpdatedAt)) throw new Error("Invalid snapshot");
         return { cookies: parseCookies(data.cookies), cookiesUpdatedAt: revision(data.cookiesUpdatedAt),
-          ...(data.pending === true ? { pending: true, baseRevision: revision(data.baseRevision) } : {}) };
+          ...(data.pending === true ? { pending: true, baseRevision: revision(data.baseRevision), saveAttempts: saveAttempts(data.saveAttempts) } : {}) };
       } catch { throw new Error("Unable to decrypt cookie snapshot; local data was preserved"); }
     },
     async markClosed(id) {
@@ -252,7 +253,7 @@ function createCookieStore({ safeStorage, userData }) {
       let handle;
       try {
         const encrypted = safeStorage.encryptString(JSON.stringify({ version: 1, profileId: profileId(id), cookies: serialized, cookiesUpdatedAt: revision(cookiesUpdatedAt),
-          ...(recovery.pending === true ? { pending: true, baseRevision: revision(recovery.baseRevision) } : {}) }));
+          ...(recovery.pending === true ? { pending: true, baseRevision: revision(recovery.baseRevision), saveAttempts: saveAttempts(recovery.saveAttempts) } : {}) }));
         await fs.mkdir(root, { recursive: true });
         handle = await fs.open(temporary, "wx", 0o600);
         await handle.writeFile(encrypted);
@@ -317,8 +318,10 @@ async function initializeCookies(ses, store, payload, recovery) {
   // Rejected or expired imports must remain recoverable for another attempt.
   if (selected.cookies.length && !restoreResult.installed) throw new Error("Unable to restore imported cookies: no cookies were accepted");
   const cookiesUpdatedAt = selected.cookiesUpdatedAt || new Date().toISOString();
-  await store.write(payload.profileId, cookies, cookiesUpdatedAt, { pending: true, baseRevision: cloudRevision });
+  const attempts = source === "local-recovery" ? saveAttempts(local?.saveAttempts) : [];
+  await store.write(payload.profileId, cookies, cookiesUpdatedAt, { pending: true, baseRevision: cloudRevision, saveAttempts: attempts });
   return { cookiesUpdatedAt, signature: canonicalCookies(cookies), source, recoveryBackupId: recovered?.backupId, skippedCookies: restoreResult.skipped,
+    saveAttempts: attempts,
     cookieRestore: { installed: restoreResult.installed, total: selected.cookies.length, expired: restoreResult.expired } };
 }
 

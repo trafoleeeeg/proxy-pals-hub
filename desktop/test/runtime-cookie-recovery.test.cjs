@@ -6,6 +6,8 @@ const os = require("node:os");
 const crypto = require("node:crypto");
 const { createCookieRecovery, recoveryRequest } = require("../runtime/cookie-recovery.cjs");
 const { initializeCookies, canonicalCookies } = require("../runtime/cookies.cjs");
+const { createCookieStore } = require("../runtime/cookies.cjs");
+const { cookieHash } = require("../runtime/cookie-save-journal.cjs");
 const ID = "10000000-0000-4000-8000-000000000001";
 const OTHER = "10000000-0000-4000-8000-000000000002";
 const OLD = "2026-01-01T00:00:00.000Z", NEW = "2026-02-01T00:00:00.000Z";
@@ -38,6 +40,36 @@ async function receipt(recovery, p = payload(), l = local(), c = cloud()) {
   try { await recovery.select(p, l, c); assert.fail("conflict expected"); }
   catch (error) { assert.equal(error.code, "COOKIE_RECOVERY_CONFLICT"); return error.recovery; }
 }
+
+test("durable own save B proves ancestry of newer local C after restart and archives both", async t => {
+  const h = await harness(t), saveId = crypto.randomUUID();
+  const store = createCookieStore({ safeStorage: h.safeStorage, userData: h.directory });
+  const candidate = { saveId, snapshotRevision: OLD, baseRevision: OLD, cookieHash: cookieHash(cloud().cookies) };
+  await store.write(ID, local().cookies, NEW, { pending: true, baseRevision: OLD, saveAttempts: [candidate] });
+  const encrypted = await fs.readFile(path.join(h.directory, "profile-cookie-snapshots", `${ID}.bin`));
+  assert.equal(encrypted.includes(Buffer.from(saveId)), false, "journal identity is encrypted too");
+  const restartedStore = createCookieStore({ safeStorage: h.safeStorage, userData: h.directory });
+  const restartedRecovery = createCookieRecovery({ safeStorage: h.safeStorage, userData: h.directory });
+  const restored = await restartedRecovery.select({ ...payload(), cookieSaveProof: { saveId, cookieHash: candidate.cookieHash, cookiesUpdatedAt: NEW } }, await restartedStore.read(ID), cloud());
+  assert.equal(restored.source, "local-save-lineage");
+  assert.deepEqual(restored.cookies, local().cookies);
+  assert.equal((await restartedRecovery.listBackups(ID)).length, 1);
+  const record = JSON.parse(h.safeStorage.decryptString(await fs.readFile(path.join(h.directory, "profile-cookie-recovery", ID, `${restored.backupId}.bin`))));
+  assert.deepEqual(record.local.cookies, JSON.parse(canonicalCookies(local().cookies)));
+  assert.deepEqual(record.cloud.cookies, JSON.parse(canonicalCookies(cloud().cookies)));
+});
+
+test("independent equal-content save, import, changed hash/revision/base and missing proof still require consent", async t => {
+  const h = await harness(t), saveId = crypto.randomUUID(), hash = cookieHash(cloud().cookies);
+  const l = { ...local(), saveAttempts: [{ saveId, snapshotRevision: OLD, baseRevision: OLD, cookieHash: hash }] };
+  for (const proof of [null, { saveId: crypto.randomUUID(), cookieHash: hash, cookiesUpdatedAt: NEW },
+    { saveId, cookieHash: "0".repeat(64), cookiesUpdatedAt: NEW }, { saveId, cookieHash: hash, cookiesUpdatedAt: OLD }]) {
+    await assert.rejects(h.recovery.select({ ...payload(), cookieSaveProof: proof }, l, cloud()), { code: "COOKIE_RECOVERY_CONFLICT" });
+  }
+  await assert.rejects(h.recovery.select({ ...payload(), cookieSaveProof: { saveId, cookieHash: hash, cookiesUpdatedAt: NEW } },
+    { ...l, baseRevision: "2025-01-01T00:00:00.000Z" }, cloud()), { code: "COOKIE_RECOVERY_CONFLICT" });
+  assert.equal((await h.recovery.listBackups(ID)).length, 0);
+});
 
 test("explicit local recovery durably encrypts BOTH versions and supports cloud rollback", async t => {
   const h = await harness(t), selected = await receipt(h.recovery);

@@ -3,6 +3,7 @@ const path = require("node:path");
 const { randomUUID, createHash } = require("node:crypto");
 const { profileId, revision } = require("./validation.cjs");
 const { canonicalCookies, parseCookies } = require("./cookies.cjs");
+const { ownsProof } = require("./cookie-save-journal.cjs");
 
 const LIMIT = 17 * 1024 * 1024;
 const RECEIPT_TTL = 30 * 60 * 1000;
@@ -96,6 +97,12 @@ function createCookieRecovery({ safeStorage, userData, now = Date.now }) {
       const id = profileId(payload.profileId);
       const request = recoveryRequest(payload.cookieRecovery);
       if (!request) {
+        if (local?.pending && local.baseRevision !== cloud.cookiesUpdatedAt && ownsProof(local, payload.cookieSaveProof, cloud)) {
+          const backupId = await archive(id, local, cloud, "local");
+          // The cloud is our own acknowledged ancestor, NOT a competing edit.
+          // Archive both before selecting its newer local descendant.
+          return { cookies: local.cookies, cookiesUpdatedAt: local.cookiesUpdatedAt, source: "local-save-lineage", backupId };
+        }
         if (local?.pending && local.baseRevision !== cloud.cookiesUpdatedAt && canonicalCookies(local.cookies) !== canonicalCookies(cloud.cookies)) throw conflict(id, payload.name, local, cloud);
         return null;
       }

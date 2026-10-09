@@ -20,6 +20,7 @@ if (process.versions.electron) {
   const { applyFingerprint } = require("../runtime/fingerprint.cjs");
   const { createCookieStore } = require("../runtime/cookies.cjs");
   const { createCookieRecovery } = require("../runtime/cookie-recovery.cjs");
+  const { cookieHash } = require("../runtime/cookie-save-journal.cjs");
   const { defaultBookmarks } = require("../runtime/bookmarks.cjs");
   const { createRuntimeProxy } = require("../runtime/proxy.cjs");
   const { createProxyChecker, requestJson } = require("../runtime/proxy-probe.cjs");
@@ -87,6 +88,30 @@ if (process.versions.electron) {
     if (mode === "native") {
       const recovery = createCookieRecovery({ safeStorage, userData: app.getPath("userData") });
       const nativeCookie = value => ({ name: "recovery-fixture", value, domain: "localhost", path: "/", session: true, hostOnly: true, secure: true });
+      const journalProfile = "10000000-0000-4000-8000-000000000089";
+      const journalId = "10000000-0000-4000-8000-000000000090";
+      const journalStore = createCookieStore({ safeStorage, userData: app.getPath("userData") });
+      const journalBase = "2026-01-01T00:00:00.000Z", journalSaved = "2026-02-01T00:00:00.000Z";
+      const sentCookies = [nativeCookie("synthetic-dpapi-saved-B")];
+      const localCookies = [nativeCookie("synthetic-dpapi-newer-C")];
+      if (process.env.UMBRA_RUNTIME_TEST_PHASE === "initial") {
+        await journalStore.write(journalProfile, localCookies, journalSaved, { pending: true, baseRevision: journalBase,
+          saveAttempts: [{ saveId: journalId, snapshotRevision: journalBase, baseRevision: journalBase, cookieHash: cookieHash(sentCookies) }] });
+        const encrypted = fs.readFileSync(path.join(app.getPath("userData"), "profile-cookie-snapshots", `${journalProfile}.bin`));
+        assert.equal(encrypted.includes(Buffer.from(journalId)), false);
+        assert.equal(encrypted.includes(Buffer.from(localCookies[0].value)), false);
+      } else {
+        const localJournal = await journalStore.read(journalProfile);
+        assert.equal(localJournal.saveAttempts[0].saveId, journalId, "DPAPI save journal survives a real process restart");
+        const recovered = await recovery.select({ profileId: journalProfile, lockToken: "synthetic", cookieSaveProof: {
+          saveId: journalId, cookieHash: cookieHash(sentCookies), cookiesUpdatedAt: journalSaved } }, localJournal,
+          { cookies: sentCookies, cookiesUpdatedAt: journalSaved });
+        assert.equal(recovered.source, "local-save-lineage");
+        assert.equal(recovered.cookies[0].value, localCookies[0].value);
+        const reserve = fs.readFileSync(path.join(app.getPath("userData"), "profile-cookie-recovery", journalProfile, `${recovered.backupId}.bin`));
+        assert.equal(reserve.includes(Buffer.from(localCookies[0].value)), false);
+        assert.equal(reserve.includes(Buffer.from(sentCookies[0].value)), false);
+      }
       const local = { cookies: [nativeCookie("recovery-native-local")], cookiesUpdatedAt: "2026-02-01T00:00:00Z", pending: true, baseRevision: "2026-01-01T00:00:00.000Z" };
       const cloud = { cookies: [nativeCookie("recovery-native-cloud")], cookiesUpdatedAt: "2026-02-01T00:00:00.000Z" };
       const recoveryPayload = { profileId: ID, name: "Synthetic recovery", lockToken: "synthetic-recovery-lease" };

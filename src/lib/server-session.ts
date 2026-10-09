@@ -43,6 +43,14 @@ export async function prepareSessionLaunch(context: ServerContext, data: z.infer
         country: row.country ?? null, city: row.city ?? null }];
     });
     const cookies = profile.cookies_enc ? JSON.stringify(parseCookieImport(decryptSecret(profile.cookies_enc))) : "[]";
+    let cookieSaveProof = null;
+    if (data.cookieSaveProtocol === 1) {
+      const result = await callServerRpc(context.supabase, "get_profile_cookie_save_proof", {
+        _profile_id: profile.id, _lock_token: lease.lockToken, _device_id: deviceId,
+      });
+      // Never attach a proof to a different concurrently-read cookie revision.
+      if (result.proof && new Date(result.proof.cookiesUpdatedAt).toISOString() === new Date(profile.cookies_updated_at).toISOString()) cookieSaveProof = result.proof;
+    }
     await writeAudit(context, profile.team_id, "profile.launched", profile.id);
     const { data: settingsRow } = await serverDb(context.supabase).from("profile_browser_settings").select("*").eq("profile_id", profile.id).maybeSingle();
     const parsedBrowserSettings = settingsRow ? browserSettingsSchema.safeParse({
@@ -60,7 +68,8 @@ export async function prepareSessionLaunch(context: ServerContext, data: z.infer
     return { profileId: profile.id, name: profile.name, fingerprint, proxy, proxies, cookies,
       browserSettings,
       bookmarkDefaults,
-      lockToken: lease.lockToken, lockExpiresAt: lease.expiresAt, cookiesUpdatedAt: profile.cookies_updated_at, deviceId };
+      lockToken: lease.lockToken, lockExpiresAt: lease.expiresAt, cookiesUpdatedAt: profile.cookies_updated_at, deviceId,
+      ...(data.cookieSaveProtocol === 1 ? { cookieSaveProof } : {}) };
   } catch (error) {
     try {
       await callServerRpc(context.supabase, "mutate_profile_lease", {

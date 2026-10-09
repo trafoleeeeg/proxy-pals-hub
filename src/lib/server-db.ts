@@ -6,6 +6,8 @@ type LeaseResult = { lockToken: string; expiresAt: string; cookiesUpdatedAt: str
 type MigrationFunctions = {
   acquire_profile_lease: Rpc<{ _profile_id: string; _device_id: string; _device_label: string | null }, LeaseResult>;
   mutate_profile_lease: Rpc<{ _profile_id: string; _lock_token: string; _operation: "save" | "heartbeat" | "close"; _cookies_enc: string | null; _device_id: string | null }, { expiresAt: string; cookiesUpdatedAt: string }>;
+  get_profile_cookie_save_proof: Rpc<{ _profile_id: string; _lock_token: string; _device_id: string }, { proof: import("./desktop").CookieSaveProof | null }>;
+  save_profile_cookie_checkpoint: Rpc<{ _profile_id: string; _lock_token: string; _device_id: string | null; _save_id: string; _base_revision: string | null; _cookie_hash: string; _cookies_enc: string }, { ok: boolean; conflict?: boolean; cookiesUpdatedAt: string; proof: import("./desktop").CookieSaveProof | null }>;
   force_profile_unlock: Rpc<{ _profile_id: string }, boolean>;
   import_profile_cookies: Rpc<{ _profile_id: string; _cookies_enc: string }, string>;
   bulk_mutate_profiles: Rpc<{ _team_id: string; _profile_ids: string[]; _operation: "update" | "delete"; _changes: Json }, number>;

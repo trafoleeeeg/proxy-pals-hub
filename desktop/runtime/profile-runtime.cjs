@@ -3,7 +3,8 @@ const { randomUUID } = require("node:crypto");
 const { profileId, startUrl, revision } = require("./validation.cjs");
 const { createProfileBrowser } = require("./browser.cjs");
 const { createRuntimeProxy, blockSession } = require("./proxy.cjs");
-const { createCookieStore, initializeCookies, canonicalCookies, parseCookieImport, applyImportedCookies, registerCookieTransport, readSessionCookies, disposeCookieTransport } = require("./cookies.cjs");
+const { createCookieStore, initializeCookies, canonicalCookies, parseCookies, parseCookieImport, applyImportedCookies, registerCookieTransport, readSessionCookies, disposeCookieTransport } = require("./cookies.cjs");
+const { cookieHash, saveProof, saveAttempts } = require("./cookie-save-journal.cjs");
 const { createCookieTransport } = require("./cookie-transport.cjs");
 const { createTabStore, sanitizeTabs } = require("./tabs.cjs");
 const { createBookmarkStore, defaultBookmarks, sanitizeBookmarks } = require("./bookmarks.cjs");
@@ -113,7 +114,7 @@ function createProfileRuntime(electron, options = {}) {
       const signature = canonicalCookies(cookies);
       if (signature !== entry.cookieSignature) {
         const next = new Date(Math.max(Date.now(), Date.parse(entry.cookiesUpdatedAt || 0) + 1)).toISOString();
-        await cookieStore().write(entry.profileId, cookies, next, { pending: true, baseRevision: entry.cloudCookieRevision });
+        await cookieStore().write(entry.profileId, cookies, next, { pending: true, baseRevision: entry.cloudCookieRevision, saveAttempts: entry.saveAttempts });
         entry.cookiesUpdatedAt = next;
         entry.cookieSignature = signature;
       }
@@ -122,11 +123,25 @@ function createProfileRuntime(electron, options = {}) {
       const snapshotId = randomUUID();
       const snapshotRevision = entry.cookiesUpdatedAt;
       const snapshotSequence = ++entry.cookieSnapshotSequence;
+      const hash = cookieHash(cookies);
+      const unchanged = hash === entry.cloudCookieHash;
+      if (!unchanged) {
+        // Never evict an unconfirmed save: it may be the only proof of a
+        // committed reply lost during a long offline period.
+        const repeated = entry.saveAttempts.find(item => item.cookieHash === hash && item.baseRevision === entry.cloudCookieRevision);
+        if (repeated) return { ...result, snapshotId: repeated.saveId, snapshotRevision: repeated.snapshotRevision, snapshotSequence, baseRevision: entry.cloudCookieRevision, cookieHash: hash, unchanged };
+        if (entry.saveAttempts.length >= 16) throw new Error("Cookie save journal awaiting server confirmation");
+        const attempts = [...entry.saveAttempts, { saveId: snapshotId, snapshotRevision, cookieHash: hash, baseRevision: entry.cloudCookieRevision }];
+        // Persist the identity BEFORE any caller can issue the network save.
+        // Later local checkpoints retain it even if the reply/ACK is lost.
+        await cookieStore().write(entry.profileId, cookies, snapshotRevision, { pending: true, baseRevision: entry.cloudCookieRevision, saveAttempts: attempts });
+        entry.saveAttempts = attempts;
+      }
       entry.issuedCookieSnapshots.set(snapshotId, { revision: snapshotRevision, sequence: snapshotSequence });
       // Only recent in-flight saves need receipts; repeated reads cannot grow
       // memory without bound. An expired receipt is rejected without mutation.
       if (entry.issuedCookieSnapshots.size > 16) entry.issuedCookieSnapshots.delete(entry.issuedCookieSnapshots.keys().next().value);
-      return { ...result, snapshotId, snapshotRevision, snapshotSequence };
+      return { ...result, snapshotId, snapshotRevision, snapshotSequence, baseRevision: entry.cloudCookieRevision, cookieHash: hash, unchanged };
     }).catch(() => { throw new Error("Unable to flush encrypted profile cookies"); });
     return entry.snapshotQueue;
   }
@@ -687,6 +702,7 @@ function createProfileRuntime(electron, options = {}) {
       state: "starting", startedAt: new Date().toISOString(), windows: new Set(), pendingWindows: new Set(),
       snapshotQueue: Promise.resolve(), onClosed, closingRequested: false,
       cloudCookieRevision: revision(payload.cookiesUpdatedAt),
+      cloudCookieHash: cookieHash(parseCookies(payload.cookies ?? "[]")), saveAttempts: [],
       cookieSnapshotSequence: 0, acknowledgedCookieSequence: 0, issuedCookieSnapshots: new Map(),
     };
     const initialSettings = sanitizeBrowserSettings(payload.browserSettings, id);
@@ -769,6 +785,7 @@ function createProfileRuntime(electron, options = {}) {
          installResourceRecovery(entry);
         registerCookieTransport(entry.ses, cookieTransport(entry.ses));
         const initialized = await initializeCookies(entry.ses, cookieStore(), { ...payload, profileId: id }, cookieRecovery());
+        entry.saveAttempts = initialized.saveAttempts;
         entry.cookiesUpdatedAt = initialized.cookiesUpdatedAt;
         entry.cookieSignature = initialized.signature;
         entry.cookieSource = initialized.source;
@@ -863,9 +880,33 @@ function createProfileRuntime(electron, options = {}) {
       // the current checkpoint without replacing its cookies or local revision.
       // Serializing with snapshot() also makes later changes use the new base.
       await cookieStore().write(id, current.cookies, current.cookiesUpdatedAt, { pending: true, baseRevision: cloudRevision });
+      entry.saveAttempts = [];
       entry.cloudCookieRevision = cloudRevision;
       entry.acknowledgedCookieSequence = issued.sequence;
       for (const [key, receipt] of entry.issuedCookieSnapshots) if (receipt.sequence <= issued.sequence) entry.issuedCookieSnapshots.delete(key);
+      return true;
+    });
+    return entry.snapshotQueue;
+  }
+
+  async function reconcileProfileCookieSave(payload) {
+    const id = profileId(payload?.profileId), proof = saveProof(payload?.proof);
+    if (!proof || typeof payload?.lockToken !== "string") throw new Error("Invalid cookie save proof");
+    const entry = profiles.get(id);
+    if (!entry) return false;
+    const valid = () => profiles.get(id) === entry && entry.state === "running" && !entry.closingRequested && entry.lockToken === payload.lockToken;
+    entry.snapshotQueue = entry.snapshotQueue.catch(() => {}).then(async () => {
+      if (!valid()) return false;
+      const current = await cookieStore().read(id);
+      const candidate = saveAttempts(current?.saveAttempts).find(attempt => attempt.saveId === proof.saveId && attempt.cookieHash === proof.cookieHash && attempt.baseRevision === current?.baseRevision);
+      if (!candidate || !current?.pending || !valid() || current.cookiesUpdatedAt !== entry.cookiesUpdatedAt || canonicalCookies(current.cookies) !== entry.cookieSignature) return false;
+      if (entry.cloudCookieRevision && Date.parse(proof.cookiesUpdatedAt) < Date.parse(entry.cloudCookieRevision)) return false;
+      // Only metadata changes: a newer local C is NEVER replaced by saved B.
+      await cookieStore().write(id, current.cookies, current.cookiesUpdatedAt, { pending: true, baseRevision: proof.cookiesUpdatedAt, saveAttempts: [] });
+      entry.cloudCookieRevision = proof.cookiesUpdatedAt;
+      entry.cloudCookieHash = proof.cookieHash;
+      entry.saveAttempts = [];
+      entry.issuedCookieSnapshots.clear();
       return true;
     });
     return entry.snapshotQueue;
@@ -1014,7 +1055,7 @@ function createProfileRuntime(electron, options = {}) {
   }
 
   return {
-    launchProfileWindow, closeProfileWindow, snapshotProfileCookies, acknowledgeProfileCookies, closeAllProfiles,
+    launchProfileWindow, closeProfileWindow, snapshotProfileCookies, acknowledgeProfileCookies, reconcileProfileCookieSave, closeAllProfiles,
     listCookieRecoveryBackups: id => cookieRecovery().listBackups(profileId(id)),
     refreshExtensions, applyBrowserSettings,
     applyBookmarkDefaults: async (value) => {

@@ -13,6 +13,8 @@ test("context IDs can be reused but stale unique identities must never be used",
   const pending = tracker.wait(undefined, "frame");
   announce(tracker, 1, "second");
   assert.equal(await pending, "second");
+  tracker.update("Runtime.executionContextDestroyed", { executionContextId: 1, executionContextUniqueId: "first" });
+  assert.equal(await tracker.wait(undefined, "frame"), "second", "a delayed old destroy must not erase the reused numeric ID");
   tracker.update("Runtime.executionContextDestroyed", { executionContextUniqueId: "second" });
   const next = tracker.wait(undefined, "frame");
   announce(tracker, 1, "third");

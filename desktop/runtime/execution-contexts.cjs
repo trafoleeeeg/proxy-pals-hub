@@ -22,7 +22,9 @@ function executionContexts({ timeout = 4000 } = {}) {
     } else if (method === "Runtime.executionContextDestroyed") {
       const contexts = sessions.get(session);
       for (const [id, context] of contexts || []) {
-        if (id === params.executionContextId || context.uniqueId === params.executionContextUniqueId) contexts.delete(id);
+        const matches = params.executionContextUniqueId
+          ? context.uniqueId === params.executionContextUniqueId : id === params.executionContextId;
+        if (matches) contexts.delete(id);
       }
     } else if (method === "Runtime.executionContextsCleared") sessions.delete(session);
     else return;

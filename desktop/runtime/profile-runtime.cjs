@@ -105,7 +105,7 @@ function createProfileRuntime(electron, options = {}) {
     };
   }
 
-  function snapshot(entry, issueAcknowledgement = false) {
+  function snapshot(entry, issueAcknowledgement = false, durableSaveProtocol = false) {
     entry.snapshotQueue = entry.snapshotQueue.catch(() => {}).then(async () => {
       if (issueAcknowledgement && (profiles.get(entry.profileId) !== entry || entry.state !== "running" || entry.closingRequested)) return null;
       await entry.ses.cookies.flushStore();
@@ -125,7 +125,7 @@ function createProfileRuntime(electron, options = {}) {
       const snapshotSequence = ++entry.cookieSnapshotSequence;
       const hash = cookieHash(cookies);
       const unchanged = hash === entry.cloudCookieHash;
-      if (!unchanged) {
+      if (durableSaveProtocol && !unchanged) {
         // Never evict an unconfirmed save: it may be the only proof of a
         // committed reply lost during a long offline period.
         const repeated = entry.saveAttempts.find(item => item.cookieHash === hash && item.baseRevision === entry.cloudCookieRevision);
@@ -852,11 +852,12 @@ function createProfileRuntime(electron, options = {}) {
     return entry.startPromise;
   }
 
-  async function snapshotProfileCookies(id) {
+  async function snapshotProfileCookies(id, cookieSaveProtocol) {
+    if (cookieSaveProtocol != null && cookieSaveProtocol !== 1) throw new Error("Invalid cookie save protocol");
     const entry = profiles.get(profileId(id));
     if (!entry) return null;
     await entry.startPromise;
-    return snapshot(entry, true);
+    return snapshot(entry, true, cookieSaveProtocol === 1);
   }
 
   async function acknowledgeProfileCookies(payload) {

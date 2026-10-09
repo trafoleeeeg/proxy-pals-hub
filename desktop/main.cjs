@@ -139,8 +139,8 @@ handle("umbra:close-profile", async (id) => {
   const snapshot = await closeProfileWindow(profileId(id));
   return { ok: true, ...snapshot };
 });
-handle("umbra:profile-cookies", async (id) => {
-  const snapshot = await snapshotProfileCookies(profileId(id));
+handle("umbra:profile-cookies", async (id, cookieSaveProtocol) => {
+  const snapshot = await snapshotProfileCookies(profileId(id), cookieSaveProtocol);
   return { ok: true, cookies: null, ...snapshot };
 });
 handle("umbra:acknowledge-profile-cookies", async (payload) => {

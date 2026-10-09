@@ -73,7 +73,7 @@ export type UmbraBridge = {
   pendingProfileClosures: () => Promise<{ ok: boolean; profiles: ProfileClosed[] }>;
   acknowledgeProfileClosure: (snapshotId: string) => Promise<{ ok: boolean }>;
   archiveProfileClosure: (snapshotId: string) => Promise<{ ok: boolean }>;
-  profileCookies: (profileId: string) => Promise<{ ok: boolean; cookies: string | null } & Partial<ProfileRuntimeSnapshot>>;
+  profileCookies: (profileId: string, cookieSaveProtocol?: 1) => Promise<{ ok: boolean; cookies: string | null } & Partial<ProfileRuntimeSnapshot>>;
   acknowledgeProfileCookies?: (payload: ProfileCookieAcknowledgement) => Promise<{ ok: boolean; applied: boolean; error?: string }>;
   reconcileProfileCookieSave?: (payload: { profileId: string; lockToken: string; proof: CookieSaveProof }) => Promise<{ ok: boolean; applied: boolean; error?: string }>;
   onProfileClosed: (cb: (p: ProfileClosed) => void) => () => void;
@@ -460,7 +460,7 @@ export class DesktopProfileLifecycle {
             const rebased = await withDesktopTimeout(this.bridge.reconcileProfileCookieSave({ ...key, proof: heartbeat.cookieSaveProof as CookieSaveProof }), "Подтверждение предыдущего сохранения не получено вовремя");
             if (!rebased.ok) throw new Error("Не удалось проверить предыдущее сохранение cookies");
           }
-          const snapshot = await this.bridge.profileCookies(id);
+          const snapshot = await this.bridge.profileCookies(id, this.bridge.reconcileProfileCookieSave ? 1 : undefined);
           if (!snapshot.ok || typeof snapshot.cookies !== "string" || snapshot.lockToken !== key.lockToken || (snapshot.profileId && snapshot.profileId !== id)) throw new Error();
           const snapshotRevision = cookieRevision(snapshot.snapshotRevision ?? snapshot.cookiesUpdatedAt);
           if (this.bridge.acknowledgeProfileCookies && (!snapshot.snapshotId || !snapshotRevision)) throw new Error("Приложение не подтвердило локальный снимок cookies");
@@ -479,7 +479,7 @@ export class DesktopProfileLifecycle {
               if (!("conflict" in result) || result.conflict !== true || attempt === 1) throw new Error("Сохранение cookies ожидает повторной синхронизации");
               // Lost response: rebase only from our own durable receipt, then
               // save a NEW snapshot once. Never blindly replay a stale version.
-              current = await this.bridge.profileCookies(id);
+              current = await this.bridge.profileCookies(id, 1);
               if (!current.ok || typeof current.cookies !== "string" || current.lockToken !== key.lockToken || current.profileId !== id) throw new Error();
             }
           } else {

@@ -20,4 +20,7 @@ test("production WebContentsView and restored-profile startup initialize blank b
   });
   assert.equal(result.code, 0, result.output);
   assert.match(result.output, /UMBRA_START_READINESS_OK/);
+  assert.match(result.output, /SYNTHETIC_NAMED_WORKER_READY classic/);
+  assert.match(result.output, /SYNTHETIC_NAMED_WORKER_READY module/);
+  assert.match(result.output, /SYNTHETIC_FULL_PROFILE_NAMED_WORKERS_OK/);
 });

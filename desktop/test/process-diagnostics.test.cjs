@@ -252,3 +252,16 @@ test("destroyed contents events never re-read the native ID getter", t => {
   observeContents(failing, () => { throw new Error("ENOSPC"); }, "panel");
   assert.doesNotThrow(() => failing.emit("destroyed"));
 });
+
+test("execution-context diagnostics retain only structural flags, never names or identities", t => {
+  const { directory, file } = fixture(t);
+  recordProcessEvent(directory, "execution-context", { phase: "created", targetType: "worker", named: true, hasUniqueId: true,
+    accepted: true, defaultWorld: false, name: "private-name", uniqueId: "private-id", context: { origin: "https://private.example" } });
+  const raw = fs.readFileSync(file, "utf8");
+  const row = JSON.parse(raw.trim());
+  assert.equal(row.named, true);
+  assert.equal(row.accepted, true);
+  assert.equal(row.defaultWorld, false);
+  assert.equal(row.targetType, "worker");
+  assert.doesNotMatch(raw, /private|uniqueId|origin|https/);
+});

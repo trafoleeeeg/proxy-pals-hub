@@ -44,3 +44,32 @@ test("missing unique identity cannot fall back to a numeric/default context", as
   try { await assert.rejects(tracker.wait(), /unavailable/); }
   finally { clearTimeout(keepAlive); tracker.dispose(); }
 });
+
+test("a confirmed named worker uses its announced unique context without page-only flags", async () => {
+  const tracker = executionContexts();
+  tracker.registerTarget("named-worker", "worker");
+  const pending = tracker.wait("named-worker");
+  tracker.update("Runtime.executionContextCreated", { context: { id: 1, uniqueId: "worker-unique", name: "site-assigned-name" } }, "named-worker");
+  assert.equal(await pending, "worker-unique");
+  tracker.close("named-worker");
+  tracker.registerTarget("named-worker", "worker");
+  tracker.update("Runtime.executionContextCreated", { context: { id: 2, uniqueId: "late", name: "site-assigned-name" } }, "named-worker");
+  await assert.rejects(tracker.wait("named-worker"), /detached/);
+  tracker.dispose();
+});
+
+test("named contexts cannot widen page, iframe, unknown-session or isolated-world selection", async () => {
+  const tracker = executionContexts({ timeout: 15 });
+  const keepAlive = setTimeout(() => {}, 200);
+  try {
+    for (const type of ["page", "iframe", "unknown", "worker"]) {
+      tracker.registerTarget(type, type);
+      tracker.update("Runtime.executionContextCreated", { context: { id: 1, uniqueId: "wrong-" + type, name: "named-world",
+        ...(type === "worker" ? { auxData: { isDefault: false } } : {}) } }, type);
+      await assert.rejects(tracker.wait(type), /unavailable/);
+    }
+    tracker.registerTarget("missing-id", "worker");
+    tracker.update("Runtime.executionContextCreated", { context: { id: 1, name: "named-worker" } }, "missing-id");
+    await assert.rejects(tracker.wait("missing-id"), /unavailable/);
+  } finally { clearTimeout(keepAlive); tracker.dispose(); }
+});

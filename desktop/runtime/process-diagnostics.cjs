@@ -18,7 +18,7 @@ const EVENTS = new Set([
   "page-protection",
   "native-crash-capture",
   "profile-lifecycle", "profile-close-request", "profile-snapshot", "proxy-operation",
-  "contents-lifecycle", "window-lifecycle", "ipc-operation", "browser-command", "power-state", "process-health", "update-state", "protection-command",
+  "contents-lifecycle", "window-lifecycle", "ipc-operation", "browser-command", "power-state", "process-health", "update-state", "protection-command", "execution-context",
 ]);
 const PHASES = new Set(["begin", "ready", "failed", "done", "cancelled", "starting", "running",
   "session", "fingerprint", "workers", "proxy", "cookies", "extensions", "tabs",
@@ -108,6 +108,11 @@ function recordProcessEvent(userData, event, details = {}, options = {}) {
     }
     if (PHASES.has(details.phase) && ["profile-lifecycle", "profile-snapshot", "proxy-operation", "contents-lifecycle", "window-lifecycle", "ipc-operation", "browser-command", "power-state", "update-state", "protection-command"].includes(event)) row.phase = details.phase;
     if (event === "browser-command" && BROWSER_ACTIONS.has(details.action)) row.action = details.action;
+    if (event === "execution-context") {
+      if (["created", "destroyed", "cleared", "detached"].includes(details.phase)) row.phase = details.phase;
+      if (["page", "iframe", "worker"].includes(details.targetType)) row.targetType = details.targetType;
+      for (const key of ["named", "hasUniqueId", "accepted", "defaultWorld"]) if (typeof details[key] === "boolean") row[key] = details[key];
+    }
     if (event === "protection-command") {
       if (PAGE_STAGES.has(details.stage)) row.stage = details.stage;
       if (["page", "worker", "shared_worker", "service_worker"].includes(details.targetType)) row.targetType = details.targetType;

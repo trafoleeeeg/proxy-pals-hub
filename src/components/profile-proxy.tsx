@@ -98,8 +98,8 @@ export function useProxyOps(teamId: string | undefined) {
       return { ...result, previousIp: request.previousIp };
     },
     onSuccess: (result, id) => {
-      // Не ждём очередного опроса сервера: подтверждённый новый адрес уже
-      // сохранён, поэтому сразу завершаем плашку «меняем IP» в текущей панели.
+      // Не ждём очередного опроса сервера: результат проверки уже сохранён,
+      // поэтому сразу завершаем плашку «меняем IP» в текущей панели.
       if (teamId && (result.rotationConfirmed || result.connectionRestored) && result.ip) {
         setErrors((old) => { const next = { ...old }; delete next[id]; return next; });
         const changedAt = new Date().toISOString();
@@ -119,7 +119,9 @@ export function useProxyOps(teamId: string | undefined) {
           rotationChangedAt: changedAt,
           rotationLastError: null,
         } : proxy));
-        toast.success((result.connectionRestored ? "Подключение восстановлено. IP: " : "Новый IP подтверждён: ") + result.ip);
+        if (result.connectionRestored) {
+          toast.warning(`Запрос смены IP отправлен. Текущий IP: ${result.ip}. Исходный IP недоступен — смена не подтверждена.`);
+        } else toast.success("Новый IP подтверждён: " + result.ip);
         return;
       }
       // A superseded request does not tell us whether another window finished
@@ -154,8 +156,8 @@ export function ProfileProxyCell({ proxy, ops, compact = false }: { proxy: Proxy
     proxyAddress(proxy.host, proxy.port),
     shownIp ? `IP ${shownIp}${proxy.last_check_latency_ms != null ? ` · ${proxy.last_check_latency_ms} мс` : ""}` : "IP не проверялся",
     proxy.last_checked_at ? `проверено ${relativeTime(proxy.last_checked_at)}` : "",
-    previousIp ? `был ${previousIp}${newIp ? " → стал " + newIp : ""}` : "",
-    proxy.rotationChangedAt ? `${previousIp ? "смена IP" : "подключение восстановлено"} ${relativeTime(proxy.rotationChangedAt)}` : "",
+    previousIp ? `был ${previousIp}${newIp ? " → стал " + newIp : ""}` : newIp ? `исходный IP неизвестен → после запроса ${newIp}` : "",
+    proxy.rotationChangedAt ? `${previousIp ? "смена IP" : "смена IP не подтверждена · проверено"} ${relativeTime(proxy.rotationChangedAt)}` : "",
     rotating ? "меняем IP, ждём подтверждения" : "",
     error ?? "",
   ].filter(Boolean).join("\n");
@@ -183,7 +185,7 @@ export function ProfileProxyCell({ proxy, ops, compact = false }: { proxy: Proxy
           : <>меняем IP{proxy.rotationPreviousIp ? <> · был <span className="text-foreground/70">{proxy.rotationPreviousIp}</span></> : ""}…</>
         : previousIp
         ? <>был <span className="text-foreground/70">{previousIp}</span> → стал <span className="text-success">{newIp ?? shownIp ?? "—"}</span></>
-        : proxy.rotationStatus === "success" && newIp ? "подключение восстановлено" : "смены IP не было"}
+        : proxy.rotationStatus === "success" && newIp ? <span className="text-warning">исходный IP неизвестен → после запроса {newIp}</span> : "смены IP не было"}
     </div>
   </div>;
 
@@ -216,8 +218,11 @@ export function ProfileProxyCell({ proxy, ops, compact = false }: { proxy: Proxy
     {proxy.rotationPreviousIp && <div className="mono break-all text-xs text-muted-foreground">
       Был: {proxy.rotationPreviousIp}{proxy.rotationNewIp ? " → стал: " + proxy.rotationNewIp : ""}
     </div>}
+    {!proxy.rotationPreviousIp && proxy.rotationStatus === "success" && proxy.rotationNewIp && <div className="mono break-all text-xs text-warning">
+      Исходный IP неизвестен → после запроса: {proxy.rotationNewIp}
+    </div>}
     {proxy.rotationChangedAt && <div className="flex items-center gap-1 text-xs text-muted-foreground">
-      <Clock3 className="size-3" />{proxy.rotationPreviousIp ? "Смена IP" : "Подключение восстановлено"} {relativeTime(proxy.rotationChangedAt)}
+      <Clock3 className="size-3" />{proxy.rotationPreviousIp ? "Смена IP" : "Смена IP не подтверждена · проверено"} {relativeTime(proxy.rotationChangedAt)}
     </div>}
     {rotating && <p role="status" className="text-xs text-warning">Меняем IP, ждём подтверждения…</p>}
     {error && <p role="status" className="break-words text-xs text-destructive">{error}</p>}

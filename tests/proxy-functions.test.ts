@@ -3,6 +3,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { confirmRotation, prepareRotation } from "../src/lib/proxy-rotation";
 
 // Bundle test doubles privately so other agents' tests keep their real modules.
 const source = fileURLToPath(new URL("../src/lib/proxies.functions.ts", import.meta.url));
@@ -416,6 +417,33 @@ describe("mobile proxy rotation", () => {
     api.decryptSecret.mockImplementation(() => "https://provider.example/rotate?token=private-token");
     return f;
   };
+  test("first click after idle saves a fresh baseline before the provider and persists old to new", async () => {
+    const f = ready();
+    f.tables.proxies[0]!.last_checked_at = "2000-01-01T00:00:00Z";
+    const network = spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
+    let probes = 0;
+    const probe = async () => ++probes === 1 ? { ok: false } : { ok: true, ip: probes === 2 ? "1.2.3.8" : "1.2.3.9" };
+    try {
+      const request = await prepareRotation({
+        probe, wait: async () => {},
+        record: (before) => invoke("recordProxyCheck", { ...target, ...before }, f),
+        request: () => invoke("rotateProxyIp", target, f),
+      });
+      expect(request.previousIp).toBe("1.2.3.8");
+      expect(network).toHaveBeenCalledTimes(1);
+      const result = await confirmRotation({
+        previousIp: request.previousIp, probe, wait: async () => {},
+        record: (value, final, confirmed) => invoke("recordProxyCheck", {
+          ...target, ...value, rotationRequestedAt: request.requestedAt, rotationFinal: final, rotationConfirmed: confirmed,
+        }, f),
+      });
+      expect(result).toMatchObject({ rotationConfirmed: true, connectionRestored: false, ip: "1.2.3.9" });
+      expect((await invoke("listProxies", { teamId }, f))[0]).toMatchObject({
+        rotationStatus: "success", rotationPreviousIp: "1.2.3.8", rotationNewIp: "1.2.3.9",
+      });
+      expect(network).toHaveBeenCalledTimes(1);
+    } finally { network.mockRestore(); }
+  });
   test("one concurrent request wins; duplicate requests cannot invoke the provider", async () => {
     const f = ready();
     const network = spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 204 }));

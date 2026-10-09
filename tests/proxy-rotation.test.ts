@@ -27,13 +27,65 @@ test("rotation completes on the first different IP; failures and unchanged addre
 test("failed connectivity and thrown desktop probes cannot block the recovery request", async () => {
   for (const probe of [async () => ({ ok: false }), async () => { throw new Error("offline"); }]) {
     const steps: string[] = [];
+    let probes = 0;
     expect(await prepareRotation({
-      probe,
+      probe: async () => { probes++; return probe(); },
       record: async (result) => { expect(result.ok).toBe(false); steps.push("record"); },
       request: async () => { steps.push("provider"); return { previousIp: null }; },
+      wait: async () => {},
     })).toEqual({ previousIp: null });
+    expect(probes).toBe(2);
     expect(steps).toEqual(["record", "provider"]);
   }
+});
+
+test("the first click after idle retries a failed baseline before one rotation and confirms old to new", async () => {
+  for (const first of [async () => ({ ok: false }), async () => { throw new Error("idle tunnel"); }]) {
+    const steps: string[] = [];
+    let probes = 0;
+    let previousIp: string | null = null;
+    const probe = async () => {
+      steps.push("probe");
+      if (++probes === 1) return first();
+      return { ok: true, ip: probes === 2 ? "1.2.3.4" : "1.2.3.5" };
+    };
+    const request = await prepareRotation({
+      probe,
+      wait: async (ms) => { expect(ms).toBe(300); steps.push("wait"); },
+      record: async (before) => { previousIp = before.ok ? before.ip ?? null : null; steps.push("record-baseline"); },
+      request: async () => { steps.push("provider"); return { previousIp }; },
+    });
+    const result = await confirmRotation({
+      previousIp: request.previousIp, probe, wait: async () => {},
+      record: async () => { steps.push("record-result"); },
+    });
+    expect(request.previousIp).toBe("1.2.3.4");
+    expect(result).toMatchObject({ ip: "1.2.3.5", rotationConfirmed: true, connectionRestored: false });
+    expect(steps).toEqual(["probe", "wait", "probe", "record-baseline", "provider", "probe", "record-result"]);
+  }
+});
+
+test("a healthy baseline does not wait or probe again before rotation", async () => {
+  const steps: string[] = [];
+  await prepareRotation({
+    probe: async () => { steps.push("probe"); return { ok: true, ip: "1.2.3.4" }; },
+    wait: async () => { steps.push("wait"); },
+    record: async () => { steps.push("record"); },
+    request: async () => { steps.push("provider"); },
+  });
+  expect(steps).toEqual(["probe", "record", "provider"]);
+});
+
+test("a provider failure is not retried after successful baseline recovery", async () => {
+  let probes = 0;
+  let requests = 0;
+  await expect(prepareRotation({
+    probe: async () => ++probes === 1 ? { ok: false } : { ok: true, ip: "1.2.3.4" },
+    wait: async () => {}, record: async () => {},
+    request: async () => { requests++; throw new Error("provider failed"); },
+  })).rejects.toThrow("provider failed");
+  expect(probes).toBe(2);
+  expect(requests).toBe(1);
 });
 
 test("persistence or authorization failure still stops rotation", async () => {
@@ -42,6 +94,7 @@ test("persistence or authorization failure still stops rotation", async () => {
     probe: async () => ({ ok: false }),
     record: async () => { throw new Error("denied"); },
     request: async () => { requested = true; },
+    wait: async () => {},
   })).rejects.toThrow("denied");
   expect(requested).toBe(false);
 });

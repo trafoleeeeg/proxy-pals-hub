@@ -2,6 +2,37 @@ import { test, expect } from "@playwright/test";
 import type { fixture } from "./mock-api";
 declare global { interface Window { fixture: typeof fixture } }
 
+test("a lost online event does not trap a cold workspace or its profile and folder lists", async ({ page }) => {
+  const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
+  await page.goto("/app?scenario=lost-online");
+  await expect(page.getByRole("heading", { name: "Профили", exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "Папка Работа", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Запустить Рабочий профиль", exact: true })).toBeVisible();
+  await expect(page.getByText("Нет связи с сервером", { exact: true })).toHaveCount(0);
+  await page.evaluate(() => {
+    window.fixture.authOffline = true;
+    window.fixture.networkFailures.push("listWorkspaces");
+    window.dispatchEvent(new Event("offline"));
+    window.fixture.emitResume();
+  });
+  await expect(page.getByText("Нет связи с сервером", { exact: true })).toBeVisible();
+  const reads = await page.evaluate(() => window.fixture.calls.filter(item => item.method === "listWorkspaces").length);
+  await page.evaluate(() => {
+    window.fixture.authOffline = false;
+    window.fixture.networkFailures = [];
+    window.fixture.emitResume(); // Deliberately no online event.
+  });
+  await expect(page.getByText("Нет связи с сервером", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Запустить Рабочий профиль", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => window.fixture.calls.filter(item => item.method === "listWorkspaces").length)).toBeGreaterThan(reads);
+  await page.getByRole("link", { name: "Папки", exact: true }).click();
+  await page.getByRole("textbox", { name: "Название новой папки", exact: true }).fill("Synthetic recovered folder");
+  await page.getByRole("button", { name: "Создать", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.fixture.calls.filter(item => item.method === "createFolder").length)).toBe(1);
+  expect(await page.evaluate(() => window.fixture.calls.filter(item => item.method === "signOut"))).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
 test("an error boundary retries after another check clears offline and stops polling after recovery", async ({ page }) => {
   const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
   await page.clock.install();

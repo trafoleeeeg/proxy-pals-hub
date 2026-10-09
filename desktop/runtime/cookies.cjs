@@ -278,13 +278,22 @@ async function initializeCookies(ses, store, payload) {
   // Clean local caches defer to an explicit cloud revision/import. An unclean
   // checkpoint instead remembers its exact cloud base: it is not just a cache.
   // Comparing wall clocks from different computers is never authoritative.
-  if (local?.pending && local.cookiesUpdatedAt !== cloudRevision) {
+  if (local?.pending) {
     // Compare the known base revision, never clocks on different machines.
     // A changed cloud base might be a deliberate import or another device:
     // preserve both rather than silently overwriting either snapshot.
-    if (local.baseRevision !== cloudRevision) throw new Error("Unclean cookie recovery conflict; local and cloud data preserved");
-    selected = local;
-    source = "local-recovery";
+    if (local.baseRevision !== cloudRevision) {
+      const cloudCookies = parseCookies(payload.cookies ?? "[]");
+      // A successful save can reach the server before its acknowledgement is
+      // durable locally. Equal contents prove there is no divergent version;
+      // compare the complete snapshots before touching native or local data.
+      if (canonicalCookies(local.cookies) !== canonicalCookies(cloudCookies)) throw new Error("Unclean cookie recovery conflict; local and cloud data preserved");
+      selected = { cookies: cloudCookies, cookiesUpdatedAt: cloudRevision };
+      source = "cloud";
+    } else {
+      selected = local;
+      source = "local-recovery";
+    }
   } else if (cloudRevision) {
     selected = { cookies: parseCookies(payload.cookies ?? "[]"), cookiesUpdatedAt: cloudRevision };
     source = "cloud";

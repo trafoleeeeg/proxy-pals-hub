@@ -30,7 +30,10 @@ export type RunningProfile = {
 };
 export type InstalledExtension = { id: string; name: string; version: string; source?: "store" | "url"; url?: string };
 
-export type ProfileRuntimeSnapshot = { profileId: string; cookies: string | null; lockToken?: string | null; cookiesUpdatedAt?: string | null; deviceId?: string | null };
+export type ProfileRuntimeSnapshot = { profileId: string; cookies: string | null; lockToken?: string | null; cookiesUpdatedAt?: string | null; deviceId?: string | null; snapshotId?: string; snapshotRevision?: string | null };
+export type ProfileCookieAcknowledgement = {
+  profileId: string; lockToken: string; snapshotId: string; snapshotRevision: string; cloudRevision: string;
+};
 export type ProfileClosed = ProfileRuntimeSnapshot & { snapshotId: string };
 
 export type UmbraBridge = {
@@ -47,6 +50,7 @@ export type UmbraBridge = {
   acknowledgeProfileClosure: (snapshotId: string) => Promise<{ ok: boolean }>;
   archiveProfileClosure: (snapshotId: string) => Promise<{ ok: boolean }>;
   profileCookies: (profileId: string) => Promise<{ ok: boolean; cookies: string | null } & Partial<ProfileRuntimeSnapshot>>;
+  acknowledgeProfileCookies?: (payload: ProfileCookieAcknowledgement) => Promise<{ ok: boolean; applied: boolean; error?: string }>;
   onProfileClosed: (cb: (p: ProfileClosed) => void) => () => void;
   pushBrowserSettings: (settings: import("./browser-settings").BrowserSettings) => Promise<{ ok: boolean; error?: string }>;
   pushBookmarkDefaults?: (settings: import("./bookmark-defaults").BookmarkDefaults) => Promise<{ ok: boolean; error?: string }>;
@@ -121,6 +125,10 @@ function terminalSessionFailure(error: unknown): TerminalClose | null {
   if (message.includes("no profile access")) return "access_revoked";
   if (message.includes("session lease lost")) return "lease_lost";
   return null;
+}
+function cookieRevision(value: unknown): string | null {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(value) || !Number.isFinite(Date.parse(value))) return null;
+  return new Date(value).toISOString();
 }
 function safeLaunchError(error: unknown): string {
   const message = error instanceof Error ? error.message.trim() : "";
@@ -410,8 +418,19 @@ export class DesktopProfileLifecycle {
           if (terminalClose(heartbeat)) throw heartbeat;
           const snapshot = await this.bridge.profileCookies(id);
           if (!snapshot.ok || typeof snapshot.cookies !== "string" || snapshot.lockToken !== key.lockToken || (snapshot.profileId && snapshot.profileId !== id)) throw new Error();
+          const snapshotRevision = cookieRevision(snapshot.snapshotRevision ?? snapshot.cookiesUpdatedAt);
+          if (this.bridge.acknowledgeProfileCookies && (!snapshot.snapshotId || !snapshotRevision)) throw new Error("Приложение не подтвердило локальный снимок cookies");
           const saved = await this.api.save({ ...key, cookies: snapshot.cookies });
           if (terminalClose(saved)) throw saved;
+          if (this.bridge.acknowledgeProfileCookies) {
+            const cloudRevision = saved && typeof saved === "object" && "ok" in saved && saved.ok === true && "cookiesUpdatedAt" in saved
+              ? cookieRevision(saved.cookiesUpdatedAt) : null;
+            if (!cloudRevision) throw new Error("Сервер не подтвердил версию сохранённых cookies");
+            const acknowledged = await withDesktopTimeout(this.bridge.acknowledgeProfileCookies({
+              ...key, snapshotId: snapshot.snapshotId!, snapshotRevision: snapshotRevision!, cloudRevision,
+            }), "Приложение не подтвердило сохранение cookies вовремя");
+            if (!acknowledged.ok || !acknowledged.applied) throw new Error("Локальное подтверждение сохранения cookies ожидает повторной синхронизации");
+          }
           if (![...this.pending.values()].some((p) => p.profileId === id) && !this.outboxFailures.has(id)) delete this.errors[id];
         } catch (error) {
           const terminal = terminalSessionFailure(error);

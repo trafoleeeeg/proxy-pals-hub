@@ -116,7 +116,7 @@ test("a stopped profile tab writes Electron's reason without the tab URL", async
   const h = await harness(undefined, undefined, directory).start();
   h.views.at(-1).webContents.emit("render-process-gone", {}, { reason: "memory-eviction", exitCode: -1 });
   const raw = fs.readFileSync(path.join(directory, "diagnostics", "process-events.jsonl"), "utf8");
-  const entry = JSON.parse(raw.trim());
+  const entry = raw.trim().split("\n").map(JSON.parse).find(row => row.event === "renderer-gone");
   assert.equal(entry.role, "profile-tab");
   assert.equal(entry.reason, "memory-eviction");
   assert.equal(entry.exitCode, -1);

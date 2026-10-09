@@ -80,17 +80,27 @@ function superviseBrowser({ forwardOutput = false } = {}) {
   app.on("will-quit", cleanup);
   const child = spawnBrowser(process.execPath, process.argv.slice(1), {},
     (reason) => diagnose("coordinator-pipe-closed", { reason }));
+  diagnose("coordinator-child-start", { childPid: child.pid });
+  const healthTimer = setInterval(() => {
+    try {
+      const memory = process.memoryUsage();
+      diagnose("process-health", { role: "other", childPid: child.pid, rssMb: Math.round(memory.rss / 1048576), heapMb: Math.round(memory.heapUsed / 1048576) });
+    } catch { /* Health sampling is optional. */ }
+  }, 60000);
+  healthTimer.unref?.();
   child.stderr.on("data", createNativeFatalParser((category) => diagnose("coordinator-native-fatal", { category, childPid: child.pid })));
   if (forwardOutput) { child.stdout.pipe(process.stdout); child.stderr.pipe(process.stderr); }
   else { child.stdout.resume(); child.stderr.resume(); }
   let finished = false;
   child.on("error", () => {
+    clearInterval(healthTimer);
     diagnose("coordinator-child-error", { childPid: child.pid });
     finished = true;
     dialog.showErrorBox("Umbra", "Не удалось запустить защищённый браузерный процесс");
     app.exit(1);
   });
   child.on("exit", (code, signal) => {
+    clearInterval(healthTimer);
     diagnose("coordinator-child-exit", { childPid: child.pid, exitCode: code, signal });
     finished = true; cleanup(); app.exit(code || 0);
   });

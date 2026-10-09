@@ -8,7 +8,8 @@ const ID = "10000000-0000-4000-8000-000000000001";
 const FP = { userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/144.0.0.0", languages: ["de-DE", "de"], timezone: "Europe/Berlin", hardwareConcurrency: 6, screen: { width: 1920, height: 1080, colorDepth: 24 } };
 const defer = () => { let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise, resolve }; };
 
-function harness() {
+function harness({ diagnosticFailure = false } = {}) {
+  const diagnosticEvents = [];
   const windows = [];
   const sessions = new Map();
   let configured = 0;
@@ -78,6 +79,7 @@ function harness() {
     } },
   };
   const runtime = createProfileRuntime(electron, {
+    recordDiagnostic: (_directory, event, details) => { if (diagnosticFailure) throw new Error("Disk unavailable"); diagnosticEvents.push({ event, ...details }); },
     cookieTransport: ses => ({ read: () => ses.cookies.get({}), write: cookie => ses.cookies.set({ ...cookie, url: "https://" + cookie.domain.replace(/^\./, "") }) }),
     cleanupTimeoutMs: 25,
     shutdownTimeoutMs: 100,
@@ -110,10 +112,33 @@ function harness() {
     },
     privacyStore: { readPermissions: async (id) => privacyRecords.get(id) || {}, writePermissions: async (id, rules) => { privacyRecords.set(id, structuredClone(rules)); } },
   });
-  return { runtime, electron, shell, privacyRecords, windows, sessions, records, tabRecords, bookmarkRecords, storageClears, get browserConfig() { return browserConfig; }, get configured() { return configured; }, get disposed() { return disposed; }, setFlushGate: (gate) => { flushGate = gate; }, setNavigationGate: (gate) => { navigationGate = gate; }, setSnapshotFailure: (value) => { snapshotFailure = value; }, setWorkerStop: (fn) => { workerStop = fn; }, setFreezeCommand: (fn) => { freezeCommand = fn; }, setProxyDispose: (fn) => { proxyDispose = fn; } };
+  return { runtime, diagnosticEvents, electron, shell, privacyRecords, windows, sessions, records, tabRecords, bookmarkRecords, storageClears, get browserConfig() { return browserConfig; }, get configured() { return configured; }, get disposed() { return disposed; }, setFlushGate: (gate) => { flushGate = gate; }, setNavigationGate: (gate) => { navigationGate = gate; }, setSnapshotFailure: (value) => { snapshotFailure = value; }, setWorkerStop: (fn) => { workerStop = fn; }, setFreezeCommand: (fn) => { freezeCommand = fn; }, setProxyDispose: (fn) => { proxyDispose = fn; } };
 }
 
 const payload = () => ({ profileId: ID, deviceId: "test-device", name: "Test", lockToken: "test-lock-token", fingerprint: FP, cookies: "[]", cookiesUpdatedAt: null, proxy: null, startUrl: "https://example.test" });
+
+test("lifecycle journal links launch, close initiator and durable cleanup for the same run", async () => {
+  const h = harness();
+  await h.runtime.launchProfileWindow(payload());
+  await h.browserConfig.closeProfile("shell-close");
+  const events = h.diagnosticEvents;
+  const runId = events[0].runId;
+  assert.ok(runId && runId !== ID);
+  assert.ok(events.every(row => row.runId === runId));
+  assert.deepEqual(events.filter(row => row.event === "profile-lifecycle").map(row => row.phase), ["starting", "session", "fingerprint", "workers", "proxy", "cookies", "extensions", "tabs", "tabs", "tabs", "running"]);
+  assert.equal(events.find(row => row.event === "profile-close-request").source, "shell-close");
+  assert.deepEqual(events.filter(row => row.event === "profile-close-phase").map(row => row.phase), ["begin", "workers", "tabs", "cookies", "outbox", "done"]);
+  assert.ok(events.filter(row => row.event === "profile-close-phase").every(row => row.source === "shell-close" && row.elapsedMs >= 0));
+  assert.equal(h.runtime.getRunningProfile(ID), null);
+});
+
+test("unwritable diagnostics cannot block launch, encrypted save or close", async () => {
+  const h = harness({ diagnosticFailure: true });
+  await h.runtime.launchProfileWindow(payload());
+  await h.runtime.closeAllProfiles();
+  assert.equal(h.records.has(ID), true);
+  assert.equal(h.runtime.getRunningProfile(ID), null);
+});
 
 test("page protection failure saves the profile and reports why the window was closed", async () => {
   const h = harness();

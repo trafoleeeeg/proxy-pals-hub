@@ -7,6 +7,20 @@ const WINDOWS_UA = "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36
 const CHROME = "150.0.1234.56";
 const fingerprint = (extra = {}) => normalizeFingerprint({ userAgent: WINDOWS_UA, ...extra }, undefined, CHROME);
 
+test("protection trace includes begin/end metadata and cannot alter protection when it throws", async () => {
+  const trace = [];
+  const wc = webContents();
+  await applyFingerprint(wc, fingerprint(), { onTrace: row => trace.push(row) });
+  assert.ok(trace.some(row => row.stage === "blank-init" && row.phase === "begin"));
+  assert.ok(trace.some(row => row.stage === "Page.addScriptToEvaluateOnNewDocument" && row.phase === "done" && row.elapsedMs >= 0));
+  for (const { command } of wc.commands) {
+    assert.ok(trace.some(row => row.stage === command && row.phase === "begin"));
+    assert.ok(trace.some(row => row.stage === command && row.phase === "done"));
+  }
+  assert.ok(trace.every(row => !Object.hasOwn(row, "params") && !Object.hasOwn(row, "response")));
+  await applyFingerprint(webContents(), fingerprint(), { onTrace: () => { throw new Error("Disk full"); } });
+});
+
 test("renderer-wide locale conflicts require a verified match, never silently degrade", async () => {
   for (const value of [true, false, undefined]) {
     const send = async (method, args, id) => {

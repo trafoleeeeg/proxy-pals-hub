@@ -4,7 +4,7 @@ const { EventEmitter } = require("node:events");
 const { startUrl, bookmarkletUrl } = require("./validation.cjs");
 const { PRIVACY_CAPABILITIES } = require("./privacy-policy.cjs");
 const { browserUrl } = require("./browser-ui.cjs");
-const { recordProcessEvent } = require("./process-diagnostics.cjs");
+const { recordProcessEvent, observeContents, BROWSER_ACTIONS } = require("./process-diagnostics.cjs");
 
 const CHROME_HEIGHT = 90;
 const handlers = new WeakMap();
@@ -31,7 +31,9 @@ async function createProfileBrowser(electron, {
   getLeaks = () => null, checkLeaks = async () => {},
   getPrivacy = () => ({ origin: "", allowed: false }), setPrivacy = async () => {},
   setExtensionEnabled = async () => {},
+  recordDiagnostic = (event, details) => recordProcessEvent(electron.app?.getPath?.("userData"), event, details),
 }) {
+  const diagnose = (event, details) => { try { recordDiagnostic(event, details); } catch { /* Never interrupt the browser for diagnostics. */ } };
   const { BrowserWindow, WebContentsView, session, ipcMain } = electron;
   let registry = handlers.get(ipcMain);
   if (!registry) {
@@ -87,9 +89,13 @@ async function createProfileBrowser(electron, {
   let tabOrder = [];
   const recentlyClosed = [];
   const shellContents = shell.webContents;
+  const shellContentsId = shellContents.id;
+  diagnose("window-lifecycle", { role: "profile-shell", phase: "created", contentsId: shellContentsId });
+  observeContents(shellContents, diagnose, "profile-shell");
+  for (const phase of ["show", "hide", "focus", "blur"]) shell.on(phase, () => diagnose("window-lifecycle", { role: "profile-shell", phase, contentsId: shellContentsId }));
   const recordRendererGone = (role, contents, details) => {
     try {
-      recordProcessEvent(electron.app?.getPath?.("userData"), "renderer-gone", {
+      diagnose("renderer-gone", {
         role, reason: details?.reason, exitCode: details?.exitCode, contentsId: contents.id,
       });
     } catch { /* Crash logging must not cause a second crash. */ }
@@ -379,7 +385,7 @@ async function createProfileBrowser(electron, {
          if (!Array.isArray(message.ids) || message.ids.length !== tabOrder.length || new Set(message.ids).size !== tabOrder.length || message.ids.some((id) => !tabs.has(id)) || (homeTab() && message.ids[0] !== homeTab().id)) throw new Error("Некорректный порядок вкладок");
         tabOrder = [...message.ids]; if (ready) onTabsChanged(); break;
       }
-      case "close-profile": await closeProfile(); break;
+      case "close-profile": await closeProfile("browser-command"); break;
       case "import-cookies": {
         try {
           response = await importCookies(message.text);
@@ -536,7 +542,15 @@ async function createProfileBrowser(electron, {
     "zoom-in", "zoom-out", "zoom-reset", "import-cookies",
   ]);
   function runCommand(message) {
-    return command(message).then((result) => result || {}).catch(() => {
+    const action = BROWSER_ACTIONS.has(message?.action) ? message.action : null;
+    const operationId = randomUUID();
+    const started = Date.now();
+    if (action) diagnose("browser-command", { action, operationId, phase: "begin" });
+    return command(message).then((result) => {
+      if (action) diagnose("browser-command", { action, operationId, phase: "done", elapsedMs: Date.now() - started });
+      return result || {};
+    }).catch(() => {
+      if (action) diagnose("browser-command", { action, operationId, phase: "failed", elapsedMs: Date.now() - started });
       error = "Не удалось выполнить действие. Проверьте адрес и подключение прокси."; publish(); return { error };
     });
   }
@@ -592,12 +606,13 @@ async function createProfileBrowser(electron, {
   shell.webContents.on("before-input-event", shortcuts);
   shell.webContents.on("render-process-gone", (_event, details) => {
     recordRendererGone("profile-shell", shellContents, details);
-    if (!destroyed) void closeProfile().catch(() => {});
+    if (!destroyed) void closeProfile("shell-renderer-gone").catch(() => {});
   });
   shell.on("resize", layout);
   shell.on("move", positionExtensionPopup);
-  shell.on("close", (event) => { event.preventDefault(); void closeProfile().catch(() => { error = "Не удалось сохранить профиль. Повторите закрытие."; publish(); }); });
+  shell.on("close", (event) => { diagnose("window-lifecycle", { role: "profile-shell", phase: "close", contentsId: shellContentsId }); event.preventDefault(); void closeProfile("shell-close").catch(() => { error = "Не удалось сохранить профиль. Повторите закрытие."; publish(); }); });
   shell.on("closed", () => {
+    diagnose("window-lifecycle", { role: "profile-shell", phase: "closed", contentsId: shellContentsId });
     destroyed = true;
     clearTimeout(publishTimer); publishTimer = null;
     closeExtensionPopup();
@@ -621,13 +636,16 @@ async function createProfileBrowser(electron, {
       if (pinnedHome && homeTab()) throw new Error("Стартовая вкладка уже открыта");
       const view = new WebContentsView({ webPreferences: { partition, contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, devTools: false } });
       const wc = view.webContents;
+      const contentsId = wc.id;
+      diagnose("contents-lifecycle", { role: "profile-tab", phase: "created", contentsId });
+      observeContents(wc, diagnose, "profile-tab");
       const tab = new EventEmitter();
       Object.assign(tab, {
         id: randomUUID(), view, webContents: wc, url: "about:blank", error: "", pinnedHome,
         isDestroyed: () => wc.isDestroyed(),
         focus: () => { shell.focus(); select(tab); },
         show: () => { if (show && !shell.isDestroyed()) shell.show(); select(tab); },
-        destroy: () => { tab.closing = true; if (!wc.isDestroyed()) wc.close({ waitForBeforeUnload: false }); },
+        destroy: () => { diagnose("contents-lifecycle", { role: "profile-tab", phase: "destroy", contentsId }); tab.closing = true; if (!wc.isDestroyed()) wc.close({ waitForBeforeUnload: false }); },
         async loadURL(url, options) {
           const target = startUrl(url, { allowBlank: true });
           if (pinnedHome && target !== "about:blank") throw new Error("Стартовую вкладку нельзя заменить сайтом");

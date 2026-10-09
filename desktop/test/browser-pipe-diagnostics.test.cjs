@@ -24,10 +24,13 @@ function fixture() {
   app.setPath = () => {};
   app.exit = code => exits.push(code);
   const diagnostics = [];
+  const intervals = [];
   const module = { exports: {} };
   const directory = path.resolve(__dirname, "../runtime");
   vm.runInNewContext(fs.readFileSync(path.join(directory, "browser-pipe.cjs"), "utf8"), {
-    module, process: { env: {}, execPath: "synthetic-executable", argv: ["synthetic-executable"] },
+    module, process: { env: {}, execPath: "synthetic-executable", argv: ["synthetic-executable"], memoryUsage: () => ({ rss: 32 * 1048576, heapUsed: 4 * 1048576 }) },
+    setInterval(callback, milliseconds) { const timer = { callback, milliseconds, cleared: false, unref() { this.unreferenced = true; } }; intervals.push(timer); return timer; },
+    clearInterval(timer) { timer.cleared = true; },
     require(name) {
       if (name === "node:child_process") return { spawn: () => child };
       if (name === "electron") return { app, dialog: { showErrorBox() {} } };
@@ -37,7 +40,7 @@ function fixture() {
       return require(name);
     },
   });
-  return { child, sent, app, exits, diagnostics, api: module.exports };
+  return { child, sent, app, exits, diagnostics, intervals, api: module.exports };
 }
 
 test("pipe failures report one fixed reason while preserving private-pipe cleanup", () => {
@@ -74,7 +77,7 @@ test("a failing pipe diagnostic callback cannot prevent the existing cleanup", (
 });
 
 test("supervisor records fixed stderr categories and raw exit code without changing exit handling", () => {
-  const { api, child, diagnostics, exits } = fixture();
+  const { api, child, diagnostics, exits, intervals } = fixture();
   assert.equal(api.superviseBrowser(), true);
   child.stderr.emit("data", Buffer.from("[123:456:1009/160700.123:FATAL:private.cc(42)] secret https://private.example\n"));
   child.stderr.emit("data", Buffer.from("# Fatal process out of memory: private\n"));
@@ -82,11 +85,26 @@ test("supervisor records fixed stderr categories and raw exit code without chang
   child.emit("exit", 0xC0000005, null);
   assert.deepEqual(diagnostics, [
     { event: "coordinator-start" },
+    { event: "coordinator-child-start", childPid: 123 },
     { event: "coordinator-native-fatal", category: "native-fatal", childPid: 123 },
     { event: "coordinator-native-fatal", category: "v8-oom", childPid: 123 },
     { event: "coordinator-pipe-closed", reason: "read-end" },
     { event: "coordinator-child-exit", childPid: 123, exitCode: 0xC0000005, signal: null },
   ]);
   assert.deepEqual(exits, [0xC0000005]);
+  assert.equal(intervals[0].cleared, true);
   assert.doesNotMatch(JSON.stringify(diagnostics), /private|secret|https|\.cc/);
+});
+
+test("coordinator health samples are bounded, unreferenced and stopped on launch failure", () => {
+  const { api, child, diagnostics, intervals } = fixture();
+  api.superviseBrowser();
+  assert.equal(intervals.length, 1);
+  assert.equal(intervals[0].milliseconds, 60000);
+  assert.equal(intervals[0].unreferenced, true);
+  intervals[0].callback();
+  assert.deepEqual(diagnostics.at(-1), { event: "process-health", role: "other", childPid: 123, rssMb: 32, heapMb: 4 });
+  child.emit("error", new Error("private-cookie"));
+  assert.equal(intervals[0].cleared, true);
+  assert.doesNotMatch(JSON.stringify(diagnostics), /private|secret|cookie/);
 });

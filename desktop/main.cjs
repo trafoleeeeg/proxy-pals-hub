@@ -17,7 +17,8 @@ const { isTrustedSender, isWebUrl } = require("./ipc-policy.cjs");
 const { createUpdateController } = require("./update-controller.cjs");
 const { createSessionOutbox } = require("./session-outbox.cjs");
 const { checkEngineVersions } = require("./runtime/engine-status.cjs");
-const { recordProcessEvent } = require("./runtime/process-diagnostics.cjs");
+const { recordProcessEvent, startProcessJournalMaintenance, observeContents } = require("./runtime/process-diagnostics.cjs");
+const { randomUUID } = require("node:crypto");
 const { createPanelStartup, panelBackground } = require("./runtime/panel-startup.cjs");
 const { createPanelBundle } = require("./runtime/panel-bundle.cjs");
 
@@ -44,6 +45,8 @@ let quitting = false;
 let closing = false;
 let proxyChecks = 0;
 let extensionDownloads = 0;
+let stopJournalMaintenance;
+let healthTimer;
 function diagnose(event, details) {
   try { recordProcessEvent(app.getPath("userData"), event, details); } catch { /* Never disrupt the browser for diagnostics. */ }
 }
@@ -102,6 +105,9 @@ function createWindow(prepare = Promise.resolve()) {
   window.on("close", (event) => {
     if (!quitting && listRunningProfiles().length) { event.preventDefault(); app.quit(); }
   });
+  observeContents(window.webContents, diagnose, "panel");
+  const panelContentsId = window.webContents.id;
+  for (const phase of ["close", "closed", "show", "hide", "focus", "blur"]) window.on(phase, () => diagnose("window-lifecycle", { role: "panel", phase, contentsId: panelContentsId }));
   window.on("closed", () => { if (mainWindow === window) { mainWindow = null; panelStartup = null; } });
   void startup.start().catch((error) => {
     if (window.isDestroyed() || quitting || closing) return;
@@ -113,8 +119,22 @@ function createWindow(prepare = Promise.resolve()) {
 function handle(channel, handler) {
   ipcMain.handle(channel, async (event, ...args) => {
     if (!isTrustedSender(event, mainWindow, APP_ORIGIN)) throw new Error("Untrusted IPC sender");
-    try { return await handler(...args); }
-    catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; }
+    const operation = channel.slice("umbra:".length);
+    // Read-only polling is deliberately omitted; mutations/saves are traced
+    // without logging IPC arguments, returned payloads or arbitrary errors.
+    const traced = !["app-version", "runtime-capabilities", "update-state", "list-running-profiles", "extensions-list", "proxy-clipboard", "open-external", "check-engine-versions"].includes(operation);
+    const operationId = randomUUID();
+    const started = Date.now();
+    if (traced) diagnose("ipc-operation", { operation, operationId, phase: "begin" });
+    try {
+      const result = await handler(...args);
+      if (traced) diagnose("ipc-operation", { operation, operationId, phase: "done", elapsedMs: Date.now() - started, ok: result?.ok !== false, applied: result?.applied });
+      return result;
+    }
+    catch (error) {
+      if (traced) diagnose("ipc-operation", { operation, operationId, phase: "failed", elapsedMs: Date.now() - started, errorCode: error?.code });
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
   });
 }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -230,7 +250,7 @@ handle("umbra:extensions-remove", async (id) => {
 
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
-  diagnose("browser-start");
+  diagnose("browser-start", { version: app.getVersion() });
   process.on("disconnect", () => diagnose("coordinator-disconnect"));
   process.on("uncaughtExceptionMonitor", () => diagnose("browser-uncaught-exception"));
   app.on("render-process-gone", (_event, contents, details) => {
@@ -247,6 +267,14 @@ else {
     }
   });
   app.whenReady().then(async () => {
+    stopJournalMaintenance = startProcessJournalMaintenance(app.getPath("userData"));
+    healthTimer = setInterval(() => {
+      try {
+        const memory = process.memoryUsage();
+        diagnose("process-health", { rssMb: Math.round(memory.rss / 1048576), heapMb: Math.round(memory.heapUsed / 1048576), profileCount: listRunningProfiles().length });
+      } catch { /* Health sampling must not crash the app or access saved cookies. */ }
+    }, 60000);
+    healthTimer.unref();
     outbox = createSessionOutbox(path.join(app.getPath("userData"), "session-outbox"), safeStorage);
     const preparePanel = (async () => {
       // Show the harmless local shell now, but do not load any remote renderer
@@ -273,6 +301,7 @@ else {
       currentVersion: app.getVersion(),
       hasOpenProfiles: () => listRunningProfiles().length > 0 || closing,
       onState: (state) => {
+        diagnose("update-state", { phase: state.state, version: state.version });
         send("umbra:update", state);
         if (state.state === "downloaded" && Notification.isSupported()) {
           const notice = new Notification({ title: "Umbra", body: "Обновление " + state.version + " готово к установке" });
@@ -284,6 +313,7 @@ else {
     createWindow(preparePanel);
     // Wake the control panel only. Do not reload/close working profile tabs or
     // replay profile/proxy mutations when the laptop resumes.
+    for (const phase of ["suspend", "resume", "shutdown", "lock-screen", "unlock-screen"]) powerMonitor.on(phase, () => diagnose("power-state", { phase }));
     powerMonitor.on("resume", () => send("umbra:panel-resume"));
     app.on("umbra:profile-protection-failed", ({ saved, kind }) => {
       const protection = kind === "page" ? "Защита страницы" : "Защита фонового процесса";
@@ -333,6 +363,8 @@ app.on("before-quit", (event) => {
   Promise.resolve().then(() => closeAllProfiles()).then(() => {
     quitting = true;
     clearInterval(updateTimer);
+    clearInterval(healthTimer);
+    stopJournalMaintenance?.();
     app.quit();
   }).catch((error) => {
     closing = false;

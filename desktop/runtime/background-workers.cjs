@@ -90,7 +90,12 @@ async function configureWorker(params, parentSessionId, existing) {
   const send = (method, args, sessionId) => {
     ensureCurrent();
     record.stage = method;
-    return protocol.send(method, args, sessionId);
+    const started = Date.now();
+    const trace = phase => { try { record.state?.onTrace?.({ stage: method, phase, elapsedMs: Date.now() - started, targetType: record.info.type }); } catch { /* Never alter worker protection. */ } };
+    trace("begin");
+    try {
+      return protocol.send(method, args, sessionId).then(result => { trace("done"); return result; }, error => { trace("failed"); throw error; });
+    } catch (error) { trace("failed"); throw error; }
   };
   try {
     const state = record.state || await findContext(info.browserContextId);
@@ -320,12 +325,13 @@ async function stopState(state) {
   catch (error) { state.stopping = null; throw error; }
 }
 
-async function protectBackgroundWorkers(ses, fp, { onFailure, onDiagnostic } = {}) {
+async function protectBackgroundWorkers(ses, fp, { onFailure, onDiagnostic, onTrace } = {}) {
   const state = await sessionState(ses);
   if (state.active) throw new Error("Background profile already active");
   state.fp = fp;
   state.onFailure = onFailure;
   state.onDiagnostic = onDiagnostic;
+  state.onTrace = onTrace;
   state.active = true;
   publish(state);
   return { stop: () => stopState(state), isActive: () => state.active && state.terminating.size === 0 };

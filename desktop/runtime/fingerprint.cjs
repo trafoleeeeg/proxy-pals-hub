@@ -190,7 +190,7 @@ async function prepareFingerprintTarget(wc, { isClosing = () => false, timeout =
   }
 }
 
-async function applyFingerprint(wc, fp, { onFailure = () => {}, onDiagnostic = () => {}, onTrace = () => {}, isClosing = () => false } = {}) {
+async function applyFingerprint(wc, fp, { onFailure = () => {}, onDiagnostic = () => {}, onTrace = () => {}, onContextTrace = () => {}, isClosing = () => false } = {}) {
   const trace = (stage, phase, elapsedMs, targetType = "page") => {
     try { onTrace({ stage, phase, elapsedMs, targetType, contentsId: wc.id }); } catch { /* Never alter protection. */ }
   };
@@ -218,7 +218,7 @@ async function applyFingerprint(wc, fp, { onFailure = () => {}, onDiagnostic = (
   let stopped = false;
   const children = new Set();
   const pageChildren = new Set();
-  const contexts = require("./execution-contexts.cjs").executionContexts();
+  const contexts = require("./execution-contexts.cjs").executionContexts({ onTrace: details => onContextTrace({ ...details, contentsId: wc.id }) });
   wc.once?.("destroyed", () => contexts.dispose());
   const fail = (reason = "command-failed", stage = "context", targetType = "page") => {
     if (stopped || isClosing() || wc.isDestroyed?.()) return;
@@ -295,6 +295,7 @@ async function applyFingerprint(wc, fp, { onFailure = () => {}, onDiagnostic = (
       contexts.close(params.sessionId); return;
     }
     if (method !== "Target.attachedToTarget") return;
+    contexts.registerTarget(params.sessionId, params.targetInfo.type);
     children.add(params.sessionId);
     if (["page", "iframe"].includes(params.targetInfo.type)) pageChildren.add(params.sessionId);
     void configureChild(params.sessionId, params.targetInfo.type).catch(error => {

@@ -666,6 +666,7 @@ function createProfileRuntime(electron, options = {}) {
       // Starting navigation and attachment concurrently can bind DevTools twice.
       const fingerprintOptions = { isClosing: () => entry.closingRequested || win.closing || win.isDestroyed(),
         onTrace: details => diagnose(entry, "protection-command", details),
+        onContextTrace: details => diagnose(entry, "execution-context", details),
         onDiagnostic: details => diagnose(entry, "page-protection", details), onFailure: () => {
         if (entry.closingRequested || win.closing || win.isDestroyed()) return;
         entry.lastError = "Защита страницы недоступна, профиль остановлен";

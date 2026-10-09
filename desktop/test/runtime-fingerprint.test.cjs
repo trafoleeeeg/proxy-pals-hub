@@ -135,7 +135,7 @@ test("legacy profiles retain strict API blocking while new normal-mode profiles 
   }
 });
 
-function webContents({ policy = "disable_non_proxied_udp", reject = null, announceContext = true } = {}) {
+function webContents({ policy = "disable_non_proxied_udp", reject = null, announceContext = true, namedWorkerContext = false } = {}) {
   const commands = [];
   let detached = false;
   return {
@@ -147,7 +147,8 @@ function webContents({ policy = "disable_non_proxied_udp", reject = null, announ
         commands.push({ command, args, id });
         if (command === reject) throw new Error("Protocol error");
         if (command === "Runtime.enable" && announceContext) this.emit("message", {}, "Runtime.executionContextCreated", {
-          context: { id: 1, uniqueId: "unique-" + (id || "root"), name: "", auxData: { isDefault: true, frameId: "frame-" + (id || "root") } },
+          context: { id: 1, uniqueId: "unique-" + (id || "root"), name: id && namedWorkerContext ? "site-assigned-worker-name" : "",
+            ...(id && namedWorkerContext ? {} : { auxData: { isDefault: true, frameId: "frame-" + (id || "root") } }) },
         }, id);
         if (command === "Page.getFrameTree") return { frameTree: { frame: { id: "frame-" + (id || "root") } } };
         if (command === "Runtime.evaluate") return { result: { value: true } };
@@ -221,6 +222,21 @@ test("child locale and worker evaluations use their own unique contexts, not the
     assert.ok(evaluations.every(c => c.args.uniqueContextId === "unique-" + type));
     assert.ok(wc.commands.some(c => c.command === "Runtime.runIfWaitingForDebugger" && c.id === type));
   }
+});
+
+test("a named dedicated worker is protected in its announced context before resuming", async () => {
+  const wc = webContents({ namedWorkerContext: true });
+  const failures = [], contexts = [];
+  await applyFingerprint(wc, fingerprint(), { onFailure: row => failures.push(row), onContextTrace: row => contexts.push(row) });
+  wc.debugger.emit("message", {}, "Target.attachedToTarget", { sessionId: "named", targetInfo: { type: "worker" }, waitingForDebugger: true });
+  await new Promise(resolve => setImmediate(resolve));
+  const evaluationIndex = wc.commands.findIndex(row => row.command === "Runtime.evaluate" && row.id === "named");
+  const resumeIndex = wc.commands.findIndex(row => row.command === "Runtime.runIfWaitingForDebugger" && row.id === "named");
+  assert.ok(evaluationIndex >= 0 && resumeIndex > evaluationIndex);
+  assert.equal(wc.commands[evaluationIndex].args.uniqueContextId, "unique-named");
+  assert.deepEqual(failures, []);
+  assert.ok(contexts.some(row => row.targetType === "worker" && row.named && row.accepted));
+  assert.doesNotMatch(JSON.stringify(contexts), /site-assigned-worker-name|unique-named/);
 });
 
 test("closing the debugger while locale waits never sends a default-context evaluation", async () => {

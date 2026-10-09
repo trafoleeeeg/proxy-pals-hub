@@ -1,5 +1,8 @@
-if (require("./runtime/browser-pipe.cjs").superviseBrowser()) return;
 const electron = require("electron");
+require("./runtime/native-crash-capture.cjs").startNativeCrashCapture(
+  electron, process.env.UMBRA_PRIVATE_BROWSER_CHILD === "1" ? "browser" : "coordinator",
+);
+if (require("./runtime/browser-pipe.cjs").superviseBrowser()) return;
 const { app, BrowserWindow, ipcMain, session, shell, dialog, safeStorage, Notification, powerMonitor } = electron;
 const { initializeBackgroundWorkers, allowBackgroundWorkers } = require("./runtime/background-workers.cjs");
 const path = require("node:path");

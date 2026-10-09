@@ -11,6 +11,7 @@ const EVENTS = new Set([
   "profile-close-phase",
   "profile-cleanup-failed",
   "background-worker",
+  "native-crash-capture",
 ]);
 const CLOSE_PHASES = new Set(["begin", "workers", "tabs", "cookies", "outbox", "done", "failed"]);
 const ROLES = new Set(["panel", "profile-shell", "profile-tab", "other"]);
@@ -37,6 +38,7 @@ function recordProcessEvent(userData, event, details = {}, options = {}) {
   try {
     const row = { at: new Date().toISOString(), event, pid: process.pid };
     if (ROLES.has(details.role)) row.role = details.role;
+    if (event === "native-crash-capture" && ["enabled", "rejected", "failed", "pruned"].includes(details.state)) row.state = details.state;
     if (event === "profile-close-phase" && CLOSE_PHASES.has(details.phase)) row.phase = details.phase;
     if (event === "profile-cleanup-failed") {
       if (["workers", "connections", "proxy"].includes(details.operation)) row.operation = details.operation;

@@ -2,6 +2,25 @@ import { test, expect } from "@playwright/test";
 import type { fixture } from "./mock-api";
 declare global { interface Window { fixture: typeof fixture } }
 
+test("an error boundary retries after another check clears offline and stops polling after recovery", async ({ page }) => {
+  const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
+  await page.clock.install();
+  await page.goto("/recovery-boundary.html");
+  await expect.poll(() => page.evaluate(() => window.recoveryFixture.attempts)).toBe(1);
+  await expect(page.getByText("Нет связи с сервером", { exact: true })).toBeVisible();
+  await page.evaluate(() => window.recoveryFixture.clearOffline());
+  await page.clock.runFor(15_000);
+  await expect(page.getByRole("heading", { name: "Панель восстановлена" })).toBeVisible();
+  await expect(page.getByText("Нет связи с сервером", { exact: true })).toHaveCount(0);
+  expect(await page.evaluate(() => window.recoveryFixture.attempts)).toBe(2);
+  const verifications = await page.evaluate(() => window.recoveryFixture.verifications);
+  await page.clock.runFor(30_000);
+  expect(await page.evaluate(() => window.recoveryFixture.attempts)).toBe(2);
+  expect(await page.evaluate(() => window.recoveryFixture.verifications)).toBe(verifications);
+  expect(await page.evaluate(() => window.fixture.calls.filter(item => item.method === "signOut"))).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
 test("sleep/network recovery keeps profiles visible and does not close working tabs", async ({ page }) => {
   const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
   await page.goto("/app");

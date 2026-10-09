@@ -166,10 +166,15 @@ function initializeBackgroundWorkers() {
               diagnose(record.state, "worker-retired", record, "worker-closed");
             } else awaitTermination(record, record.closing);
           }
-          if (record.closing && !record.cancelled) {
-            void protocol.send("Target.detachFromTarget", { sessionId: record.id }).catch(() => {
-              if (!record.destroyed) fail(record.state, "close-failed", record);
-            });
+          // Chromium retains a stopped SW's DevTools host while we own its
+          // debugger session. Release that stale host so the next wake creates
+          // a fresh target with a real waitForDebuggerOnStart handshake. Do not
+          // resume an in-place restart: persisted hosts do not always pause.
+          if ((record.closing || record.info.type === "service_worker") && !record.cancelled) {
+            // Destruction may race this command ("session not found"). Its
+            // acknowledgement/error is not evidence either way: the existing
+            // terminal-event deadline controls the gate for restartable SWs.
+            void protocol.send("Target.detachFromTarget", { sessionId: record.id }).catch(() => {});
           }
         }
       }

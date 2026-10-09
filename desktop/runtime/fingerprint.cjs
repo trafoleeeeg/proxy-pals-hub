@@ -177,6 +177,9 @@ async function applyFingerprint(wc, fp, { onFailure = () => {}, isClosing = () =
   const source = `(${DOCUMENT_SOURCE})(${JSON.stringify(fp)});`;
   let stopped = false;
   const children = new Set();
+  const pageChildren = new Set();
+  const contexts = require("./execution-contexts.cjs").executionContexts();
+  wc.once?.("destroyed", () => contexts.dispose());
   const fail = () => {
     if (stopped || isClosing() || wc.isDestroyed?.()) return;
     stopped = true;
@@ -189,6 +192,19 @@ async function applyFingerprint(wc, fp, { onFailure = () => {}, isClosing = () =
   };
   const send = async (method, params, id) => {
     ensureOpen();
+    if (id && !children.has(id)) throw new Error("Fingerprint child target detached");
+    if (method === "Runtime.evaluate") {
+      let frameId;
+      if (!id || pageChildren.has(id)) {
+        const tree = await send("Page.getFrameTree", {}, id);
+        frameId = tree?.frameTree?.frame?.id;
+        if (!frameId) throw new Error("Fingerprint frame unavailable");
+      }
+      const uniqueContextId = await contexts.wait(id, frameId);
+      ensureOpen();
+      if (id && !children.has(id)) throw new Error("Fingerprint child target detached");
+      params = { ...params, uniqueContextId };
+    }
     let timer;
     try {
       return await Promise.race([wc.debugger.sendCommand(method, params, id), new Promise((_, reject) => {
@@ -221,15 +237,21 @@ async function applyFingerprint(wc, fp, { onFailure = () => {}, isClosing = () =
     await autoAttach(id);
     await send("Runtime.runIfWaitingForDebugger", {}, id);
   }
-  wc.debugger.on?.("message", (_event, method, params) => {
-    if (method === "Target.detachedFromTarget") { children.delete(params.sessionId); return; }
+  wc.debugger.on?.("message", (_event, method, params, id) => {
+    contexts.update(method, params, id);
+    if (method === "Target.detachedFromTarget") {
+      children.delete(params.sessionId); pageChildren.delete(params.sessionId);
+      contexts.close(params.sessionId); return;
+    }
     if (method !== "Target.attachedToTarget") return;
     children.add(params.sessionId);
+    if (["page", "iframe"].includes(params.targetInfo.type)) pageChildren.add(params.sessionId);
     void configureChild(params.sessionId, params.targetInfo.type).catch(() => {
       if (children.has(params.sessionId)) fail();
     });
   });
   wc.debugger.on?.("detach", (_event, reason) => {
+    contexts.dispose();
     // A dead renderer no longer executes site code. Its replacement must go
     // through the normal protected tab creation path, but the other tabs in
     // the profile remain protected and must not be closed with it.
@@ -238,6 +260,7 @@ async function applyFingerprint(wc, fp, { onFailure = () => {}, isClosing = () =
   try {
     await autoAttach();
     await send("Page.enable");
+    await send("Runtime.enable");
     await Promise.all([
       send("Emulation.setUserAgentOverride", userAgentOverride(fp)),
       applyLocale(send, fp.languages[0]),
@@ -254,6 +277,7 @@ async function applyFingerprint(wc, fp, { onFailure = () => {}, isClosing = () =
     ensureOpen();
   } catch {
     stopped = true;
+    contexts.dispose();
     if (!wc.isDestroyed?.() && wc.debugger.isAttached()) wc.debugger.detach();
     throw new Error("Unable to apply fingerprint before navigation");
   }

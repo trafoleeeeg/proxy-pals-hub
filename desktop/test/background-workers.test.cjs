@@ -264,6 +264,7 @@ test("retired service worker must be destroyed, not merely detached, before traf
   f.protocol.emit("message", "Inspector.targetCrashed", {}, "sw");
   f.protocol.emit("message", "Target.detachedFromTarget", { sessionId: "sw" });
   await f.drain();
+  assert.ok(f.calls.some(c => c.method === "Target.detachFromTarget" && c.args.sessionId === "sw"), "release the old host so wake uses a new startup pause");
   assert.equal(a.protection.isActive(), false);
   assert.equal(b.protection.isActive(), true);
   f.protocol.emit("message", "Target.targetDestroyed", { targetId: "target-sw" });

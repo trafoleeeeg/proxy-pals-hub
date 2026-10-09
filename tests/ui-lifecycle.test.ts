@@ -37,6 +37,46 @@ function fixture(running: RunningProfile[] = []) {
 }
 
 describe("desktop profile lifecycle", () => {
+  test("unchanged cookies skip upload but continue heartbeat and lost-response proof reconciliation", async () => {
+    const f = fixture([{ profileId: "a", name: "A", lockToken: "lease-a" }]);
+    const calls: string[] = [];
+    f.bridge.reconcileProfileCookieSave = async () => { calls.push("proof"); return { ok: true, applied: true }; };
+    f.api.heartbeat = async key => { expect(key.cookieSaveProtocol).toBe(1); calls.push("heartbeat"); return { cookieSaveProof: { saveId: "durable-B", cookieHash: "a".repeat(64), cookiesUpdatedAt: "2026-10-10T01:00:00Z" } }; };
+    f.bridge.profileCookies = async () => { calls.push("snapshot"); return { ok: true, profileId: "a", lockToken: "lease-a", cookies: "[]", unchanged: true }; };
+    await f.controller.restore(); await f.controller.sync();
+    expect(calls).toEqual(["heartbeat", "proof", "snapshot"]);
+    expect(f.state.saves).toHaveLength(0);
+    expect(f.controller.getSnapshot().errors.a).toBeUndefined();
+  });
+
+  test("lost save response rebases only from native durable proof and retries a fresh C snapshot once", async () => {
+    const f = fixture([{ profileId: "a", name: "A", lockToken: "lease-a" }]);
+    let reads = 0, writes = 0;
+    const hashes = ["a".repeat(64), "b".repeat(64)];
+    const proofs: string[] = [];
+    f.bridge.reconcileProfileCookieSave = async data => { proofs.push(data.proof.saveId); return { ok: true, applied: true }; };
+    f.bridge.profileCookies = async () => ({ ok: true, profileId: "a", cookies: ++reads === 1 ? "B" : "C", lockToken: "lease-a", snapshotId: "snapshot-" + reads, baseRevision: reads === 1 ? "2026-01-01T00:00:00Z" : "2026-02-01T00:00:00Z" });
+    f.api.save = async data => { writes++; expect(data.saveId).toBe("snapshot-" + writes); return { ok: writes === 2, conflict: writes === 1,
+      proof: { saveId: writes === 1 ? "prior-durable-B" : data.saveId, cookieHash: hashes[writes - 1], cookiesUpdatedAt: "2026-02-01T00:00:00Z" } }; };
+    await f.controller.restore(); await f.controller.sync();
+    expect(proofs).toEqual(["prior-durable-B", "snapshot-2"]);
+    expect(writes).toBe(2); expect(reads).toBe(2);
+    expect(f.controller.getSnapshot().errors.a).toBeUndefined();
+    expect(JSON.stringify(f.controller.getSnapshot())).not.toContain("prior-durable-B");
+  });
+
+  test("foreign or failed durable receipt never permits stale retry or closes a healthy native profile", async () => {
+    for (const response of [null, { ok: false, conflict: true, proof: null }, { ok: false, conflict: true, proof: { saveId: "foreign", cookieHash: "a".repeat(64), cookiesUpdatedAt: "2026-02-01T00:00:00Z" } }]) {
+      const f = fixture([{ profileId: "a", name: "A", lockToken: "lease-a" }]); let saves = 0;
+      f.bridge.reconcileProfileCookieSave = async () => ({ ok: true, applied: false });
+      f.bridge.profileCookies = async () => ({ ok: true, profileId: "a", cookies: "C", lockToken: "lease-a", snapshotId: "durable-C", baseRevision: null });
+      f.api.save = async () => { saves++; return response; };
+      await f.controller.restore(); await f.controller.sync();
+      expect(saves).toBe(1); expect(f.state.closeCalls).toHaveLength(0);
+      expect(f.controller.getSnapshot().errors.a).toBeDefined();
+    }
+  });
+
   test("cookie conflict releases its lease and offers metadata-only explicit recovery", async () => {
     const f = fixture();
     const receiptId = "10000000-0000-4000-8000-000000000009";

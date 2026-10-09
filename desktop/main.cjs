@@ -5,7 +5,7 @@ const { initializeBackgroundWorkers, allowBackgroundWorkers } = require("./runti
 const path = require("node:path");
 const { autoUpdater } = require("electron-updater");
 const {
-  launchProfileWindow, closeProfileWindow, snapshotProfileCookies, acknowledgeProfileCookies, listCookieRecoveryBackups,
+  launchProfileWindow, closeProfileWindow, snapshotProfileCookies, acknowledgeProfileCookies, reconcileProfileCookieSave, listCookieRecoveryBackups,
   listRunningProfiles, closeAllProfiles, refreshExtensions, extensionStore,
   applyBrowserSettings, applyBookmarkDefaults,
 } = require("./launcher.cjs");
@@ -139,14 +139,15 @@ handle("umbra:close-profile", async (id) => {
   const snapshot = await closeProfileWindow(profileId(id));
   return { ok: true, ...snapshot };
 });
-handle("umbra:profile-cookies", async (id) => {
-  const snapshot = await snapshotProfileCookies(profileId(id));
+handle("umbra:profile-cookies", async (id, cookieSaveProtocol) => {
+  const snapshot = await snapshotProfileCookies(profileId(id), cookieSaveProtocol);
   return { ok: true, cookies: null, ...snapshot };
 });
 handle("umbra:acknowledge-profile-cookies", async (payload) => {
   profileId(payload?.profileId);
   return { ok: true, applied: await acknowledgeProfileCookies(payload) };
 });
+handle("umbra:reconcile-profile-cookie-save", async payload => ({ ok: true, applied: await reconcileProfileCookieSave(payload) }));
 handle("umbra:list-running-profiles", () => ({ ok: true, profiles: listRunningProfiles() }));
 handle("umbra:browser-settings-push", async (settings) => ({ ok: true, applied: await applyBrowserSettings(settings) }));
 handle("umbra:bookmark-defaults-push", async (settings) => ({ ok: true, applied: await applyBookmarkDefaults(settings) }));

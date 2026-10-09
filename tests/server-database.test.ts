@@ -65,6 +65,51 @@ beforeAll(async () => {
 afterAll(async () => { await db?.close(); });
 
 describe("real migrations and RLS", () => {
+  test("cookie save lineage is atomic, idempotent and compare-and-swap cannot overwrite a newer save", async () => {
+    const id = crypto.randomUUID(), saveId = crypto.randomUUID(), hash = "a".repeat(64);
+    await db.query("insert into public.browser_profiles(id, team_id, name, cookies_enc) values ($1, $2, 'Lineage', 'encrypted-A')", [id, team]);
+    type Result = { ok: boolean; conflict?: boolean; cookiesUpdatedAt: string; proof: { saveId: string; cookieHash: string; cookiesUpdatedAt: string } | null };
+    const lease = (await asUser<{ value: { lockToken: string } }>(owner, "select public.acquire_profile_lease($1, 'lineage-device') as value", [id]))[0]!.value;
+    const base = (await db.query<{ cookies_updated_at: string }>("select cookies_updated_at from public.browser_profiles where id = $1", [id])).rows[0]!.cookies_updated_at;
+    const save = async (identity: string, expected: string | null, digest = hash, cipher = "encrypted-B") =>
+      (await asUser<{ value: Result }>(owner, "select public.save_profile_cookie_checkpoint($1, $2, 'lineage-device', $3, $4, $5, $6) as value", [id, lease.lockToken, identity, expected ? new Date(expected).toISOString() : null, digest, cipher]))[0]!.value;
+    const saved = await save(saveId, base);
+    expect(saved.ok).toBe(true);
+    expect(saved.proof?.saveId).toBe(saveId);
+    // Re-encryption/retry does not change revision or ciphertext after lost response.
+    expect(await save(saveId, base, hash, "retry-cipher-random-nonce")).toEqual(saved);
+    expect((await db.query<{ cookies_enc: string }>("select cookies_enc from public.browser_profiles where id = $1", [id])).rows[0]!.cookies_enc).toBe("encrypted-B");
+    await expect(save(saveId, base, "b".repeat(64))).rejects.toThrow("Invalid cookie save identity");
+    const stale = await save(crypto.randomUUID(), base, "c".repeat(64), "must-not-overwrite");
+    expect(stale.ok).toBe(false); expect(stale.conflict).toBe(true); expect(stale.proof).toEqual(saved.proof);
+    // Read proof under a newly acquired lease after the original client died.
+    await asUser(owner, "select public.force_profile_unlock($1)", [id]);
+    const restarted = (await asUser<{ value: { lockToken: string } }>(owner, "select public.acquire_profile_lease($1, 'restart-device') as value", [id]))[0]!.value;
+    const readProof = async () => (await asUser<{ value: { proof: Result["proof"] } }>(owner, "select public.get_profile_cookie_save_proof($1, $2, 'restart-device') as value", [id, restarted.lockToken]))[0]!.value.proof;
+    expect(await readProof()).toEqual(saved.proof);
+    await asUser(owner, "select public.mutate_profile_lease($1, $2, 'save', 'legacy-independent-save', 'restart-device')", [id, restarted.lockToken]);
+    expect(await readProof()).toBeNull();
+    await asUser(owner, "select public.mutate_profile_lease($1, $2, 'close', null, 'restart-device')", [id, restarted.lockToken]);
+    await asUser(owner, "select public.import_profile_cookies($1, 'independent-import')", [id]);
+    expect((await db.query("select * from private.profile_cookie_save_proofs where profile_id = $1", [id])).rows).toHaveLength(0);
+    await db.query("delete from public.browser_profiles where id = $1", [id]);
+  });
+
+  test("cookie save proof never bypasses private-table, user, token, device, expiry or revoked access checks", async () => {
+    const id = crypto.randomUUID();
+    await db.query("insert into public.browser_profiles(id, team_id, name) values ($1, $2, 'Lineage security')", [id, team]);
+    const lease = (await asUser<{ value: { lockToken: string } }>(owner, "select public.acquire_profile_lease($1, 'device') as value", [id]))[0]!.value;
+    await expect(asUser(owner, "select * from private.profile_cookie_save_proofs")).rejects.toThrow("permission denied");
+    await expect(asUser(outsider, "select public.get_profile_cookie_save_proof($1, $2, 'device')", [id, lease.lockToken])).rejects.toThrow("No profile access");
+    await expect(asUser(owner, "select public.get_profile_cookie_save_proof($1, $2, 'other')", [id, lease.lockToken])).rejects.toThrow("Session lease lost");
+    await expect(asUser(owner, "select public.get_profile_cookie_save_proof($1, $2, 'device')", [id, crypto.randomUUID()])).rejects.toThrow("Session lease lost");
+    await expect(db.transaction(async tx => { await tx.exec("set local role anon"); await tx.query("select public.get_profile_cookie_save_proof($1, $2, 'device')", [id, lease.lockToken]); })).rejects.toThrow("permission denied");
+    await db.query("update public.profile_locks set expires_at = now() - interval '1 minute' where profile_id = $1", [id]);
+    await expect(asUser(owner, "select public.save_profile_cookie_checkpoint($1, $2, 'device', $3, null, $4, 'cipher')", [id, lease.lockToken, crypto.randomUUID(), "a".repeat(64)])).rejects.toThrow("Session lease lost");
+    await asUser(owner, "select public.force_profile_unlock($1)", [id]);
+    await db.query("delete from public.browser_profiles where id = $1", [id]);
+  });
+
   test("an employee can create and immediately return profiles only in an authorized folder", async () => {
     const employee = crypto.randomUUID();
     const folder = "Create regression " + employee;

@@ -75,9 +75,14 @@ export const bulkDeleteSchema = z.object({ teamId: uuidSchema, ids: profileIdsSc
 export const cookiesTextSchema = z.string().max(5_000_000);
 export const importCookiesSchema = z.object({ profileId: uuidSchema, text: cookiesTextSchema }).strict();
 const deviceId = text(200).trim().min(1);
-export const launchSchema = z.object({ profileId: uuidSchema, device: text(200).optional(), deviceId: deviceId.optional() }).strict();
+export const launchSchema = z.object({ profileId: uuidSchema, device: text(200).optional(), deviceId: deviceId.optional(), cookieSaveProtocol: z.literal(1).optional() }).strict();
 export const leaseSchema = z.object({ profileId: uuidSchema, lockToken: uuidSchema.optional(), deviceId: deviceId.optional() }).strict();
-export const saveSessionSchema = leaseSchema.extend({ cookies: cookiesTextSchema });
+export const heartbeatSchema = leaseSchema.extend({ cookieSaveProtocol: z.literal(1).optional() });
+export const saveSessionSchema = leaseSchema.extend({ cookies: cookiesTextSchema,
+  saveId: uuidSchema.optional(), baseRevision: z.string().datetime({ offset: true }).nullable().optional(),
+}).superRefine((data, context) => {
+  if ((data.saveId !== undefined) !== (data.baseRevision !== undefined)) context.addIssue({ code: z.ZodIssueCode.custom, message: "Cookie save identity and base must be supplied together" });
+});
 export const closeSessionSchema = leaseSchema.extend({ cookies: cookiesTextSchema.optional() });
 export const workspaceSchema = z.object({ teamId: uuidSchema.optional() }).strict().optional();
 export const inviteSchema = z.object({ teamId: uuidSchema, email: z.string().trim().toLowerCase().email().max(254) }).strict();

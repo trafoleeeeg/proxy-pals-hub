@@ -13,11 +13,13 @@ function fixture() {
     rpc: [] as { name: string; args: Record<string, unknown> }[],
     filters: [] as [string, string, unknown][],
     failRelease: false, failAudit: false,
+    proof: null as { saveId: string; cookieHash: string; cookiesUpdatedAt: string } | null,
   };
   const client = {
     rpc: async (name: string, args: Record<string, unknown>) => {
       state.rpc.push({ name, args });
       if (name === "get_team_bookmark_defaults") return { data: { teamId, bookmarks: [], bookmarkBarVisible: true, revision: 0, updatedAt: null }, error: null };
+      if (name === "get_profile_cookie_save_proof") return { data: { proof: state.proof }, error: null };
       if (name === "acquire_profile_lease") return { data: { lockToken: token, expiresAt: "2026-09-15T00:05:00Z" }, error: null };
       return state.failRelease ? { data: null, error: { message: "lease-write-failed" } } : { data: {}, error: null };
     },
@@ -38,6 +40,15 @@ function fixture() {
 }
 
 describe("server launch transaction boundary", () => {
+  test("only a capable client receives a proof tied to exactly the returned cookie revision", async () => {
+    const f = fixture();
+    f.state.proof = { saveId: crypto.randomUUID(), cookieHash: "a".repeat(64), cookiesUpdatedAt: "2026-09-15T00:00:00.000000+00:00" };
+    const result = await prepareSessionLaunch(f.context, { profileId: id, deviceId: "desktop-a", cookieSaveProtocol: 1 }, f.decrypt);
+    expect(result.cookieSaveProof).toEqual(f.state.proof);
+    expect(f.state.rpc.find(call => call.name === "get_profile_cookie_save_proof")?.args).toEqual({ _profile_id: id, _lock_token: token, _device_id: "desktop-a" });
+    f.state.proof.cookiesUpdatedAt = "2026-09-16T00:00:00Z";
+    expect((await prepareSessionLaunch(f.context, { profileId: id, cookieSaveProtocol: 1 }, f.decrypt)).cookieSaveProof).toBeNull();
+  });
   test("launch restores cloud cookies and the encrypted same-team proxy password on another device", async () => {
     const f = fixture();
     const result = await prepareSessionLaunch(f.context, { profileId: id, deviceId: "desktop-a" }, f.decrypt);

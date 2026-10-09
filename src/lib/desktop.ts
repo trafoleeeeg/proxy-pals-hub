@@ -20,7 +20,10 @@ export type LaunchPayload = {
   browserSettings?: import("./browser-settings").BrowserSettings | null;
   bookmarkDefaults?: import("./bookmark-defaults").BookmarkDefaults;
   cookieRecovery?: CookieRecoveryRequest;
+  cookieSaveProof?: CookieSaveProof | null;
 };
+
+export type CookieSaveProof = { saveId: string; cookieHash: string; cookiesUpdatedAt: string };
 
 export type CookieRecoveryRequest = { source: "local" | "cloud"; receiptId?: string; backupId?: string };
 export type CookieVersionSummary = { revision: string | null; count: number; activeCount: number };
@@ -50,7 +53,7 @@ export type RunningProfile = {
 };
 export type InstalledExtension = { id: string; name: string; version: string; source?: "store" | "url"; url?: string };
 
-export type ProfileRuntimeSnapshot = { profileId: string; cookies: string | null; lockToken?: string | null; cookiesUpdatedAt?: string | null; deviceId?: string | null; snapshotId?: string; snapshotRevision?: string | null };
+export type ProfileRuntimeSnapshot = { profileId: string; cookies: string | null; lockToken?: string | null; cookiesUpdatedAt?: string | null; deviceId?: string | null; snapshotId?: string; snapshotRevision?: string | null; baseRevision?: string | null; cookieHash?: string; unchanged?: boolean };
 export type ProfileCookieAcknowledgement = {
   profileId: string; lockToken: string; snapshotId: string; snapshotRevision: string; cloudRevision: string;
 };
@@ -70,8 +73,9 @@ export type UmbraBridge = {
   pendingProfileClosures: () => Promise<{ ok: boolean; profiles: ProfileClosed[] }>;
   acknowledgeProfileClosure: (snapshotId: string) => Promise<{ ok: boolean }>;
   archiveProfileClosure: (snapshotId: string) => Promise<{ ok: boolean }>;
-  profileCookies: (profileId: string) => Promise<{ ok: boolean; cookies: string | null } & Partial<ProfileRuntimeSnapshot>>;
+  profileCookies: (profileId: string, cookieSaveProtocol?: 1) => Promise<{ ok: boolean; cookies: string | null } & Partial<ProfileRuntimeSnapshot>>;
   acknowledgeProfileCookies?: (payload: ProfileCookieAcknowledgement) => Promise<{ ok: boolean; applied: boolean; error?: string }>;
+  reconcileProfileCookieSave?: (payload: { profileId: string; lockToken: string; proof: CookieSaveProof }) => Promise<{ ok: boolean; applied: boolean; error?: string }>;
   onProfileClosed: (cb: (p: ProfileClosed) => void) => () => void;
   pushBrowserSettings: (settings: import("./browser-settings").BrowserSettings) => Promise<{ ok: boolean; error?: string }>;
   pushBookmarkDefaults?: (settings: import("./bookmark-defaults").BookmarkDefaults) => Promise<{ ok: boolean; error?: string }>;
@@ -160,9 +164,9 @@ function safeLaunchError(error: unknown): string {
     : "Не удалось запустить профиль. Проверьте доступ, блокировку и параметры подключения.";
 }
 export type ProfileSessionApi = {
-  launch: (profileId: string, device: string) => Promise<LaunchPayload>;
-  heartbeat: (key: SessionKey) => Promise<unknown>;
-  save: (data: SessionKey & { cookies: string }) => Promise<unknown>;
+  launch: (profileId: string, device: string, cookieSaveProtocol?: 1) => Promise<LaunchPayload>;
+  heartbeat: (key: SessionKey & { cookieSaveProtocol?: 1 }) => Promise<unknown>;
+  save: (data: SessionKey & { cookies: string; saveId?: string; baseRevision?: string | null }) => Promise<unknown>;
   close: (data: SessionKey & { cookies?: string }) => Promise<unknown>;
 };
 
@@ -286,7 +290,7 @@ export class DesktopProfileLifecycle {
       let payload: LaunchPayload | undefined;
       try {
         if (recovery && !this.bridge.listCookieRecoveryBackups) throw new Error("Обновите клиент Umbra для безопасного восстановления cookies.");
-        payload = { ...await this.api.launch(profileId, this.bridge.platform) };
+        payload = { ...await this.api.launch(profileId, this.bridge.platform, this.bridge.reconcileProfileCookieSave ? 1 : undefined) };
         // Recovery is a one-off explicit choice; never trust a saved preference
         // or server payload to silently select a cookie version on later starts.
         delete payload.cookieRecovery;
@@ -450,22 +454,46 @@ export class DesktopProfileLifecycle {
           const profile = this.sessions.get(id);
           if (!profile) return;
           const key = this.key(profile);
-          const heartbeat = await this.api.heartbeat(key);
+          const heartbeat = await this.api.heartbeat({ ...key, ...(this.bridge.reconcileProfileCookieSave ? { cookieSaveProtocol: 1 as const } : {}) });
           if (terminalClose(heartbeat)) throw heartbeat;
-          const snapshot = await this.bridge.profileCookies(id);
+          if (this.bridge.reconcileProfileCookieSave && heartbeat && typeof heartbeat === "object" && "cookieSaveProof" in heartbeat && heartbeat.cookieSaveProof) {
+            const rebased = await withDesktopTimeout(this.bridge.reconcileProfileCookieSave({ ...key, proof: heartbeat.cookieSaveProof as CookieSaveProof }), "Подтверждение предыдущего сохранения не получено вовремя");
+            if (!rebased.ok) throw new Error("Не удалось проверить предыдущее сохранение cookies");
+          }
+          const snapshot = await this.bridge.profileCookies(id, this.bridge.reconcileProfileCookieSave ? 1 : undefined);
           if (!snapshot.ok || typeof snapshot.cookies !== "string" || snapshot.lockToken !== key.lockToken || (snapshot.profileId && snapshot.profileId !== id)) throw new Error();
           const snapshotRevision = cookieRevision(snapshot.snapshotRevision ?? snapshot.cookiesUpdatedAt);
           if (this.bridge.acknowledgeProfileCookies && (!snapshot.snapshotId || !snapshotRevision)) throw new Error("Приложение не подтвердило локальный снимок cookies");
-          const saved = await this.api.save({ ...key, cookies: snapshot.cookies });
-          if (terminalClose(saved)) throw saved;
-          if (this.bridge.acknowledgeProfileCookies) {
-            const cloudRevision = saved && typeof saved === "object" && "ok" in saved && saved.ok === true && "cookiesUpdatedAt" in saved
-              ? cookieRevision(saved.cookiesUpdatedAt) : null;
-            if (!cloudRevision) throw new Error("Сервер не подтвердил версию сохранённых cookies");
-            const acknowledged = await withDesktopTimeout(this.bridge.acknowledgeProfileCookies({
-              ...key, snapshotId: snapshot.snapshotId!, snapshotRevision: snapshotRevision!, cloudRevision,
-            }), "Приложение не подтвердило сохранение cookies вовремя");
-            if (!acknowledged.ok || !acknowledged.applied) throw new Error("Локальное подтверждение сохранения cookies ожидает повторной синхронизации");
+          if (this.bridge.reconcileProfileCookieSave) {
+            let current = snapshot;
+            for (let attempt = 0; attempt < 2; attempt++) {
+              if (current.unchanged === true) break; // Heartbeat above still enforces access.
+              if (!current.snapshotId || current.baseRevision === undefined) throw new Error("Приложение не подтвердило журнал сохранения cookies");
+              const result = await this.api.save({ ...key, cookies: current.cookies!, saveId: current.snapshotId, baseRevision: current.baseRevision });
+              if (terminalClose(result)) throw result;
+              if (!result || typeof result !== "object" || !("proof" in result) || !result.proof || typeof result.proof !== "object" || !("saveId" in result.proof) || !("cookieHash" in result.proof) || !("cookiesUpdatedAt" in result.proof)) throw new Error("Сервер не подтвердил происхождение сохранённых cookies");
+              const proof = result.proof as CookieSaveProof;
+              const ack = await withDesktopTimeout(this.bridge.reconcileProfileCookieSave({ ...key, proof }), "Приложение не подтвердило сохранение cookies вовремя");
+              if (!ack.ok || !ack.applied) throw new Error("Версия cookies изменилась независимо. Локальные данные сохранены, нужна проверка восстановления.");
+              if ("ok" in result && result.ok === true) break;
+              if (!("conflict" in result) || result.conflict !== true || attempt === 1) throw new Error("Сохранение cookies ожидает повторной синхронизации");
+              // Lost response: rebase only from our own durable receipt, then
+              // save a NEW snapshot once. Never blindly replay a stale version.
+              current = await this.bridge.profileCookies(id, 1);
+              if (!current.ok || typeof current.cookies !== "string" || current.lockToken !== key.lockToken || current.profileId !== id) throw new Error();
+            }
+          } else {
+            const saved = await this.api.save({ ...key, cookies: snapshot.cookies });
+            if (terminalClose(saved)) throw saved;
+            if (this.bridge.acknowledgeProfileCookies) {
+              const cloudRevision = saved && typeof saved === "object" && "ok" in saved && saved.ok === true && "cookiesUpdatedAt" in saved
+                ? cookieRevision(saved.cookiesUpdatedAt) : null;
+              if (!cloudRevision) throw new Error("Сервер не подтвердил версию сохранённых cookies");
+              const acknowledged = await withDesktopTimeout(this.bridge.acknowledgeProfileCookies({
+                ...key, snapshotId: snapshot.snapshotId!, snapshotRevision: snapshotRevision!, cloudRevision,
+              }), "Приложение не подтвердило сохранение cookies вовремя");
+              if (!acknowledged.ok || !acknowledged.applied) throw new Error("Локальное подтверждение сохранения cookies ожидает повторной синхронизации");
+            }
           }
           if (![...this.pending.values()].some((p) => p.profileId === id) && !this.outboxFailures.has(id)) delete this.errors[id];
         } catch (error) {

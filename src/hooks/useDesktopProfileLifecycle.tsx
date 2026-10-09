@@ -45,7 +45,7 @@ export function DesktopProfileProvider({ children }: { children: ReactNode }) {
     const bridge = desktop();
     if (!bridge) { setReady(true); return; }
     const lifecycle = lifecycleRef.current ??= new DesktopProfileLifecycle(bridge, {
-      launch: (profileId, device) => api.current.launch({ data: { profileId, device } }),
+      launch: (profileId, device, cookieSaveProtocol) => api.current.launch({ data: { profileId, device, ...(cookieSaveProtocol ? { cookieSaveProtocol } : {}) } }),
       close: (data) => api.current.close({ data }),
       heartbeat: (data) => api.current.heartbeat({ data }),
       save: (data) => api.current.save({ data }),

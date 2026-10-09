@@ -425,7 +425,7 @@ export function ProxiesPage() {
                     {proxy.rotationStatus === "changing" ? "меняем IP" : proxy.rotationStatus === "error" ? "ошибка смены" : proxy.rotationStatus === "success" ? proxy.rotationPreviousIp ? "смена подтверждена" : "смена не подтверждена" : "готово к смене"}
                   </Badge>
                   {proxy.rotationPreviousIp && <div className="mono mt-1 break-all text-xs text-muted-foreground">Был: {proxy.rotationPreviousIp}</div>}
-                  {proxy.rotationStatus === "success" && proxy.rotationNewIp && <div className="mono break-all text-xs">{proxy.rotationPreviousIp ? "Стал: " : "Исходный IP неизвестен → текущий: "}{proxy.rotationNewIp}</div>}
+                  {proxy.rotationStatus === "success" && proxy.rotationNewIp && <div className="mono break-all text-xs">{proxy.rotationPreviousIp ? "Стал: " : "Исходный IP неизвестен → после запроса: "}{proxy.rotationNewIp}</div>}
                   {proxy.rotationChangedAt && <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground"><Clock3 className="size-3" />{proxy.rotationPreviousIp ? "Последняя смена: " : "Проверка после запроса: "}{proxyTime(proxy.rotationChangedAt)}</div>}
                   {proxy.rotationStatus === "changing" && proxy.rotationRequestedAt && <p className="mt-1 text-xs text-muted-foreground">Запрос: {proxyTime(proxy.rotationRequestedAt)}</p>}
                   {proxy.rotationLastError && <p role="status" className="mt-1 text-xs text-destructive">{proxy.rotationLastError}</p>}

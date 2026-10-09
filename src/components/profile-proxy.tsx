@@ -156,7 +156,7 @@ export function ProfileProxyCell({ proxy, ops, compact = false }: { proxy: Proxy
     proxyAddress(proxy.host, proxy.port),
     shownIp ? `IP ${shownIp}${proxy.last_check_latency_ms != null ? ` · ${proxy.last_check_latency_ms} мс` : ""}` : "IP не проверялся",
     proxy.last_checked_at ? `проверено ${relativeTime(proxy.last_checked_at)}` : "",
-    previousIp ? `был ${previousIp}${newIp ? " → стал " + newIp : ""}` : newIp ? `исходный IP неизвестен → текущий ${newIp}` : "",
+    previousIp ? `был ${previousIp}${newIp ? " → стал " + newIp : ""}` : newIp ? `исходный IP неизвестен → после запроса ${newIp}` : "",
     proxy.rotationChangedAt ? `${previousIp ? "смена IP" : "смена IP не подтверждена · проверено"} ${relativeTime(proxy.rotationChangedAt)}` : "",
     rotating ? "меняем IP, ждём подтверждения" : "",
     error ?? "",
@@ -185,7 +185,7 @@ export function ProfileProxyCell({ proxy, ops, compact = false }: { proxy: Proxy
           : <>меняем IP{proxy.rotationPreviousIp ? <> · был <span className="text-foreground/70">{proxy.rotationPreviousIp}</span></> : ""}…</>
         : previousIp
         ? <>был <span className="text-foreground/70">{previousIp}</span> → стал <span className="text-success">{newIp ?? shownIp ?? "—"}</span></>
-        : proxy.rotationStatus === "success" && newIp ? <span className="text-warning">исходный IP неизвестен → текущий {newIp}</span> : "смены IP не было"}
+        : proxy.rotationStatus === "success" && newIp ? <span className="text-warning">исходный IP неизвестен → после запроса {newIp}</span> : "смены IP не было"}
     </div>
   </div>;
 
@@ -219,7 +219,7 @@ export function ProfileProxyCell({ proxy, ops, compact = false }: { proxy: Proxy
       Был: {proxy.rotationPreviousIp}{proxy.rotationNewIp ? " → стал: " + proxy.rotationNewIp : ""}
     </div>}
     {!proxy.rotationPreviousIp && proxy.rotationStatus === "success" && proxy.rotationNewIp && <div className="mono break-all text-xs text-warning">
-      Исходный IP неизвестен → текущий: {proxy.rotationNewIp}
+      Исходный IP неизвестен → после запроса: {proxy.rotationNewIp}
     </div>}
     {proxy.rotationChangedAt && <div className="flex items-center gap-1 text-xs text-muted-foreground">
       <Clock3 className="size-3" />{proxy.rotationPreviousIp ? "Смена IP" : "Смена IP не подтверждена · проверено"} {relativeTime(proxy.rotationChangedAt)}

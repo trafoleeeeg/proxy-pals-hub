@@ -162,13 +162,48 @@ function userAgentOverride(fp) {
   return result;
 }
 
-async function applyFingerprint(wc, fp, { onFailure = () => {}, isClosing = () => false } = {}) {
+async function prepareFingerprintTarget(wc, { isClosing = () => false, timeout = 4000 } = {}) {
+  const ensureOpen = () => {
+    if (isClosing() || wc.isDestroyed?.()) throw new Error("Fingerprint target is closing");
+  };
+  ensureOpen();
+  // CDP attachment during the initial about:blank navigation can bind the
+  // renderer's DevTools agent twice. Wait for LOCAL blank-page initialization,
+  // not for any remote site, before attaching the debugger.
+  if (!wc.getURL || (wc.getURL() === "about:blank" && !wc.isLoading())) return;
+  if (!["", "about:blank"].includes(wc.getURL())) throw new Error("Fingerprint target is not blank");
+  let timer, destroyed;
+  try {
+    await Promise.race([
+      wc.loadURL("about:blank"),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("Fingerprint blank initialization timed out")), timeout);
+        timer.unref?.();
+        destroyed = () => reject(new Error("Fingerprint target is closing"));
+        wc.once?.("destroyed", destroyed);
+      }),
+    ]);
+    ensureOpen();
+  } finally {
+    clearTimeout(timer);
+    if (destroyed) wc.removeListener?.("destroyed", destroyed);
+  }
+}
+
+async function applyFingerprint(wc, fp, { onFailure = () => {}, onDiagnostic = () => {}, isClosing = () => false } = {}) {
+  const diagnose = (reason, stage = "context", targetType = "page") => {
+    if (isClosing() || wc.isDestroyed?.()) return;
+    try { onDiagnostic({ reason, stage, targetType }); } catch { /* Never alter protection. */ }
+  };
   const ensureOpen = () => {
     // Accessing webContents.debugger after native destruction can DCHECK in
     // Electron, not merely reject a JS promise. Check before every CDP call,
     // including continuations of setup that was started before Ctrl+W.
     if (isClosing() || wc.isDestroyed?.()) throw new Error("Fingerprint target is closing");
   };
+  ensureOpen();
+  try { await prepareFingerprintTarget(wc, { isClosing }); }
+  catch (error) { diagnose("blank-init-failed", "blank-init"); throw error; }
   ensureOpen();
   wc.setUserAgent(fp.userAgent);
   wc.setWebRTCIPHandlingPolicy(WEBRTC_POLICY);
@@ -180,9 +215,10 @@ async function applyFingerprint(wc, fp, { onFailure = () => {}, isClosing = () =
   const pageChildren = new Set();
   const contexts = require("./execution-contexts.cjs").executionContexts();
   wc.once?.("destroyed", () => contexts.dispose());
-  const fail = () => {
+  const fail = (reason = "command-failed", stage = "context", targetType = "page") => {
     if (stopped || isClosing() || wc.isDestroyed?.()) return;
     stopped = true;
+    diagnose(reason, stage, targetType);
     // Never leave a running renderer behind when protection disappears.
     wc.session?.webRequest?.onBeforeRequest((_details, callback) => callback({ cancel: true }));
     void wc.session?.closeAllConnections?.().catch(() => {});
@@ -191,6 +227,12 @@ async function applyFingerprint(wc, fp, { onFailure = () => {}, isClosing = () =
     onFailure("Защита страницы недоступна, профиль остановлен");
   };
   const send = async (method, params, id) => {
+    try { return await sendCommand(method, params, id); }
+    catch (error) {
+      throw Object.assign(new Error("Fingerprint protection command failed"), { privacyStage: error?.privacyStage || method });
+    }
+  };
+  const sendCommand = async (method, params, id) => {
     ensureOpen();
     if (id && !children.has(id)) throw new Error("Fingerprint child target detached");
     if (method === "Runtime.evaluate") {
@@ -246,8 +288,8 @@ async function applyFingerprint(wc, fp, { onFailure = () => {}, isClosing = () =
     if (method !== "Target.attachedToTarget") return;
     children.add(params.sessionId);
     if (["page", "iframe"].includes(params.targetInfo.type)) pageChildren.add(params.sessionId);
-    void configureChild(params.sessionId, params.targetInfo.type).catch(() => {
-      if (children.has(params.sessionId)) fail();
+    void configureChild(params.sessionId, params.targetInfo.type).catch(error => {
+      if (children.has(params.sessionId)) fail("command-failed", error?.privacyStage, params.targetInfo.type);
     });
   });
   wc.debugger.on?.("detach", (_event, reason) => {
@@ -255,7 +297,7 @@ async function applyFingerprint(wc, fp, { onFailure = () => {}, isClosing = () =
     // A dead renderer no longer executes site code. Its replacement must go
     // through the normal protected tab creation path, but the other tabs in
     // the profile remain protected and must not be closed with it.
-    if (reason !== "target closed" && reason !== "render process gone") fail();
+    if (reason !== "target closed" && reason !== "render process gone") fail("debugger-detached");
   });
   try {
     await autoAttach();
@@ -275,8 +317,9 @@ async function applyFingerprint(wc, fp, { onFailure = () => {}, isClosing = () =
       send("Page.addScriptToEvaluateOnNewDocument", { source }),
     ]);
     ensureOpen();
-  } catch {
+  } catch (error) {
     stopped = true;
+    diagnose("setup-failed", error?.privacyStage);
     contexts.dispose();
     if (!wc.isDestroyed?.() && wc.debugger.isAttached()) wc.debugger.detach();
     throw new Error("Unable to apply fingerprint before navigation");
@@ -314,4 +357,4 @@ async function applyLocale(send, locale, id) {
   }
 }
 
-module.exports = { normalizeFingerprint, applyNativeScreenMetrics, applyNativeHardwareMetrics, applyFingerprint, userAgentOverride, installSessionPrivacy, hasCapability, applyLocale };
+module.exports = { normalizeFingerprint, applyNativeScreenMetrics, applyNativeHardwareMetrics, prepareFingerprintTarget, applyFingerprint, userAgentOverride, installSessionPrivacy, hasCapability, applyLocale };

@@ -115,6 +115,18 @@ function harness() {
 
 const payload = () => ({ profileId: ID, deviceId: "test-device", name: "Test", lockToken: "test-lock-token", fingerprint: FP, cookies: "[]", cookiesUpdatedAt: null, proxy: null, startUrl: "https://example.test" });
 
+test("page protection failure saves the profile and reports why the window was closed", async () => {
+  const h = harness();
+  const notices = [];
+  h.electron.app.emit = (event, details) => { if (event === "umbra:profile-protection-failed") notices.push(details); };
+  await h.runtime.launchProfileWindow(payload());
+  h.windows[0].webContents.debugger.emit("detach", {}, "replaced with devtools");
+  await h.runtime.closeProfileWindow(ID);
+  assert.deepEqual(notices, [{ saved: true, kind: "page" }]);
+  assert.equal(h.records.has(ID), true, "durable cookie snapshot precedes the notification");
+  assert.equal(h.runtime.getRunningProfile(ID), null);
+});
+
 test("native launch returns a metadata-only conflict and preserves the checkpoint before any page opens", async () => {
   const h = harness();
   const old = "2026-01-01T00:00:00.000Z", next = "2026-02-01T00:00:00.000Z";

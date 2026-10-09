@@ -285,10 +285,11 @@ else {
     // Wake the control panel only. Do not reload/close working profile tabs or
     // replay profile/proxy mutations when the laptop resumes.
     powerMonitor.on("resume", () => send("umbra:panel-resume"));
-    app.on("umbra:profile-protection-failed", ({ saved }) => {
+    app.on("umbra:profile-protection-failed", ({ saved, kind }) => {
+      const protection = kind === "page" ? "Защита страницы" : "Защита фонового процесса";
       const body = saved
-        ? "Защита фонового процесса потеряна. Профиль остановлен, локальные данные сохранены. Откройте профиль снова."
-        : "Защита фонового процесса потеряна. Сеть профиля заблокирована, но сохранение не завершено. Повторите закрытие профиля; не завершайте Umbra принудительно.";
+        ? `${protection} потеряна. Профиль остановлен, локальные данные сохранены. Откройте профиль снова.`
+        : `${protection} потеряна. Сеть профиля заблокирована, но сохранение не завершено. Повторите закрытие профиля; не завершайте Umbra принудительно.`;
       if (Notification.isSupported()) {
         const notice = new Notification({ title: "Umbra — защитная остановка профиля", body });
         notice.on("click", () => mainWindow?.focus());

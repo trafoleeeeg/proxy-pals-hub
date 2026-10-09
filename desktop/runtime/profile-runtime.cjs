@@ -637,21 +637,18 @@ function createProfileRuntime(electron, options = {}) {
       return { action: "deny" };
     });
     try {
-      // Отпечаток применяется к пустому рендереру до любой удалённой навигации.
-      // Полная загрузка about:blank больше не ожидается: страница лишь
-      // запускается без await, чтобы рендерер существовал для CDP. Если
-      // отладчик недоступен, запуск отклоняется. Каждый CDP-запрос ограничен
-      // таймаутом; второй контроллер поверх незавершённого не запускается.
-      try {
-        if (win.webContents.getURL() === "" && !win.webContents.isLoading()) {
-          win.webContents.loadURL("about:blank").catch(() => {});
-        }
-      } catch { /* рендерер появится при первой навигации */ }
-      const fingerprintOptions = { isClosing: () => entry.closingRequested || win.closing || win.isDestroyed(), onFailure: () => {
+      // Fingerprint setup first completes the bounded LOCAL about:blank
+      // initialization, then attaches CDP, before any remote navigation.
+      // Starting navigation and attachment concurrently can bind DevTools twice.
+      const fingerprintOptions = { isClosing: () => entry.closingRequested || win.closing || win.isDestroyed(),
+        onDiagnostic: details => recordProcessEvent(app?.getPath?.("userData"), "page-protection", details), onFailure: () => {
         if (entry.closingRequested || win.closing || win.isDestroyed()) return;
         entry.lastError = "Защита страницы недоступна, профиль остановлен";
         blockSession(entry.ses);
-        void closeProfileWindow(entry.profileId).catch(() => {});
+        void closeProfileWindow(entry.profileId).then(
+          () => app?.emit?.("umbra:profile-protection-failed", { saved: true, kind: "page" }),
+          () => app?.emit?.("umbra:profile-protection-failed", { saved: false, kind: "page" }),
+        );
       } };
       entry.fingerprintDiagnostics = await configureFingerprint(win.webContents, entry.fp, fingerprintOptions);
       if (entry.closingRequested) throw new Error("Profile is closing");

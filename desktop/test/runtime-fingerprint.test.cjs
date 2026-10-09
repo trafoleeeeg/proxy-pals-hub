@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const vm = require("node:vm");
-const { normalizeFingerprint, applyNativeScreenMetrics, applyNativeHardwareMetrics, applyFingerprint, userAgentOverride, applyLocale, installSessionPrivacy } = require("../runtime/fingerprint.cjs");
+const { normalizeFingerprint, applyNativeScreenMetrics, applyNativeHardwareMetrics, prepareFingerprintTarget, applyFingerprint, userAgentOverride, applyLocale, installSessionPrivacy } = require("../runtime/fingerprint.cjs");
 
 const WINDOWS_UA = "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
 const CHROME = "150.0.1234.56";
@@ -142,6 +142,40 @@ function webContents({ policy = "disable_non_proxied_udp", reject = null, announ
   };
 }
 
+test("a fresh blank renderer must finish local initialization before any debugger attachment", async () => {
+  const wc = webContents();
+  let ready = false, release;
+  const loading = new Promise(resolve => { release = () => { ready = true; resolve(); }; });
+  wc.getURL = () => ready ? "about:blank" : "";
+  wc.isLoading = () => !ready;
+  wc.loadURL = url => { assert.equal(url, "about:blank"); return loading; };
+  let attached = false;
+  wc.debugger.attach = () => { assert.equal(ready, true); attached = true; };
+  const pending = applyFingerprint(wc, fingerprint());
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(attached, false);
+  assert.equal(wc.commands.length, 0);
+  release(); await pending;
+  assert.equal(attached, true);
+});
+
+test("local initialization is bounded and cannot attach after cancellation", async () => {
+  const wc = webContents();
+  wc.getURL = () => "";
+  wc.isLoading = () => false;
+  wc.loadURL = () => new Promise(() => {});
+  const keepAlive = setTimeout(() => {}, 100);
+  try { await assert.rejects(prepareFingerprintTarget(wc, { timeout: 20 }), /timed out/); }
+  finally { clearTimeout(keepAlive); }
+  let release, closing = false;
+  wc.loadURL = () => new Promise(resolve => { release = resolve; });
+  const pending = applyFingerprint(wc, fingerprint(), { isClosing: () => closing });
+  closing = true; release();
+  await assert.rejects(pending, /closing/);
+  assert.equal(wc.commands.length, 0);
+  assert.equal(wc.detached, false);
+});
+
 test("locale verification waits for the real main-world context instead of evaluating a provisional frame", async () => {
   const wc = webContents({ reject: "Emulation.setLocaleOverride", announceContext: false });
   const pending = applyFingerprint(wc, fingerprint());
@@ -182,6 +216,14 @@ test("closing the debugger while locale waits never sends a default-context eval
   wc.debugger.emit("detach", {}, "target closed");
   await assert.rejects(pending, /Unable to apply fingerprint before navigation/);
   assert.equal(wc.commands.some(c => c.command === "Runtime.evaluate"), false);
+});
+
+test("page diagnostics report the rejected command even when the callback throws", async () => {
+  const wc = webContents({ reject: "Emulation.setHardwareConcurrencyOverride" });
+  const details = [];
+  await assert.rejects(applyFingerprint(wc, fingerprint(), { onDiagnostic: value => { details.push(value); throw new Error("ignored"); } }), /Unable to apply fingerprint before navigation/);
+  assert.deepEqual(details, [{ reason: "setup-failed", stage: "Emulation.setHardwareConcurrencyOverride", targetType: "page" }]);
+  assert.equal(wc.detached, true);
 });
 
 test("native screen CSS and hardware concurrency preserve viewport size but mask host DPI", async () => {
@@ -264,11 +306,13 @@ test("closing a tab during CDP setup never accesses its destroyed native debugge
   for (const destroyed of [false, true]) {
     const wc = webContents();
     const debug = wc.debugger;
-    let closing = false, release;
+    let closing = false, release, started;
     const gate = new Promise(resolve => { release = resolve; });
+    const firstCommand = new Promise(resolve => { started = resolve; });
     debug.sendCommand = async command => {
       wc.commands.push({ command });
       assert.equal(command, "Target.setAutoAttach", "no later CDP calls after close");
+      started();
       await gate;
     };
     wc.isDestroyed = () => destroyed && closing;
@@ -277,6 +321,7 @@ test("closing a tab during CDP setup never accesses its destroyed native debugge
       return debug;
     } });
     const pending = applyFingerprint(wc, fingerprint(), { isClosing: () => closing });
+    await firstCommand;
     closing = true;
     release();
     await assert.rejects(pending, /Unable to apply fingerprint before navigation/);

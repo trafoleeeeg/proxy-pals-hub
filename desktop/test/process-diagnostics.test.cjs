@@ -11,6 +11,20 @@ function fixture(t) {
   return { directory, file: path.join(directory, "diagnostics", "process-events.jsonl") };
 }
 
+test("page protection diagnostics retain only fixed stage/type/reason, never protocol payloads", t => {
+  const { directory, file } = fixture(t);
+  recordProcessEvent(directory, "page-protection", { reason: "command-failed", stage: "Runtime.evaluate", targetType: "iframe",
+    error: "private-cookie", expression: "private-token", url: "https://private.example" });
+  recordProcessEvent(directory, "page-protection", { reason: "private", stage: "private", targetType: "private" });
+  const raw = fs.readFileSync(file, "utf8");
+  const rows = raw.trim().split("\n").map(JSON.parse);
+  assert.equal(rows[0].reason, "command-failed");
+  assert.equal(rows[0].stage, "Runtime.evaluate");
+  assert.equal(rows[0].targetType, "iframe");
+  for (const key of ["reason", "stage", "targetType"]) assert.equal(rows[1][key], undefined);
+  assert.doesNotMatch(raw, /private|cookie|token|expression|https/);
+});
+
 test("process diagnostics retain crash reason and code without site or session data", (t) => {
   const { directory, file } = fixture(t);
   assert.equal(recordProcessEvent(directory, "renderer-gone", {

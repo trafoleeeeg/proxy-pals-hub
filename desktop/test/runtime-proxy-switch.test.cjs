@@ -28,7 +28,8 @@ function harness(options = {}) {
       Object.assign(this.webContents, {
         id: windows.length + 1,
         setUserAgent() {}, setWebRTCIPHandlingPolicy() {}, getWebRTCIPHandlingPolicy: () => "disable_non_proxied_udp", setWindowOpenHandler() {},
-        stop() {}, setZoomLevel() {}, getURL: () => this.url || "", reload: () => { reloads++; },
+        stop() {}, setZoomLevel() {}, getURL: () => this.url || "", isLoading: () => false,
+        loadURL: async url => { this.url = url; }, reload: () => { reloads++; },
       });
       this.webContents.debugger = new EventEmitter();
       Object.assign(this.webContents.debugger, { attach() {}, isAttached: () => true, detach() {}, sendCommand: async () => {} });

@@ -11,6 +11,7 @@ const EVENTS = new Set([
   "profile-close-phase",
   "profile-cleanup-failed",
   "background-worker",
+  "page-protection",
   "native-crash-capture",
 ]);
 const CLOSE_PHASES = new Set(["begin", "workers", "tabs", "cookies", "outbox", "done", "failed"]);
@@ -30,6 +31,8 @@ const WORKER_REASONS = new Set(["setup-failed", "close-failed", "resume-failed",
 const WORKER_STAGES = new Set(["context", "Inspector.enable", "Runtime.enable", "Emulation.setUserAgentOverride",
   "Emulation.setTimezoneOverride", "Emulation.setLocaleOverride", "Emulation.setHardwareConcurrencyOverride",
   "Runtime.evaluate", "Target.setAutoAttach", "Runtime.runIfWaitingForDebugger"]);
+const PAGE_STAGES = new Set([...WORKER_STAGES, "blank-init", "Page.enable", "Page.getFrameTree",
+  "Network.setUserAgentOverride", "Page.addScriptToEvaluateOnNewDocument", "Emulation.setDeviceMetricsOverride"]);
 
 // This is deliberately an allowlist: never persist URLs, profile names, IPC
 // payloads, command lines, cookies or arbitrary Electron error messages.
@@ -52,6 +55,11 @@ function recordProcessEvent(userData, event, details = {}, options = {}) {
       if (WORKER_STAGES.has(details.stage)) row.stage = details.stage;
       if (["worker", "shared_worker", "service_worker"].includes(details.workerType)) row.workerType = details.workerType;
       if (["stopped", "worker-closed"].includes(details.outcome)) row.outcome = details.outcome;
+    }
+    if (event === "page-protection") {
+      if (["blank-init-failed", "command-failed", "debugger-detached", "setup-failed"].includes(details.reason)) row.reason = details.reason;
+      if (PAGE_STAGES.has(details.stage)) row.stage = details.stage;
+      if (["page", "iframe", "worker"].includes(details.targetType)) row.targetType = details.targetType;
     }
     if (PROCESS_TYPES.has(details.processType)) row.processType = details.processType;
     if (SIGNALS.has(details.signal)) row.signal = details.signal;

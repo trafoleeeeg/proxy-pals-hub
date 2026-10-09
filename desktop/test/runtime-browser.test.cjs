@@ -459,15 +459,22 @@ test("closing a profile bypasses a stalled diagnostics command", async () => {
   h.browser.destroy();
 });
 
-test("profile tabs apply fingerprint without a preliminary about:blank load", () => {
+test("one fingerprint controller owns bounded local readiness before any remote navigation", () => {
   const source = require("node:fs").readFileSync(require.resolve("../runtime/profile-runtime.cjs"), "utf8");
   const block = source.slice(source.indexOf("async function makeWindow"), source.indexOf("function launchProfileWindow"));
   assert.match(block, /await configureFingerprint\(win\.webContents, entry\.fp, fingerprintOptions\)/);
   assert.ok(block.indexOf("await configureFingerprint") < block.indexOf("await navigate(win, url"), "protection precedes remote navigation");
   assert.equal((block.match(/configureFingerprint\(/g) || []).length, 1, "never race two privacy controllers");
-  assert.match(block, /win\.webContents\.loadURL\("about:blank"\)\.catch/);
-  assert.ok(!/await\s+win\.webContents\.loadURL\("about:blank"\)/.test(block),
-    "запуск пустой страницы не должен ожидаться перед отпечатком");
+  // The old fire-and-forget blank navigation caused a DevTools binding race.
+  // Readiness now belongs to the same controller; do not race another load.
+  assert.doesNotMatch(block, /win\.webContents\.loadURL\("about:blank"\)/);
+  const fingerprintSource = require("node:fs").readFileSync(require.resolve("../runtime/fingerprint.cjs"), "utf8");
+  const controller = fingerprintSource.slice(fingerprintSource.indexOf("async function applyFingerprint"));
+  assert.ok(controller.indexOf("await prepareFingerprintTarget") < controller.indexOf("wc.debugger.attach"), "local readiness precedes native attachment");
+  const readiness = fingerprintSource.slice(fingerprintSource.indexOf("async function prepareFingerprintTarget"), fingerprintSource.indexOf("async function applyFingerprint"));
+  assert.match(readiness, /wc\.loadURL\("about:blank"\)/);
+  assert.match(readiness, /Promise\.race/);
+  assert.match(readiness, /setTimeout/);
   assert.match(source, /await Promise\.all\(plan\.slice\(1\)\.map/);
 });
 

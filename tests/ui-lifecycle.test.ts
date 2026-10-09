@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DesktopProfileLifecycle, type LaunchPayload, type ProfileClosed, type ProfileSessionApi, type RunningProfile, type UmbraBridge } from "../src/lib/desktop";
+import { DesktopProfileLifecycle, type LaunchPayload, type ProfileClosed, type ProfileSessionApi, type RunningProfile, type UmbraBridge, type ProfileCookieAcknowledgement } from "../src/lib/desktop";
 
 const payload = (id: string, token = `lease-${id}`): LaunchPayload => ({ profileId: id, name: `Profile ${id}`, fingerprint: {}, proxy: { password: "test-only-password" }, cookies: "test-only-cookies", lockToken: token, cookiesUpdatedAt: "2026-09-15T00:00:00Z" });
 const event = (id: string, token = `lease-${id}`, snapshotId = `snapshot-${token}`): ProfileClosed => ({ profileId: id, lockToken: token, cookies: "[]", snapshotId });
@@ -80,6 +80,68 @@ describe("desktop profile lifecycle", () => {
     expect(f.controller.getSnapshot().running).toEqual([{ profileId: "a", name: "A" }]);
     expect(f.state.heartbeats).toEqual(["restored-lease"]);
     expect(f.state.saves).toEqual(["restored-lease"]);
+  });
+
+  test("autosave acknowledges the exact native snapshot only after a verified server receipt", async () => {
+    const f = fixture([{ profileId: "a", name: "A", lockToken: "lease-a" }]);
+    const acknowledgements: ProfileCookieAcknowledgement[] = [];
+    f.bridge.profileCookies = async () => ({ ok: true, profileId: "a", cookies: "[]", lockToken: "lease-a", snapshotId: "native-snapshot", snapshotRevision: "2026-10-10T01:00:00Z" });
+    f.bridge.acknowledgeProfileCookies = async (receipt) => { acknowledgements.push(receipt); return { ok: true, applied: true }; };
+    let release!: () => void;
+    let entered!: () => void;
+    const saving = new Promise<void>((resolve) => { entered = resolve; });
+    f.api.save = async () => { entered(); await new Promise<void>((resolve) => { release = resolve; }); return { ok: true, cookiesUpdatedAt: "2026-10-10T01:00:01.123456+00:00" }; };
+    await f.controller.restore();
+    const sync = f.controller.sync();
+    await saving;
+    expect(acknowledgements).toHaveLength(0);
+    release(); await sync;
+    expect(acknowledgements).toEqual([{
+      profileId: "a", lockToken: "lease-a", snapshotId: "native-snapshot", snapshotRevision: "2026-10-10T01:00:00.000Z", cloudRevision: "2026-10-10T01:00:01.123Z",
+    }]);
+    expect(f.controller.getSnapshot().errors["a"]).toBeUndefined();
+    const publicState = JSON.stringify(f.controller.getSnapshot());
+    expect(publicState).not.toContain("native-snapshot");
+    expect(publicState).not.toContain("lease-a");
+  });
+
+  test("a missing or rejected save receipt never rebases native cookies", async () => {
+    for (const receipt of [undefined, { ok: false }, { ok: true }, { ok: true, cookiesUpdatedAt: "invalid" }]) {
+      const f = fixture([{ profileId: "a", name: "A", lockToken: "lease-a" }]);
+      let acknowledgements = 0;
+      f.bridge.profileCookies = async () => ({ ok: true, profileId: "a", cookies: "[]", lockToken: "lease-a", snapshotId: "native-snapshot", snapshotRevision: "2026-10-10T01:00:00Z" });
+      f.bridge.acknowledgeProfileCookies = async () => { acknowledgements++; return { ok: true, applied: true }; };
+      f.api.save = async () => receipt;
+      await f.controller.restore(); await f.controller.sync();
+      expect(acknowledgements).toBe(0);
+      expect(f.controller.getSnapshot().errors["a"]).toBeDefined();
+      expect(f.state.running).toHaveLength(1);
+    }
+  });
+
+  test("failed native acknowledgement stays retryable without closing the running profile", async () => {
+    const f = fixture([{ profileId: "a", name: "A", lockToken: "lease-a" }]);
+    let issued = 0;
+    const acknowledgements: string[] = [];
+    f.bridge.profileCookies = async () => ({ ok: true, profileId: "a", cookies: "[]", lockToken: "lease-a", snapshotId: `snapshot-${++issued}`, snapshotRevision: "2026-10-10T01:00:00Z" });
+    f.api.save = async () => ({ ok: true, cookiesUpdatedAt: "2026-10-10T01:00:01Z" });
+    f.bridge.acknowledgeProfileCookies = async (receipt) => { acknowledgements.push(receipt.snapshotId); return { ok: false, applied: false }; };
+    await f.controller.restore(); await f.controller.sync();
+    expect(f.controller.getSnapshot().errors["a"]).toBeDefined();
+    expect(f.state.running).toHaveLength(1);
+    expect(f.state.closeCalls).toHaveLength(0);
+    f.bridge.acknowledgeProfileCookies = async (receipt) => { acknowledgements.push(receipt.snapshotId); return { ok: true, applied: true }; };
+    await f.controller.sync();
+    expect(acknowledgements).toEqual(["snapshot-1", "snapshot-2"]);
+    expect(f.controller.getSnapshot().errors["a"]).toBeUndefined();
+  });
+
+  test("a native snapshot without an acknowledgement identity cannot start a save on the new bridge", async () => {
+    const f = fixture([{ profileId: "a", name: "A", lockToken: "lease-a" }]);
+    f.bridge.acknowledgeProfileCookies = async () => ({ ok: true, applied: true });
+    await f.controller.restore(); await f.controller.sync();
+    expect(f.state.saves).toHaveLength(0);
+    expect(f.controller.getSnapshot().errors["a"]).toBeDefined();
   });
 
   test("launch passes cookies and token without exposing them in public state", async () => {

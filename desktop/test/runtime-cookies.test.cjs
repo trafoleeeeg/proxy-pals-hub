@@ -150,6 +150,38 @@ test("conflicting cloud import cannot overwrite an unclean checkpoint or native 
   assert.equal((await ses.cookies.get({}))[0].value, "native");
 });
 
+test("a saved cloud copy recovers an unacknowledged crash checkpoint by complete contents", async () => {
+  for (const cookies of [[cookie("saved-before-crash"), { ...cookie("second"), name: "second" }], []]) {
+    let local = { cookies, cookiesUpdatedAt: NEW, pending: true, baseRevision: OLD };
+    const cloudRevision = "2026-03-01T00:00:00.123456+00:00";
+    const store = { read: async () => local, write: async (_id, saved, cookiesUpdatedAt, recovery) => { local = { cookies: saved, cookiesUpdatedAt, ...recovery }; } };
+    const result = await initializeCookies(session(), store, {
+      profileId: ID, cookies: JSON.stringify([...cookies].reverse()), cookiesUpdatedAt: cloudRevision,
+    });
+    assert.equal(result.source, "cloud");
+    assert.equal(local.cookiesUpdatedAt, "2026-03-01T00:00:00.123Z");
+    assert.equal(local.baseRevision, local.cookiesUpdatedAt);
+    assert.equal(local.pending, true, "the new running session still needs crash recovery");
+    assert.equal(local.cookies.length, cookies.length);
+  }
+});
+
+test("coincident timestamps and a changed cloud base cannot authorize different cookies", async () => {
+  for (const cookies of [[cookie("cloud")], [], [{ ...cookie("local"), httpOnly: false }]]) {
+    const local = { cookies: [cookie("local")], cookiesUpdatedAt: NEW, pending: true, baseRevision: OLD };
+    const ses = session([cookie("native")]);
+    let writes = 0;
+    const store = { read: async () => local, write: async () => { writes++; } };
+    await assert.rejects(initializeCookies(ses, store, {
+      profileId: ID, cookies: JSON.stringify(cookies), cookiesUpdatedAt: NEW,
+    }), /recovery conflict/);
+    assert.equal(writes, 0);
+    assert.equal(ses.writes.length, 0);
+    assert.equal((await ses.cookies.get({}))[0].value, "native");
+    assert.equal(local.cookies[0].value, "local");
+  }
+});
+
 test("confirmed cloud cookies override local cache while unversioned launches keep local data", async () => {
   let local = { cookies: [cookie("local")], cookiesUpdatedAt: NEW };
   const store = { read: async () => local, write: async (_id, cookies, cookiesUpdatedAt) => { local = { cookies, cookiesUpdatedAt }; } };

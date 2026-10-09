@@ -1,4 +1,5 @@
 const path = require("node:path");
+const { randomUUID } = require("node:crypto");
 const { profileId, startUrl, revision } = require("./validation.cjs");
 const { createProfileBrowser } = require("./browser.cjs");
 const { createRuntimeProxy, blockSession } = require("./proxy.cjs");
@@ -99,8 +100,9 @@ function createProfileRuntime(electron, options = {}) {
     };
   }
 
-  function snapshot(entry) {
+  function snapshot(entry, issueAcknowledgement = false) {
     entry.snapshotQueue = entry.snapshotQueue.catch(() => {}).then(async () => {
+      if (issueAcknowledgement && (profiles.get(entry.profileId) !== entry || entry.state !== "running" || entry.closingRequested)) return null;
       await entry.ses.cookies.flushStore();
       entry.ses.flushStorageData();
       const cookies = await readSessionCookies(entry.ses);
@@ -111,7 +113,16 @@ function createProfileRuntime(electron, options = {}) {
         entry.cookiesUpdatedAt = next;
         entry.cookieSignature = signature;
       }
-      return { profileId: entry.profileId, lockToken: entry.lockToken, deviceId: entry.deviceId, cookies: signature, cookiesUpdatedAt: entry.cookiesUpdatedAt };
+      const result = { profileId: entry.profileId, lockToken: entry.lockToken, deviceId: entry.deviceId, cookies: signature, cookiesUpdatedAt: entry.cookiesUpdatedAt };
+      if (!issueAcknowledgement) return result;
+      const snapshotId = randomUUID();
+      const snapshotRevision = entry.cookiesUpdatedAt;
+      const snapshotSequence = ++entry.cookieSnapshotSequence;
+      entry.issuedCookieSnapshots.set(snapshotId, { revision: snapshotRevision, sequence: snapshotSequence });
+      // Only recent in-flight saves need receipts; repeated reads cannot grow
+      // memory without bound. An expired receipt is rejected without mutation.
+      if (entry.issuedCookieSnapshots.size > 16) entry.issuedCookieSnapshots.delete(entry.issuedCookieSnapshots.keys().next().value);
+      return { ...result, snapshotId, snapshotRevision, snapshotSequence };
     }).catch(() => { throw new Error("Unable to flush encrypted profile cookies"); });
     return entry.snapshotQueue;
   }
@@ -670,6 +681,7 @@ function createProfileRuntime(electron, options = {}) {
       state: "starting", startedAt: new Date().toISOString(), windows: new Set(), pendingWindows: new Set(),
       snapshotQueue: Promise.resolve(), onClosed, closingRequested: false,
       cloudCookieRevision: revision(payload.cookiesUpdatedAt),
+      cookieSnapshotSequence: 0, acknowledgedCookieSequence: 0, issuedCookieSnapshots: new Map(),
     };
     const initialSettings = sanitizeBrowserSettings(payload.browserSettings, id);
     const bookmarkDefaults = payload.bookmarkDefaults && typeof payload.bookmarkDefaults === "object" ? payload.bookmarkDefaults : null;
@@ -816,7 +828,36 @@ function createProfileRuntime(electron, options = {}) {
     const entry = profiles.get(profileId(id));
     if (!entry) return null;
     await entry.startPromise;
-    return snapshot(entry);
+    return snapshot(entry, true);
+  }
+
+  async function acknowledgeProfileCookies(payload) {
+    const id = profileId(payload?.profileId);
+    const snapshotId = profileId(payload?.snapshotId);
+    const snapshotRevision = revision(payload?.snapshotRevision);
+    const cloudRevision = revision(payload?.cloudRevision);
+    if (!snapshotRevision || !cloudRevision || typeof payload?.lockToken !== "string" || !payload.lockToken) throw new Error("Invalid cookie acknowledgement");
+    const entry = profiles.get(id);
+    if (!entry) return false;
+    const valid = () => profiles.get(id) === entry && entry.state === "running" && !entry.closingRequested && entry.lockToken === payload.lockToken;
+    entry.snapshotQueue = entry.snapshotQueue.catch(() => {}).then(async () => {
+      if (!valid()) return false;
+      const issued = entry.issuedCookieSnapshots.get(snapshotId);
+      if (!issued || issued.revision !== snapshotRevision || issued.sequence <= entry.acknowledgedCookieSequence) return false;
+      if (entry.cloudCookieRevision && Date.parse(cloudRevision) < Date.parse(entry.cloudCookieRevision)) return false;
+      const current = await cookieStore().read(id);
+      if (!valid()) return false;
+      if (!current?.pending || current.cookiesUpdatedAt !== entry.cookiesUpdatedAt || canonicalCookies(current.cookies) !== entry.cookieSignature) throw new Error("Cookie checkpoint changed before acknowledgement");
+      // The saved snapshot may already have newer local descendants. Rebase
+      // the current checkpoint without replacing its cookies or local revision.
+      // Serializing with snapshot() also makes later changes use the new base.
+      await cookieStore().write(id, current.cookies, current.cookiesUpdatedAt, { pending: true, baseRevision: cloudRevision });
+      entry.cloudCookieRevision = cloudRevision;
+      entry.acknowledgedCookieSequence = issued.sequence;
+      for (const [key, receipt] of entry.issuedCookieSnapshots) if (receipt.sequence <= issued.sequence) entry.issuedCookieSnapshots.delete(key);
+      return true;
+    });
+    return entry.snapshotQueue;
   }
 
   function closeProfileWindow(id) {
@@ -962,7 +1003,7 @@ function createProfileRuntime(electron, options = {}) {
   }
 
   return {
-    launchProfileWindow, closeProfileWindow, snapshotProfileCookies, closeAllProfiles,
+    launchProfileWindow, closeProfileWindow, snapshotProfileCookies, acknowledgeProfileCookies, closeAllProfiles,
     refreshExtensions, applyBrowserSettings,
     applyBookmarkDefaults: async (value) => {
       if (!value || typeof value.teamId !== "string" || !/^[0-9a-f-]{36}$/i.test(value.teamId)) return false;

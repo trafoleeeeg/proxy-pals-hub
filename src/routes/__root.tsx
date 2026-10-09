@@ -18,6 +18,8 @@ import { PanelConnection } from "@/components/panel-connection";
 import { PanelPainted } from "@/components/panel-painted";
 import { isConnectionUnavailable } from "@/lib/panel-connectivity";
 import { assertPanelRoutesReady } from "@/lib/panel-recovery";
+import { recoverPanelQueries, refreshPanelWorkspace } from "@/lib/panel-query-recovery";
+import { listWorkspaces } from "@/lib/team.functions";
 import "@/lib/desktop";
 
 function NotFoundComponent() {
@@ -170,20 +172,18 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       <PanelPainted />
       <AuthSync queryClient={queryClient} />
-      <PanelConnection recovered={async (signal) => {
-        const predicate = (query: { queryKey: readonly unknown[] }) => query.queryKey[0] !== "authenticated-user";
-        const cancel = () => { void queryClient.cancelQueries({ predicate }); };
-        signal.addEventListener("abort", cancel, { once: true });
-        try {
-          await queryClient.cancelQueries({ predicate });
-          signal.throwIfAborted();
+      <PanelConnection recovered={(signal) => recoverPanelQueries({
+        queryClient, signal,
+        reloadRoutes: async () => {
           await router.invalidate({ sync: true });
-          signal.throwIfAborted();
           assertPanelRoutesReady(router.state.matches);
-          await queryClient.invalidateQueries({ predicate }, { throwOnError: true });
-          signal.throwIfAborted();
-        } finally { signal.removeEventListener("abort", cancel); }
-      }} />
+        },
+        refreshWorkspace: async () => {
+          if (router.state.matches.some((match) => match.routeId === "/_authenticated")) {
+            await refreshPanelWorkspace(queryClient, () => listWorkspaces({}));
+          }
+        },
+      })} />
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <Outlet />
       <Toaster position="top-right" richColors />

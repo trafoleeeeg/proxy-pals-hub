@@ -93,7 +93,12 @@ function harness() {
     },
     cookieStore: {
       read: async (id) => records.get(id),
-      write: async (id, cookies, cookiesUpdatedAt) => { if (snapshotFailure) throw new Error("simulated disk failure"); records.set(id, { cookies, cookiesUpdatedAt }); },
+      write: async (id, cookies, cookiesUpdatedAt, recovery = {}) => { if (snapshotFailure) throw new Error("simulated disk failure"); records.set(id, { cookies, cookiesUpdatedAt, ...recovery }); },
+      markClosed: async (id) => {
+        if (snapshotFailure) throw new Error("simulated disk failure");
+        const record = records.get(id);
+        if (record?.pending) records.set(id, { cookies: record.cookies, cookiesUpdatedAt: record.cookiesUpdatedAt });
+      },
     },
     tabStore: {
       read: async (id) => tabRecords.get(id) || { tabs: [], activeIndex: 0 },
@@ -390,6 +395,108 @@ test("continuous cookie updates cannot starve the encrypted checkpoint", async (
     await new Promise(resolve => setTimeout(resolve, 500));
     assert.equal(h.records.get(ID).cookies[0]?.name, "busy");
   } finally { clearInterval(interval); await h.runtime.closeAllProfiles(); }
+});
+
+const CLOUD_BASE = "2026-01-01T00:00:00.000Z";
+const CLOUD_SAVED = "2026-02-01T00:00:00.000Z";
+const savedCookie = (value) => ({ name: "fixture", value, domain: "example.test", path: "/", session: true });
+const cookieAcknowledgement = (snapshot, cloudRevision = CLOUD_SAVED) => ({
+  profileId: snapshot.profileId, lockToken: snapshot.lockToken, snapshotId: snapshot.snapshotId,
+  snapshotRevision: snapshot.snapshotRevision, cloudRevision,
+});
+
+test("a late cloud acknowledgement rebases the latest checkpoint without losing newer cookies", async (t) => {
+  const h = harness();
+  t.after(() => h.runtime.closeAllProfiles());
+  await h.runtime.launchProfileWindow({ ...payload(), cookiesUpdatedAt: CLOUD_BASE });
+  const ses = h.sessions.get(`persist:profile-${ID}`);
+  ses.cookies.update([savedCookie("sent")]);
+  const sent = await h.runtime.snapshotProfileCookies(ID);
+  ses.cookies.update([savedCookie("changed-during-request")]);
+  const flush = defer();
+  h.setFlushGate(flush);
+  const newerPending = h.runtime.snapshotProfileCookies(ID);
+  await new Promise(resolve => setImmediate(resolve));
+  let acknowledged = false;
+  const acknowledgement = h.runtime.acknowledgeProfileCookies(cookieAcknowledgement(sent)).then(applied => { acknowledged = true; return applied; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(acknowledged, false, "acknowledgement waits behind the in-flight checkpoint");
+  flush.resolve();
+  h.setFlushGate(null);
+  const newer = await newerPending;
+  assert.notEqual(newer.snapshotId, sent.snapshotId);
+  assert.ok(newer.snapshotSequence > sent.snapshotSequence);
+  assert.equal(await acknowledgement, true);
+  assert.equal(h.records.get(ID).cookies[0].value, "changed-during-request");
+  assert.equal(h.records.get(ID).cookiesUpdatedAt, newer.cookiesUpdatedAt);
+  assert.equal(h.records.get(ID).baseRevision, CLOUD_SAVED);
+  assert.equal(h.records.get(ID).pending, true);
+  ses.cookies.update([savedCookie("changed-after-ack")]);
+  await h.runtime.snapshotProfileCookies(ID);
+  assert.equal(h.records.get(ID).cookies[0].value, "changed-after-ack");
+  assert.equal(h.records.get(ID).baseRevision, CLOUD_SAVED, "future checkpoints retain the confirmed cloud base");
+});
+
+test("cookie acknowledgements reject wrong receipts, tokens, revisions and out-of-order replies", async (t) => {
+  const h = harness();
+  t.after(() => h.runtime.closeAllProfiles());
+  await h.runtime.launchProfileWindow({ ...payload(), cookiesUpdatedAt: CLOUD_BASE });
+  const sent = await h.runtime.snapshotProfileCookies(ID);
+  const newer = await h.runtime.snapshotProfileCookies(ID);
+  assert.equal(newer.snapshotRevision, sent.snapshotRevision, "unchanged cookies still get distinct receipt IDs");
+  for (const change of [
+    { lockToken: "another-session" },
+    { snapshotId: "20000000-0000-4000-8000-000000000002" },
+    { snapshotRevision: "2026-01-02T00:00:00.000Z" },
+    { profileId: "20000000-0000-4000-8000-000000000002" },
+    { cloudRevision: "2025-01-01T00:00:00.000Z" },
+  ]) {
+    const before = h.records.get(ID);
+    assert.equal(await h.runtime.acknowledgeProfileCookies({ ...cookieAcknowledgement(sent), ...change }), false);
+    assert.equal(h.records.get(ID), before, "a rejected receipt must not write the checkpoint");
+  }
+  assert.equal(await h.runtime.acknowledgeProfileCookies(cookieAcknowledgement(newer)), true);
+  const confirmed = h.records.get(ID);
+  assert.equal(await h.runtime.acknowledgeProfileCookies(cookieAcknowledgement(sent, "2026-03-01T00:00:00.000Z")), false);
+  assert.equal(await h.runtime.acknowledgeProfileCookies(cookieAcknowledgement(newer)), false, "duplicate acknowledgement is harmless");
+  assert.equal(h.records.get(ID), confirmed);
+});
+
+test("a failed durable acknowledgement keeps the old base and remains retryable", async (t) => {
+  const h = harness();
+  t.after(() => { h.setSnapshotFailure(false); return h.runtime.closeAllProfiles(); });
+  await h.runtime.launchProfileWindow({ ...payload(), cookiesUpdatedAt: CLOUD_BASE });
+  const sent = await h.runtime.snapshotProfileCookies(ID);
+  h.setSnapshotFailure(true);
+  await assert.rejects(h.runtime.acknowledgeProfileCookies(cookieAcknowledgement(sent)), /simulated disk failure/);
+  assert.equal(h.records.get(ID).baseRevision, CLOUD_BASE);
+  h.setSnapshotFailure(false);
+  h.sessions.get(`persist:profile-${ID}`).cookies.update([savedCookie("newer-local")]);
+  const newer = await h.runtime.snapshotProfileCookies(ID);
+  assert.equal(h.records.get(ID).baseRevision, CLOUD_BASE, "failed writes cannot advance the in-memory cloud base");
+  assert.equal(await h.runtime.acknowledgeProfileCookies(cookieAcknowledgement(sent)), true);
+  assert.equal(h.records.get(ID).cookies[0].value, "newer-local");
+  assert.equal(h.records.get(ID).cookiesUpdatedAt, newer.cookiesUpdatedAt);
+  assert.equal(h.records.get(ID).baseRevision, CLOUD_SAVED);
+});
+
+test("closing and a replacement session cannot acknowledge the previous session's cookies", async () => {
+  const h = harness();
+  await h.runtime.launchProfileWindow({ ...payload(), cookiesUpdatedAt: CLOUD_BASE });
+  const sent = await h.runtime.snapshotProfileCookies(ID);
+  const stopped = defer();
+  h.setWorkerStop(() => stopped.promise);
+  const closing = h.runtime.closeProfileWindow(ID);
+  const before = h.records.get(ID);
+  assert.equal(await h.runtime.acknowledgeProfileCookies(cookieAcknowledgement(sent)), false);
+  assert.equal(h.records.get(ID), before);
+  stopped.resolve();
+  await closing;
+  await h.runtime.launchProfileWindow({ ...payload(), lockToken: "replacement-session", cookiesUpdatedAt: CLOUD_BASE });
+  try {
+    assert.equal(await h.runtime.acknowledgeProfileCookies(cookieAcknowledgement(sent)), false);
+    assert.equal(h.records.get(ID).baseRevision, CLOUD_BASE);
+  } finally { await h.runtime.closeAllProfiles(); }
 });
 
 test("crashed renderer debugger rejection or timeout does not block profile close", async () => {

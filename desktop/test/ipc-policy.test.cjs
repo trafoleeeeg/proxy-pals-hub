@@ -38,6 +38,7 @@ test("sandboxed preload loads without requiring package.json and exposes no brid
   const packaged = run("https://proxy-pals-hub.lovable.app", []);
   assert.equal(typeof packaged.checkProxy, "function");
   assert.equal(typeof packaged.launchProfile, "function");
+  assert.equal(typeof packaged.listCookieRecoveryBackups, "function");
   assert.match(fs.readFileSync(path.join(__dirname, "../main.cjs"), "utf8"),
     /const DEFAULT_APP_URL = "https:\/\/proxy-pals-hub\.lovable\.app\/app"/);
   assert.equal(run("https://other.example", []), undefined);

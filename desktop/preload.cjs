@@ -21,6 +21,7 @@ if (window.location.origin === trustedOrigin) contextBridge.exposeInMainWorld("u
   closeProfile: (profileId) => ipcRenderer.invoke("umbra:close-profile", profileId),
   profileCookies: (profileId) => ipcRenderer.invoke("umbra:profile-cookies", profileId),
   acknowledgeProfileCookies: (payload) => ipcRenderer.invoke("umbra:acknowledge-profile-cookies", payload),
+  listCookieRecoveryBackups: (profileId) => ipcRenderer.invoke("umbra:cookie-recovery-backups", profileId),
   listRunningProfiles: () => ipcRenderer.invoke("umbra:list-running-profiles"),
   pendingProfileClosures: () => ipcRenderer.invoke("umbra:pending-profile-closures"),
   acknowledgeProfileClosure: (snapshotId) => ipcRenderer.invoke("umbra:acknowledge-profile-closure", snapshotId),

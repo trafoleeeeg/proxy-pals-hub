@@ -19,7 +19,27 @@ export type LaunchPayload = {
   deviceId?: string;
   browserSettings?: import("./browser-settings").BrowserSettings | null;
   bookmarkDefaults?: import("./bookmark-defaults").BookmarkDefaults;
+  cookieRecovery?: CookieRecoveryRequest;
 };
+
+export type CookieRecoveryRequest = { source: "local" | "cloud"; receiptId?: string; backupId?: string };
+export type CookieVersionSummary = { revision: string | null; count: number; activeCount: number };
+export type CookieRecoverySummary = { receiptId: string; name: string; local: CookieVersionSummary | null; cloud: CookieVersionSummary; changed: boolean };
+export type CookieRecoveryBackup = { backupId: string; createdAt: string; selectedSource: "local" | "cloud"; local: CookieVersionSummary | null; cloud: CookieVersionSummary };
+function validatedRecovery(value: unknown): CookieRecoverySummary | null {
+  if (!value || typeof value !== "object" || !("receiptId" in value) || !("name" in value) || !("local" in value) || !("cloud" in value)) return null;
+  if (typeof value.receiptId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.receiptId) || typeof value.name !== "string" || value.name.length > 200) return null;
+  const read = (entry: unknown): CookieVersionSummary | null => {
+    if (!entry || typeof entry !== "object" || !("count" in entry) || !("activeCount" in entry) || !("revision" in entry)) return null;
+    if (typeof entry.count !== "number" || !Number.isInteger(entry.count) || entry.count < 0 || entry.count > 10000 || typeof entry.activeCount !== "number" || !Number.isInteger(entry.activeCount) || entry.activeCount < 0 || entry.activeCount > entry.count) return null;
+    const revision = cookieRevision(entry.revision);
+    if (entry.revision != null && !revision) return null;
+    return { revision, count: entry.count, activeCount: entry.activeCount };
+  };
+  const local = read(value.local), cloud = read(value.cloud);
+  if (!cloud || (value.local != null && !local)) return null;
+  return { receiptId: value.receiptId, name: value.name, local, cloud, changed: "changed" in value && value.changed === true };
+}
 
 export type RunningProfile = {
   profileId: string;
@@ -43,7 +63,8 @@ export type UmbraBridge = {
   version?: string;
   platform: string;
   engine?: { electron: string; chromium: string };
-  launchProfile: (payload: LaunchPayload) => Promise<{ ok: boolean; error?: string }>;
+  launchProfile: (payload: LaunchPayload) => Promise<{ ok: boolean; error?: string; code?: string; recovery?: CookieRecoverySummary; recoveryBackupId?: string }>;
+  listCookieRecoveryBackups?: (profileId: string) => Promise<{ ok: boolean; backups?: CookieRecoveryBackup[]; error?: string }>;
   closeProfile: (profileId: string) => Promise<{ ok: boolean; error?: string } & Partial<ProfileRuntimeSnapshot>>;
   listRunningProfiles: () => Promise<{ ok: boolean; profiles: RunningProfile[]; error?: string }>;
   pendingProfileClosures: () => Promise<{ ok: boolean; profiles: ProfileClosed[] }>;
@@ -152,6 +173,7 @@ export type LifecycleSnapshot = {
   errors: Record<string, string>;
   notices: Record<string, string>;
   restoring: boolean;
+  recoveries?: Record<string, CookieRecoverySummary>;
 };
 
 // Tokens and cookie snapshots stay inside this controller, never in query caches,
@@ -167,6 +189,7 @@ export class DesktopProfileLifecycle {
   private listeners = new Set<() => void>();
   private errors: Record<string, string> = {};
   private notices: Record<string, string> = {};
+  private recoveries: Record<string, CookieRecoverySummary> = {};
   private active = 0;
   private waiting: (() => void)[] = [];
   private restoring = false;
@@ -188,6 +211,7 @@ export class DesktopProfileLifecycle {
       running: [...this.sessions.values()].map(({ profileId, name }) => ({ profileId, name })),
       busy: [...this.jobs.keys()], pending: [...new Set([...this.pending.values()].map((p) => p.profileId).concat([...this.outboxFailures]))],
       errors: { ...this.errors }, notices: { ...this.notices }, restoring: this.restoring,
+      recoveries: { ...this.recoveries },
     };
     this.listeners.forEach((listener) => listener());
   }
@@ -253,14 +277,20 @@ export class DesktopProfileLifecycle {
     return job;
   };
 
-  start = (profileId: string): Promise<void> => {
+  start = (profileId: string, recovery?: CookieRecoveryRequest): Promise<void> => {
     if (this.shutdownJob || this.restoring || this.errors["restore"]) return Promise.reject(new Error("Дождитесь синхронизации приложения."));
-    if (this.jobs.has(profileId) || this.sessions.has(profileId)) return Promise.resolve();
+    if (this.jobs.has(profileId) || this.sessions.has(profileId)) return recovery
+      ? Promise.reject(new Error("Закройте профиль перед восстановлением cookies.")) : Promise.resolve();
     return this.run(profileId, async () => {
       if (this.outboxFailures.has(profileId) || [...this.pending.values()].some((p) => p.profileId === profileId)) throw new Error("Сначала сохраните предыдущую сессию профиля.");
       let payload: LaunchPayload | undefined;
       try {
-        payload = await this.api.launch(profileId, this.bridge.platform);
+        if (recovery && !this.bridge.listCookieRecoveryBackups) throw new Error("Обновите клиент Umbra для безопасного восстановления cookies.");
+        payload = { ...await this.api.launch(profileId, this.bridge.platform) };
+        // Recovery is a one-off explicit choice; never trust a saved preference
+        // or server payload to silently select a cookie version on later starts.
+        delete payload.cookieRecovery;
+        if (recovery) payload = { ...payload, cookieRecovery: recovery };
         if (!payload.lockToken) throw new Error("Сервер не выдал токен сессии профиля.");
         if (payload.fingerprint && typeof payload.fingerprint === "object" &&
           "fontIsolation" in payload.fingerprint && payload.fingerprint.fontIsolation === true) {
@@ -274,9 +304,15 @@ export class DesktopProfileLifecycle {
           ...(payload.deviceId ? { deviceId: payload.deviceId } : {}),
         });
         const result = await this.bridge.launchProfile(payload);
+        if (result.code === "COOKIE_RECOVERY_CONFLICT") {
+          const summary = validatedRecovery(result.recovery);
+          if (summary) this.recoveries[profileId] = summary;
+        }
         if (!result.ok) throw new Error(result.error || "Приложение не смогло открыть окно профиля.");
         delete this.errors[profileId];
         delete this.notices[profileId];
+        delete this.recoveries[profileId];
+        if (result.recoveryBackupId) this.notices[profileId] = "Cookies восстановлены. Обе предыдущие версии сохранены в зашифрованном резерве на этом компьютере; возврат доступен в окне Cookies профиля.";
       } catch (error) {
         this.sessions.delete(profileId);
         if (payload?.lockToken) {

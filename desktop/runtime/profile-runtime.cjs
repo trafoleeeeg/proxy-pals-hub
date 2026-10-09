@@ -15,6 +15,7 @@ const { createFaviconLoader } = require("./favicons.cjs");
 const { protectBackgroundWorkers, quarantineBackgroundWorkers, backgroundWorkerSessionSafe, cookieProtocolForSession } = require("./background-workers.cjs");
 const { applyFontIsolation } = require("./font-isolation.cjs");
 const { recordProcessEvent } = require("./process-diagnostics.cjs");
+const { createCookieRecovery, recoveryRequest } = require("./cookie-recovery.cjs");
 
 // Сообщения об ошибках запуска показываются пользователю, поэтому они переводятся
 // на русский язык на границе клиента, без утечки URL и значений cookies.
@@ -70,6 +71,8 @@ function createProfileRuntime(electron, options = {}) {
   const profiles = new Map();
   let shuttingDown = false;
   let store;
+  let recoveryRef;
+  const cookieRecovery = () => recoveryRef ||= options.cookieRecovery || createCookieRecovery({ safeStorage, userData: app.getPath("userData") });
   let tabStoreRef;
   let bookmarkStoreRef;
   let privacyStoreRef;
@@ -88,6 +91,7 @@ function createProfileRuntime(electron, options = {}) {
       state: entry.state, cookiesUpdatedAt: entry.cookiesUpdatedAt || null,
       windowCount: entry.browser && !entry.primary.isDestroyed() ? 1 : 0,
       tabCount: entry.windows.size, startedAt: entry.startedAt,
+      ...(entry.recoveryBackupId ? { recoveryBackupId: entry.recoveryBackupId } : {}),
       diagnostics: {
         proxy: entry.proxyRuntime ? { ...entry.proxyRuntime.diagnostics } : { mode: "blocked" },
         fingerprint: entry.fingerprintDiagnostics || null,
@@ -666,6 +670,7 @@ function createProfileRuntime(electron, options = {}) {
     if (shuttingDown) return Promise.reject(new Error("Приложение завершает работу"));
     const existing = profiles.get(id);
     if (existing) {
+      if (payload.cookieRecovery) return Promise.reject(new Error("Закройте профиль перед восстановлением cookies"));
       if (existing.closingRequested) return Promise.reject(new Error("Профиль закрывается"));
       if (existing.primary && !existing.primary.isDestroyed()) existing.primary.focus();
       return existing.startPromise;
@@ -673,6 +678,7 @@ function createProfileRuntime(electron, options = {}) {
     const url = startUrl(payload.startUrl ?? payload.fingerprint?.startUrl ?? payload.fingerprint?.start_url ?? "about:blank", { allowBlank: true });
     const hasExplicitStartUrl = payload.startUrl != null;
     revision(payload.cookiesUpdatedAt);
+    recoveryRequest(payload.cookieRecovery);
     if (payload.lockToken != null && (typeof payload.lockToken !== "string" || payload.lockToken.length > 512)) throw new Error("Некорректный токен блокировки профиля");
     if (payload.deviceId != null && (typeof payload.deviceId !== "string" || !payload.deviceId || payload.deviceId.length > 512 || /[\r\n\0]/.test(payload.deviceId))) throw new Error("Некорректный идентификатор устройства");
     const entry = {
@@ -762,11 +768,12 @@ function createProfileRuntime(electron, options = {}) {
         }
          installResourceRecovery(entry);
         registerCookieTransport(entry.ses, cookieTransport(entry.ses));
-        const initialized = await initializeCookies(entry.ses, cookieStore(), { ...payload, profileId: id });
+        const initialized = await initializeCookies(entry.ses, cookieStore(), { ...payload, profileId: id }, cookieRecovery());
         entry.cookiesUpdatedAt = initialized.cookiesUpdatedAt;
         entry.cookieSignature = initialized.signature;
         entry.cookieSource = initialized.source;
         entry.cookieRestore = initialized.cookieRestore;
+        entry.recoveryBackupId = initialized.recoveryBackupId;
         entry.extensionsLoaded = new Map();
         entry.allowedExtensions = await extensionConsent().read(id);
         if (extensionStore) {
@@ -818,7 +825,11 @@ function createProfileRuntime(electron, options = {}) {
         if (entry.proxyRuntime) await entry.proxyRuntime.dispose().catch(() => {});
         if (!entry.closingRequested) profiles.delete(id);
         // Errors from Electron can include navigation URLs and cookie values.
-        throw new Error(launchErrorText(error.message));
+        const failure = new Error(error.code === "COOKIE_RECOVERY_CONFLICT" && error.recovery?.changed
+          ? "Версии cookies изменились. Проверьте новый выбор восстановления." : launchErrorText(error.message));
+        if (error.code === "COOKIE_RECOVERY_CONFLICT") { failure.code = error.code; failure.recovery = error.recovery; }
+        if (error.code === "COOKIE_RECOVERY_FAILED") failure.message = error.message;
+        throw failure;
       }
     });
     return entry.startPromise;
@@ -1004,6 +1015,7 @@ function createProfileRuntime(electron, options = {}) {
 
   return {
     launchProfileWindow, closeProfileWindow, snapshotProfileCookies, acknowledgeProfileCookies, closeAllProfiles,
+    listCookieRecoveryBackups: id => cookieRecovery().listBackups(profileId(id)),
     refreshExtensions, applyBrowserSettings,
     applyBookmarkDefaults: async (value) => {
       if (!value || typeof value.teamId !== "string" || !/^[0-9a-f-]{36}$/i.test(value.teamId)) return false;

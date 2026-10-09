@@ -19,6 +19,7 @@ if (process.versions.electron) {
   const { createProfileRuntime } = require("../runtime/profile-runtime.cjs");
   const { applyFingerprint } = require("../runtime/fingerprint.cjs");
   const { createCookieStore } = require("../runtime/cookies.cjs");
+  const { createCookieRecovery } = require("../runtime/cookie-recovery.cjs");
   const { defaultBookmarks } = require("../runtime/bookmarks.cjs");
   const { createRuntimeProxy } = require("../runtime/proxy.cjs");
   const { createProxyChecker, requestJson } = require("../runtime/proxy-probe.cjs");
@@ -82,6 +83,35 @@ if (process.versions.electron) {
     if (mode === "native" && !safeStorage.isEncryptionAvailable()) {
       process.stdout.write("UMBRA_NATIVE_DPAPI_UNAVAILABLE: OS cookie encryption is unavailable\n");
       app.exit(77); return;
+    }
+    if (mode === "native") {
+      const recovery = createCookieRecovery({ safeStorage, userData: app.getPath("userData") });
+      const nativeCookie = value => ({ name: "recovery-fixture", value, domain: "localhost", path: "/", session: true, hostOnly: true, secure: true });
+      const local = { cookies: [nativeCookie("recovery-native-local")], cookiesUpdatedAt: "2026-02-01T00:00:00Z", pending: true, baseRevision: "2026-01-01T00:00:00.000Z" };
+      const cloud = { cookies: [nativeCookie("recovery-native-cloud")], cookiesUpdatedAt: "2026-02-01T00:00:00.000Z" };
+      const recoveryPayload = { profileId: ID, name: "Synthetic recovery", lockToken: "synthetic-recovery-lease" };
+      let backupId;
+      if (process.env.UMBRA_RUNTIME_TEST_PHASE === "initial") {
+        let receipt;
+        await assert.rejects(recovery.select(recoveryPayload, local, cloud), error => { receipt = error.recovery; return error.code === "COOKIE_RECOVERY_CONFLICT"; });
+        const recovered = await recovery.select({ ...recoveryPayload, cookieRecovery: { source: "local", receiptId: receipt.receiptId } }, local, cloud);
+        assert.equal(recovered.cookies[0].value, "recovery-native-local");
+        backupId = recovered.backupId;
+      } else {
+        const backups = await recovery.listBackups(ID);
+        assert.equal(backups.length, 1, "encrypted recovery reserve must survive a real process restart");
+        backupId = backups[0].backupId;
+        assert.equal(JSON.stringify(backups).includes("recovery-native-"), false);
+        const rollback = await recovery.select({ ...recoveryPayload, cookieRecovery: { source: "cloud", backupId } }, local, cloud);
+        assert.equal(rollback.cookies[0].value, "recovery-native-cloud");
+        assert.equal((await recovery.listBackups(ID)).length, 2, "rollback must reserve current versions too");
+      }
+      const encrypted = fs.readFileSync(path.join(app.getPath("userData"), "profile-cookie-recovery", ID, `${backupId}.bin`));
+      assert.equal(encrypted.includes(Buffer.from("recovery-native-local")), false);
+      assert.equal(encrypted.includes(Buffer.from("recovery-native-cloud")), false);
+      const archived = JSON.parse(safeStorage.decryptString(encrypted));
+      assert.equal(archived.local.cookies[0].value, "recovery-native-local");
+      assert.equal(archived.cloud.cookies[0].value, "recovery-native-cloud");
     }
     const records = new Map();
     const cookieStore = memoryOnly ? {

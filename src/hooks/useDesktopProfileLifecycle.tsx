@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState, useSyncExternal
 import { useServerFn } from "@tanstack/react-start";
 import { useQueryClient } from "@tanstack/react-query";
 import { launchProfile, closeProfile, heartbeatProfile, saveProfileSession } from "@/lib/session.functions";
-import { desktop, DesktopProfileLifecycle, type LifecycleSnapshot, type UpdateStatus } from "@/lib/desktop";
+import { desktop, DesktopProfileLifecycle, type CookieRecoveryRequest, type LifecycleSnapshot, type UpdateStatus } from "@/lib/desktop";
 
 const EMPTY: LifecycleSnapshot = { running: [], busy: [], pending: [], errors: {}, notices: {}, restoring: false };
 const noopSubscribe = () => () => {};
@@ -11,7 +11,7 @@ type UpdateAction = "check" | "download" | "install";
 type Runtime = LifecycleSnapshot & {
   available: boolean;
   ready: boolean;
-  start: (id: string) => Promise<void>;
+  start: (id: string, recovery?: CookieRecoveryRequest) => Promise<void>;
   stop: (id: string) => Promise<void>;
   retry: () => Promise<void>;
   closeAll: () => Promise<void>;
@@ -120,9 +120,9 @@ export function DesktopProfileProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  async function start(id: string) {
+  async function start(id: string, recovery?: CookieRecoveryRequest) {
     if (!controller || !ready) throw new Error("Запуск доступен в приложении Umbra для Windows после синхронизации.");
-    try { await controller.start(id); }
+    try { await controller.start(id, recovery); }
     finally { void qc.invalidateQueries({ queryKey: ["profiles"] }); }
   }
   async function stop(id: string) {

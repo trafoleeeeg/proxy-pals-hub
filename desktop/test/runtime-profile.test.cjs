@@ -115,6 +115,25 @@ function harness() {
 
 const payload = () => ({ profileId: ID, deviceId: "test-device", name: "Test", lockToken: "test-lock-token", fingerprint: FP, cookies: "[]", cookiesUpdatedAt: null, proxy: null, startUrl: "https://example.test" });
 
+test("native launch returns a metadata-only conflict and preserves the checkpoint before any page opens", async () => {
+  const h = harness();
+  const old = "2026-01-01T00:00:00.000Z", next = "2026-02-01T00:00:00.000Z";
+  const local = { cookies: [{ name: "session", value: "synthetic-secret", domain: "example.test", path: "/", session: true }], cookiesUpdatedAt: next, pending: true, baseRevision: old };
+  h.records.set(ID, local);
+  let receipt;
+  await assert.rejects(h.runtime.launchProfileWindow({ ...payload(), cookiesUpdatedAt: next }), error => {
+    receipt = error.recovery;
+    return error.code === "COOKIE_RECOVERY_CONFLICT" && error.message.includes("согласование");
+  });
+  assert.equal(receipt.local.count, 1);
+  assert.equal(receipt.cloud.count, 0);
+  assert.equal(JSON.stringify(receipt).includes("synthetic-secret"), false);
+  assert.equal(h.records.get(ID), local);
+  assert.equal(h.runtime.getRunningProfile(ID), null);
+  assert.equal(h.windows.length, 0);
+  assert.equal(h.storageClears.some(clear => clear.storages.includes("cookies")), false);
+});
+
 test("isolated profile awaits fonts before network/windows and cannot grant host font access", async () => {
   const h = harness();
   const ses = h.electron.session.fromPartition(`persist:profile-${ID}`);

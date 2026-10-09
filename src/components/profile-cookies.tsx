@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Download, Upload } from "lucide-react";
 import { importProfileCookies, exportProfileCookies } from "@/lib/profiles.functions";
@@ -11,6 +11,9 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cookiesToNetscape } from "./profile-model";
 import { parseCookieImport, cookieImportErrorMessage } from "@/lib/server-cookies";
+import { desktop, type CookieRecoveryBackup } from "@/lib/desktop";
+import { useDesktopProfileLifecycle } from "@/hooks/useDesktopProfileLifecycle";
+import { CookieVersion } from "@/components/cookie-recovery";
 
 const MAX_COOKIE_IMPORT_BYTES = 5_000_000;
 
@@ -18,6 +21,11 @@ export function ProfileCookies({ profileId, name, isOwner, locked, onClose, onSa
   profileId: string; name: string; isOwner: boolean; locked: boolean; onClose: () => void; onSaved: () => void;
 }) {
   const importFn = useServerFn(importProfileCookies);
+  const runtime = useDesktopProfileLifecycle();
+  const bridge = desktop();
+  const [backups, setBackups] = useState<CookieRecoveryBackup[]>([]);
+  const [backupError, setBackupError] = useState<string | null>(null);
+  const [restoreChoice, setRestoreChoice] = useState<{ backup: CookieRecoveryBackup; source: "local" | "cloud" } | null>(null);
   const contentId = useId();
   const exportFn = useServerFn(exportProfileCookies);
   const [text, setText] = useState("");
@@ -27,6 +35,24 @@ export function ProfileCookies({ profileId, name, isOwner, locked, onClose, onSa
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const allowed = isOwner && !locked;
+  useEffect(() => {
+    let disposed = false;
+    if (isOwner && bridge?.listCookieRecoveryBackups) void bridge.listCookieRecoveryBackups(profileId).then(result => {
+      if (disposed) return;
+      if (!result.ok || !result.backups) throw new Error();
+      setBackups(result.backups);
+    }).catch(() => { if (!disposed) setBackupError("Не удалось прочитать зашифрованный резерв cookies. Существующие копии не изменены."); });
+    return () => { disposed = true; };
+  }, [profileId, isOwner, bridge]);
+  async function restoreBackup() {
+    if (!restoreChoice || !allowed || busy || runtime.busy.includes(profileId)) return;
+    setBusy(true); setError(null);
+    try {
+      await runtime.start(profileId, { backupId: restoreChoice.backup.backupId, source: restoreChoice.source });
+      setRestoreChoice(null); onSaved(); onClose();
+    } catch (failure) { setError(failure instanceof Error ? failure.message : "Не удалось восстановить резерв. Данные сохранены."); }
+    finally { setBusy(false); }
+  }
   const bytes = new Blob([text]).size;
   const preview = useMemo(() => {
     if (!text.trim() || bytes > MAX_COOKIE_IMPORT_BYTES) return null;
@@ -92,6 +118,22 @@ export function ProfileCookies({ profileId, name, isOwner, locked, onClose, onSa
         <h3 className="text-sm font-medium">Экспорт облачных cookies</h3>
         <div className="flex flex-wrap items-center gap-2"><Select value={format} disabled={busy} onValueChange={setFormat}><SelectTrigger aria-label="Формат экспорта cookies" className="w-36"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="json">JSON</SelectItem><SelectItem value="netscape">Netscape</SelectItem></SelectContent></Select><Button variant="outline" disabled={busy} onClick={exportCookies}><Download className="size-4" /> Выгрузить файл</Button></div>
       </section>
+      {bridge?.listCookieRecoveryBackups && <section className="space-y-3 border-t border-border pt-3">
+        <h3 className="text-sm font-medium">Зашифрованный резерв восстановления</h3>
+        <p className="text-xs text-muted-foreground">Хранится на этом компьютере. Возврат открывает профиль с выбранной копией; текущие локальные и облачные cookies сначала сохраняются в новый резерв.</p>
+        {backupError && <p role="alert" className="text-sm text-destructive">{backupError}</p>}
+        {!backupError && !backups.length && <p className="text-sm text-muted-foreground">Резервных копий пока нет.</p>}
+        {backups.map(backup => <div key={backup.backupId} className="space-y-2 rounded-md border border-border p-3">
+          <p className="text-sm">{new Date(backup.createdAt).toLocaleString()}</p>
+          <div className="grid gap-2 sm:grid-cols-2"><CookieVersion title="Локальная копия" version={backup.local} /><CookieVersion title="Облачная копия" version={backup.cloud} /></div>
+          <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" disabled={!allowed || busy || !backup.local} onClick={() => setRestoreChoice({ backup, source: "local" })}>Вернуть локальную</Button>
+            <Button variant="outline" size="sm" disabled={!allowed || busy} onClick={() => setRestoreChoice({ backup, source: "cloud" })}>Вернуть облачную</Button></div>
+        </div>)}
+        {restoreChoice && <div role="alert" className="space-y-2 rounded-md border border-border p-3">
+          <p className="text-sm">Открыть профиль с {restoreChoice.source === "local" ? "локальной" : "облачной"} копией из резерва от {new Date(restoreChoice.backup.createdAt).toLocaleString()}? При сохранении она заменит облачные cookies. Текущие версии будут сохранены в резерв.</p>
+          <div className="flex gap-2"><Button disabled={!allowed || busy} onClick={() => void restoreBackup()}>Подтвердить возврат</Button><Button variant="ghost" disabled={busy} onClick={() => setRestoreChoice(null)}>Отмена</Button></div>
+        </div>}
+      </section>}
     </>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {message && <p role="status" className="text-sm text-success">{message}</p>}

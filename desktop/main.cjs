@@ -5,7 +5,7 @@ const { initializeBackgroundWorkers, allowBackgroundWorkers } = require("./runti
 const path = require("node:path");
 const { autoUpdater } = require("electron-updater");
 const {
-  launchProfileWindow, closeProfileWindow, snapshotProfileCookies, acknowledgeProfileCookies,
+  launchProfileWindow, closeProfileWindow, snapshotProfileCookies, acknowledgeProfileCookies, listCookieRecoveryBackups,
   listRunningProfiles, closeAllProfiles, refreshExtensions, extensionStore,
   applyBrowserSettings, applyBookmarkDefaults,
 } = require("./launcher.cjs");
@@ -126,9 +126,15 @@ handle("umbra:launch-profile", async (payload) => {
   if (closing || quitting || updates?.isInstalling()) throw new Error("Приложение закрывается или устанавливает обновление");
   profileId(payload?.profileId);
   if (JSON.stringify(payload).length > 6 * 1024 * 1024) throw new Error("Данные профиля слишком большие");
-  await launchProfileWindow(payload, profileClosed);
-  return { ok: true };
+  try {
+    const profile = await launchProfileWindow(payload, profileClosed);
+    return { ok: true, ...(profile.recoveryBackupId ? { recoveryBackupId: profile.recoveryBackupId } : {}) };
+  } catch (error) {
+    if (error.code === "COOKIE_RECOVERY_CONFLICT") return { ok: false, error: error.message, code: error.code, recovery: error.recovery };
+    throw error;
+  }
 });
+handle("umbra:cookie-recovery-backups", async id => ({ ok: true, backups: await listCookieRecoveryBackups(profileId(id)) }));
 handle("umbra:close-profile", async (id) => {
   const snapshot = await closeProfileWindow(profileId(id));
   return { ok: true, ...snapshot };

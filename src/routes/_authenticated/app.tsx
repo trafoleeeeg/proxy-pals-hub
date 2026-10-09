@@ -15,6 +15,7 @@ import { FoldersNav } from "@/components/folders-nav";
 import { ProfileFolderProvider } from "@/lib/useProfileFolder";
 import { ImpersonationControl } from "@/components/impersonation-control";
 import { ProfileDndProvider } from "@/components/profile-dnd";
+import { CookieRecoveryAction } from "@/components/cookie-recovery";
 
 export const Route = createFileRoute("/_authenticated/app")({
   head: () => ({ meta: [
@@ -64,6 +65,8 @@ function LifecycleBar() {
   const [busy, setBusy] = useState(false);
   const messages = [...new Set(Object.values(runtime.errors))];
   const notices = [...new Set(Object.values(runtime.notices))];
+  const recoveries = Object.keys(runtime.recoveries || {});
+  const hasRetry = runtime.pending.length > 0 || Object.keys(runtime.errors).some(id => !recoveries.includes(id));
   if (!runtime.available || (!messages.length && !notices.length && !runtime.restoring && !runtime.pending.length)) return null;
   async function retry() {
     setBusy(true);
@@ -77,8 +80,9 @@ function LifecycleBar() {
       {runtime.pending.length > 0 && <p className="text-warning">Ожидают сохранения: {runtime.pending.length}</p>}
       {messages.map((message) => <p key={message} className="break-words text-destructive">{message}</p>)}
       {notices.map((notice) => <p key={notice} className="break-words text-muted-foreground">{notice}</p>)}
+      {recoveries.length > 0 && <div className="flex flex-wrap gap-2 pt-1">{recoveries.map(id => <CookieRecoveryAction key={id} profileId={id} />)}</div>}
     </div>
-    {(messages.length > 0 || runtime.pending.length > 0) && <Button variant="outline" size="sm" disabled={busy || runtime.restoring} onClick={retry}><RefreshCw className={busy ? "size-4 animate-spin" : "size-4"} />Повторить</Button>}
+    {hasRetry && <Button variant="outline" size="sm" disabled={busy || runtime.restoring} onClick={retry}><RefreshCw className={busy ? "size-4 animate-spin" : "size-4"} />Повторить</Button>}
   </div>;
 }
 

@@ -291,6 +291,28 @@ test("known locale ownership never bypasses an unrelated protocol failure", asyn
   wc.debugger.emit("detach", {}, "target closed");
 });
 
+test("detaching an iframe owner revokes its proof even while the parent remains live", async () => {
+  const wc = provisionalLocaleContents({});
+  const original = wc.debugger.sendCommand;
+  wc.debugger.sendCommand = async function (command, args, id) {
+    if (command === "Runtime.getIsolateId" && id) { wc.commands.push({ command, args, id }); return { id: "bbbb" }; }
+    if (command === "Emulation.setLocaleOverride" && id === "owner") { wc.commands.push({ command, args, id }); return {}; }
+    return original.call(this, command, args, id);
+  };
+  const failures = [];
+  await applyFingerprint(wc, fingerprint(), { onFailure: value => failures.push(value) });
+  wc.debugger.emit("message", {}, "Target.attachedToTarget", { sessionId: "owner", targetInfo: { type: "iframe" } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(wc.commands.some(row => row.id === "owner" && row.command === "Runtime.runIfWaitingForDebugger"));
+  wc.debugger.emit("message", {}, "Target.detachedFromTarget", { sessionId: "owner" });
+  wc.debugger.emit("message", {}, "Target.attachedToTarget", { sessionId: "next", targetInfo: { type: "iframe" } });
+  wc.debugger.emit("message", {}, "Runtime.executionContextCreated", { context: { id: 8, uniqueId: "next", name: "", auxData: { isDefault: true, frameId: "frame-next" } } }, "next");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(failures.length, 1);
+  assert.equal(wc.commands.some(row => row.id === "next" && row.command === "Runtime.runIfWaitingForDebugger"), false);
+  wc.debugger.emit("detach", {}, "target closed");
+});
+
 test("a named dedicated worker is protected in its announced context before resuming", async () => {
   const wc = webContents({ namedWorkerContext: true });
   const failures = [], contexts = [];

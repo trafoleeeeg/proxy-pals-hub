@@ -20,12 +20,21 @@ export function rotationOutcome(previousIp: string | null, result: ProxyCheckRes
 }
 
 /** Rotation is a recovery action: an unavailable tunnel must not block its provider URL. */
-export async function prepareRotation<T>({ probe, record, request }: {
+export async function prepareRotation<T>({ probe, record, request, wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }: {
   probe: () => Promise<ProxyCheckResult>;
   record: (result: ProxyCheckResult) => Promise<unknown>;
   request: () => Promise<T>;
+  wait?: (ms: number) => Promise<unknown>;
 }) {
-  const before = await probe().catch(() => ({ ok: false as const }));
+  const readBaseline = () => probe().catch(() => ({ ok: false as const }));
+  let before: ProxyCheckResult = await readBaseline();
+  // After idle, the first tunnel connection can fail transiently. Retry only
+  // the read before sending the provider command, so the same click can still
+  // compare a freshly measured old IP with the new one. Never replay rotation.
+  if (!before.ok || !before.ip) {
+    await wait(300);
+    before = await readBaseline();
+  }
   await record(before);
   return request();
 }

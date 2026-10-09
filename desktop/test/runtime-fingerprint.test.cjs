@@ -121,7 +121,7 @@ test("legacy profiles retain strict API blocking while new normal-mode profiles 
   }
 });
 
-function webContents({ policy = "disable_non_proxied_udp", reject = null } = {}) {
+function webContents({ policy = "disable_non_proxied_udp", reject = null, announceContext = true } = {}) {
   const commands = [];
   let detached = false;
   return {
@@ -129,13 +129,60 @@ function webContents({ policy = "disable_non_proxied_udp", reject = null } = {})
     setUserAgent() {}, setWebRTCIPHandlingPolicy() {}, getWebRTCIPHandlingPolicy: () => policy,
     debugger: Object.assign(new (require("node:events").EventEmitter)(), {
       attach() {}, isAttached: () => !detached, detach() { detached = true; },
-      async sendCommand(command, args) {
-        commands.push({ command, args });
+      async sendCommand(command, args, id) {
+        commands.push({ command, args, id });
         if (command === reject) throw new Error("Protocol error");
+        if (command === "Runtime.enable" && announceContext) this.emit("message", {}, "Runtime.executionContextCreated", {
+          context: { id: 1, uniqueId: "unique-" + (id || "root"), name: "", auxData: { isDefault: true, frameId: "frame-" + (id || "root") } },
+        }, id);
+        if (command === "Page.getFrameTree") return { frameTree: { frame: { id: "frame-" + (id || "root") } } };
+        if (command === "Runtime.evaluate") return { result: { value: true } };
       },
     }),
   };
 }
+
+test("locale verification waits for the real main-world context instead of evaluating a provisional frame", async () => {
+  const wc = webContents({ reject: "Emulation.setLocaleOverride", announceContext: false });
+  const pending = applyFingerprint(wc, fingerprint());
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(wc.commands.some(c => c.command === "Runtime.evaluate"), false);
+  wc.debugger.emit("message", {}, "Runtime.executionContextCreated", { context: {
+    id: 7, uniqueId: "isolated-world", name: "", auxData: { isDefault: false, frameId: "frame-root" },
+  } });
+  wc.debugger.emit("message", {}, "Runtime.executionContextCreated", { context: {
+    id: 8, uniqueId: "different-frame", name: "", auxData: { isDefault: true, frameId: "frame-child" },
+  } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(wc.commands.some(c => c.command === "Runtime.evaluate"), false);
+  wc.debugger.emit("message", {}, "Runtime.executionContextCreated", { context: {
+    id: 9, uniqueId: "ready-main-world", name: "", auxData: { isDefault: true, frameId: "frame-root" },
+  } });
+  await pending;
+  assert.equal(wc.commands.find(c => c.command === "Runtime.evaluate").args.uniqueContextId, "ready-main-world");
+});
+
+test("child locale and worker evaluations use their own unique contexts, not the parent default world", async () => {
+  const wc = webContents({ reject: "Emulation.setLocaleOverride" });
+  await applyFingerprint(wc, fingerprint());
+  for (const type of ["iframe", "page", "worker"]) {
+    wc.debugger.emit("message", {}, "Target.attachedToTarget", { sessionId: type, targetInfo: { type }, waitingForDebugger: true });
+    await new Promise(resolve => setImmediate(resolve));
+    const evaluations = wc.commands.filter(c => c.command === "Runtime.evaluate" && c.id === type);
+    assert.ok(evaluations.length > 0);
+    assert.ok(evaluations.every(c => c.args.uniqueContextId === "unique-" + type));
+    assert.ok(wc.commands.some(c => c.command === "Runtime.runIfWaitingForDebugger" && c.id === type));
+  }
+});
+
+test("closing the debugger while locale waits never sends a default-context evaluation", async () => {
+  const wc = webContents({ reject: "Emulation.setLocaleOverride", announceContext: false });
+  const pending = applyFingerprint(wc, fingerprint());
+  await new Promise(resolve => setImmediate(resolve));
+  wc.debugger.emit("detach", {}, "target closed");
+  await assert.rejects(pending, /Unable to apply fingerprint before navigation/);
+  assert.equal(wc.commands.some(c => c.command === "Runtime.evaluate"), false);
+});
 
 test("native screen CSS and hardware concurrency preserve viewport size but mask host DPI", async () => {
   const wc = webContents();

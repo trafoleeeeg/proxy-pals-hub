@@ -7,7 +7,7 @@ const { spawnBrowser } = require("../runtime/browser-pipe.cjs");
 
 test("sandboxed Electron strict and normal modes plus exact-origin compatibility", { timeout: 65000 }, async (t) => {
   let electron;
-  try { electron = require("electron"); await fs.access(electron); }
+  try { electron = process.env.UMBRA_TEST_ELECTRON_BINARY || require("electron"); await fs.access(electron); }
   catch (error) { if (process.env.UMBRA_REQUIRE_NATIVE !== "1") { t.skip("Electron executable unavailable"); return; } throw error; }
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "umbra-privacy-test-"));
   t.after(() => fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));

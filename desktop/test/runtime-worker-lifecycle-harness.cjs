@@ -173,21 +173,20 @@ app.whenReady().then(async () => {
     const uncommitted = (await a.ses.cookies.get({})).map(c => c.name === "crash-session" ? { ...c, value: "uncommitted" } : c);
     await crashStore.write(crashId, uncommitted, "2026-03-01T00:00:00.000Z", { pending: true, baseRevision: cloudBase });
   }
-  // A stopped but non-retired SW can restart in place without startup pause.
-  // It remains a protection failure; terminal retirement above is distinct.
-  a.expectFailure();
-  lastCheck = "before explicit stop";
   await a.win.webContents.debugger.sendCommand("ServiceWorker.enable");
-  await a.win.webContents.debugger.sendCommand("ServiceWorker.stopAllWorkers");
-  lastCheck = "explicit stop replied";
-  await a.revoked;
-  lastCheck = "protection revoked";
-  assert.equal(a.protection.isActive(), false);
-  // Test the revoked network gate directly, not a request that keeps trying
-  // to wake the intentionally stopped controller of this synthetic page.
-  lastCheck = "checking blocked network";
-  assert.equal(await a.ses.fetch(origin + "/headers?after-failure").then(() => false, () => true), true);
-  check(await liveShared(b), b.fp, "B after A protection failure");
+  for (let wake = 0; wake < 3; wake++) {
+    lastCheck = "before idle worker stop " + wake;
+    const retiredBefore = a.diagnostics.filter(d => d.reason === "worker-retired").length;
+    await a.win.webContents.debugger.sendCommand("ServiceWorker.stopAllWorkers");
+    const deadline = Date.now() + 3000;
+    while (a.diagnostics.filter(d => d.reason === "worker-retired").length === retiredBefore || !a.protection.isActive()) {
+      assert.ok(Date.now() < deadline, "stopped SW target must be destroyed before wake");
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    check(await a.execute("fetch('/worker-state').then(r=>r.json())"), a.fp, "idle/wake first statement " + wake);
+    assert.equal(a.protection.isActive(), true, "normal idle/wake must not close profile");
+    check(await liveShared(b), b.fp, "B after A idle/wake " + wake);
+  }
   await close(a); await close(b);
   // Unprofiled panel sessions are explicitly registered and keep native APIs.
   const panel = session.fromPartition("worker-panel");

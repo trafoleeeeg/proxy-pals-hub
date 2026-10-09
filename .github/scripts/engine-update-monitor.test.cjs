@@ -17,6 +17,8 @@ test('new Electron or Chromium creates an actionable maintenance task', () => {
   assert.equal(update.chromeBehind, true);
   const issue = issueFor(update);
   assert(issue.body.includes(marker));
+  assert.match(issue.title, /Chrome Stable/);
+  assert.match(issue.body, /нельзя подставлять/);
   assert.match(issue.body, /source-lock\.json/);
   assert.match(issue.body, /SHA-256/);
   const current = plan(pkg, lock, '44.4.5', '152.0.7977.130');

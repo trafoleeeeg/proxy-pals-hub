@@ -2,6 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const DOCUMENT_SOURCE = fs.readFileSync(path.join(__dirname, "..", "fingerprint-preload.cjs"), "utf8");
 const WEBRTC_POLICY = "disable_non_proxied_udp";
+const SESSION_LOCALE_OWNERS = new WeakMap();
 
 function hasCapability(fp, origin, capability) {
   if (!origin || origin === "null") return false;
@@ -218,11 +219,18 @@ async function applyFingerprint(wc, fp, { onFailure = () => {}, onDiagnostic = (
   let stopped = false;
   const children = new Set();
   const pageChildren = new Set();
+  const childTypes = new Map();
+  let localeOwners = wc.session && SESSION_LOCALE_OWNERS.get(wc.session);
+  if (!localeOwners) { localeOwners = new Set(); if (wc.session) SESSION_LOCALE_OWNERS.set(wc.session, localeOwners); }
+  const localeClaims = new Map();
+  const releaseLocale = id => { const claim = localeClaims.get(id); if (claim) localeOwners.delete(claim); localeClaims.delete(id); };
+  const releaseLocales = () => { for (const id of localeClaims.keys()) releaseLocale(id); };
   const contexts = require("./execution-contexts.cjs").executionContexts({ onTrace: details => onContextTrace({ ...details, contentsId: wc.id }) });
-  wc.once?.("destroyed", () => contexts.dispose());
+  wc.once?.("destroyed", () => { contexts.dispose(); releaseLocales(); });
   const fail = (reason = "command-failed", stage = "context", targetType = "page") => {
     if (stopped || isClosing() || wc.isDestroyed?.()) return;
     stopped = true;
+    releaseLocales();
     diagnose(reason, stage, targetType);
     // Never leave a running renderer behind when protection disappears.
     wc.session?.webRequest?.onBeforeRequest((_details, callback) => callback({ cancel: true }));
@@ -233,12 +241,13 @@ async function applyFingerprint(wc, fp, { onFailure = () => {}, onDiagnostic = (
   };
   const send = async (method, params, id) => {
     const started = Date.now();
-    const targetType = id ? (pageChildren.has(id) ? "page" : "worker") : "page";
+    const targetType = id ? (childTypes.get(id) || "worker") : "page";
     trace(method, "begin", undefined, targetType);
     try { const result = await sendCommand(method, params, id); trace(method, "done", Date.now() - started, targetType); return result; }
     catch (error) {
       trace(method, "failed", Date.now() - started, targetType);
-      throw Object.assign(new Error("Fingerprint protection command failed"), { privacyStage: error?.privacyStage || method });
+      throw Object.assign(new Error("Fingerprint protection command failed"), { privacyStage: error?.privacyStage || method,
+        localeConflict: method === "Emulation.setLocaleOverride" && /Another locale override is already in effect/.test(error?.message || "") });
     }
   };
   const sendCommand = async (method, params, id) => {
@@ -268,6 +277,32 @@ async function applyFingerprint(wc, fp, { onFailure = () => {}, onDiagnostic = (
   const autoAttach = (id) => send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true,
     filter: [{ type: "worker" }, { type: "iframe" }, { type: "page" }, { exclude: true }],
   }, id);
+  async function applyOwnedLocale(id) {
+    const locale = fp.languages[0];
+    const readIsolate = async () => {
+      const isolate = (await send("Runtime.getIsolateId", {}, id))?.id;
+      if (typeof isolate !== "string" || !/^[a-f0-9]+$/i.test(isolate)) throw new Error("Renderer isolate unavailable");
+      ensureOpen();
+      if (stopped || (id && !children.has(id))) throw new Error("Fingerprint target unavailable");
+      return isolate;
+    };
+    releaseLocale(id);
+    try {
+      await send("Emulation.setLocaleOverride", { locale }, id);
+      const isolate = await readIsolate();
+      const claim = { isolate, locale };
+      localeClaims.set(id, claim); localeOwners.add(claim);
+    } catch (error) {
+      // LocaleController is renderer-wide. A live successful claim for this
+      // exact isolate AND Session is positive proof, even when a provisional
+      // OOPIF has no world until resumed. Never accept other protocol failures.
+      if (error.localeConflict) {
+        const isolate = await readIsolate();
+        if ([...localeOwners].some(claim => claim.isolate === isolate && claim.locale === locale)) return;
+      }
+      await verifyLocale(send, locale, id, error);
+    }
+  }
   async function configureChild(id, type) {
     const page = type === "iframe" || type === "page";
     await send("Runtime.enable", {}, id);
@@ -275,7 +310,7 @@ async function applyFingerprint(wc, fp, { onFailure = () => {}, onDiagnostic = (
     if (page) {
       await send("Page.enable", {}, id);
       await send("Emulation.setTimezoneOverride", { timezoneId: fp.timezone }, id);
-      await applyLocale(send, fp.languages[0], id);
+      await applyOwnedLocale(id);
       if (!fp.nativeHardwareMetrics) await send("Emulation.setHardwareConcurrencyOverride", { hardwareConcurrency: fp.hardwareConcurrency }, id);
       // CDP rejects metrics on iframe targets. The native session policy covers
       // their CSS; stock Electron's JS fallback cannot cover OOPIF CSS.
@@ -291,12 +326,13 @@ async function applyFingerprint(wc, fp, { onFailure = () => {}, onDiagnostic = (
   wc.debugger.on?.("message", (_event, method, params, id) => {
     contexts.update(method, params, id);
     if (method === "Target.detachedFromTarget") {
-      children.delete(params.sessionId); pageChildren.delete(params.sessionId);
+      children.delete(params.sessionId); pageChildren.delete(params.sessionId); childTypes.delete(params.sessionId); releaseLocale(params.sessionId);
       contexts.close(params.sessionId); return;
     }
     if (method !== "Target.attachedToTarget") return;
     contexts.registerTarget(params.sessionId, params.targetInfo.type);
     children.add(params.sessionId);
+    childTypes.set(params.sessionId, params.targetInfo.type);
     if (["page", "iframe"].includes(params.targetInfo.type)) pageChildren.add(params.sessionId);
     void configureChild(params.sessionId, params.targetInfo.type).catch(error => {
       if (children.has(params.sessionId)) fail("command-failed", error?.privacyStage, params.targetInfo.type);
@@ -304,6 +340,7 @@ async function applyFingerprint(wc, fp, { onFailure = () => {}, onDiagnostic = (
   });
   wc.debugger.on?.("detach", (_event, reason) => {
     contexts.dispose();
+    releaseLocales();
     // A dead renderer no longer executes site code. Its replacement must go
     // through the normal protected tab creation path, but the other tabs in
     // the profile remain protected and must not be closed with it.
@@ -315,7 +352,7 @@ async function applyFingerprint(wc, fp, { onFailure = () => {}, onDiagnostic = (
     await send("Runtime.enable");
     await Promise.all([
       send("Emulation.setUserAgentOverride", userAgentOverride(fp)),
-      applyLocale(send, fp.languages[0]),
+      applyOwnedLocale(),
       send("Emulation.setTimezoneOverride", { timezoneId: fp.timezone }),
       ...(fp.nativeHardwareMetrics ? [] : [send("Emulation.setHardwareConcurrencyOverride", { hardwareConcurrency: fp.hardwareConcurrency })]),
       // Stock Electron fallback preserves viewport size but only covers the
@@ -331,6 +368,7 @@ async function applyFingerprint(wc, fp, { onFailure = () => {}, onDiagnostic = (
     stopped = true;
     diagnose("setup-failed", error?.privacyStage);
     contexts.dispose();
+    releaseLocales();
     if (!wc.isDestroyed?.() && wc.debugger.isAttached()) wc.debugger.detach();
     throw new Error("Unable to apply fingerprint before navigation");
   }
@@ -359,12 +397,16 @@ async function applyLocale(send, locale, id) {
     // Chromium's locale controller is renderer-wide and rejects a second
     // owner, even when a worker/page in this profile already set that locale.
     // Accept only an observed match, never an unchecked protocol failure.
-    const result = await send("Runtime.evaluate", {
-      expression: `Intl.DateTimeFormat().resolvedOptions().locale === Intl.DateTimeFormat(${JSON.stringify(locale)}).resolvedOptions().locale`,
-      returnByValue: true,
-    }, id);
-    if (result.exceptionDetails || result.result?.value !== true) throw error;
+    await verifyLocale(send, locale, id, error);
   }
+}
+
+async function verifyLocale(send, locale, id, error) {
+  const result = await send("Runtime.evaluate", {
+    expression: `Intl.DateTimeFormat().resolvedOptions().locale === Intl.DateTimeFormat(${JSON.stringify(locale)}).resolvedOptions().locale`,
+    returnByValue: true,
+  }, id);
+  if (result.exceptionDetails || result.result?.value !== true) throw error;
 }
 
 module.exports = { normalizeFingerprint, applyNativeScreenMetrics, applyNativeHardwareMetrics, prepareFingerprintTarget, applyFingerprint, userAgentOverride, installSessionPrivacy, hasCapability, applyLocale };

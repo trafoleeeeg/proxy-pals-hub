@@ -151,6 +151,7 @@ function webContents({ policy = "disable_non_proxied_udp", reject = null, announ
             ...(id && namedWorkerContext ? {} : { auxData: { isDefault: true, frameId: "frame-" + (id || "root") } }) },
         }, id);
         if (command === "Page.getFrameTree") return { frameTree: { frame: { id: "frame-" + (id || "root") } } };
+        if (command === "Runtime.getIsolateId") return { id: "abcd" };
         if (command === "Runtime.evaluate") return { result: { value: true } };
       },
     }),
@@ -222,6 +223,72 @@ test("child locale and worker evaluations use their own unique contexts, not the
     assert.ok(evaluations.every(c => c.args.uniqueContextId === "unique-" + type));
     assert.ok(wc.commands.some(c => c.command === "Runtime.runIfWaitingForDebugger" && c.id === type));
   }
+});
+
+function provisionalLocaleContents(session, { isolate = "abcd", rejectRoot = false, conflict = true } = {}) {
+  const wc = webContents();
+  wc.session = session;
+  const original = wc.debugger.sendCommand;
+  wc.debugger.sendCommand = async function (command, args, id) {
+    if (command === "Runtime.getIsolateId") { wc.commands.push({ command, args, id }); return { id: id ? isolate : "abcd" }; }
+    if (command === "Runtime.enable" && id) { wc.commands.push({ command, args, id }); return {}; }
+    if (command === "Emulation.setLocaleOverride" && (id || rejectRoot)) {
+      wc.commands.push({ command, args, id });
+      throw new Error(conflict ? "Another locale override is already in effect" : "Other protocol error");
+    }
+    if (command === "Runtime.evaluate") { wc.commands.push({ command, args, id }); return { result: { value: false } }; }
+    return original.call(this, command, args, id);
+  };
+  return wc;
+}
+
+test("a provisional iframe with a proven live owner in the same isolate resumes only after protection", async () => {
+  const wc = provisionalLocaleContents({});
+  const failures = [];
+  await applyFingerprint(wc, fingerprint(), { onFailure: value => failures.push(value) });
+  wc.debugger.emit("message", {}, "Target.attachedToTarget", { sessionId: "child", targetInfo: { type: "iframe" } });
+  await new Promise(resolve => setImmediate(resolve));
+  const childCommands = wc.commands.filter(row => row.id === "child");
+  assert.equal(failures.length, 0);
+  assert.equal(childCommands.some(row => row.command === "Runtime.evaluate"), false, "do not wait for a world which cannot exist yet");
+  const installed = childCommands.findIndex(row => row.command === "Page.addScriptToEvaluateOnNewDocument");
+  const resumed = childCommands.findIndex(row => row.command === "Runtime.runIfWaitingForDebugger");
+  assert.ok(installed >= 0 && resumed > installed);
+  wc.debugger.emit("detach", {}, "target closed");
+});
+
+test("locale proof cannot cross Session, isolate, language, or a detached owner", async () => {
+  const shared = {};
+  const owner = provisionalLocaleContents(shared);
+  await applyFingerprint(owner, fingerprint());
+  for (const [session, fp] of [[{}, fingerprint()], [shared, fingerprint({ languages: ["fr-CA"] })]]) {
+    const foreign = provisionalLocaleContents(session, { rejectRoot: true });
+    await assert.rejects(applyFingerprint(foreign, fp), /Unable to apply fingerprint/);
+    assert.ok(foreign.commands.some(row => row.command === "Runtime.evaluate"));
+  }
+  const differentIsolate = provisionalLocaleContents(shared, { isolate: "dcba" });
+  const failures = [];
+  await applyFingerprint(differentIsolate, fingerprint(), { onFailure: value => failures.push(value) });
+  differentIsolate.debugger.emit("message", {}, "Target.attachedToTarget", { sessionId: "child", targetInfo: { type: "iframe" } });
+  differentIsolate.debugger.emit("message", {}, "Runtime.executionContextCreated", { context: { id: 8, uniqueId: "child", name: "", auxData: { isDefault: true, frameId: "frame-child" } } }, "child");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(failures.length, 1);
+  assert.equal(differentIsolate.commands.some(row => row.id === "child" && row.command === "Runtime.runIfWaitingForDebugger"), false);
+  owner.debugger.emit("detach", {}, "target closed");
+  const afterDetach = provisionalLocaleContents(shared, { rejectRoot: true });
+  await assert.rejects(applyFingerprint(afterDetach, fingerprint()), /Unable to apply fingerprint/);
+});
+
+test("known locale ownership never bypasses an unrelated protocol failure", async () => {
+  const wc = provisionalLocaleContents({}, { conflict: false });
+  const failures = [];
+  await applyFingerprint(wc, fingerprint(), { onFailure: value => failures.push(value) });
+  wc.debugger.emit("message", {}, "Target.attachedToTarget", { sessionId: "child", targetInfo: { type: "iframe" } });
+  wc.debugger.emit("message", {}, "Runtime.executionContextCreated", { context: { id: 8, uniqueId: "child", name: "", auxData: { isDefault: true, frameId: "frame-child" } } }, "child");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(failures.length, 1);
+  assert.equal(wc.commands.some(row => row.id === "child" && row.command === "Runtime.runIfWaitingForDebugger"), false);
+  wc.debugger.emit("detach", {}, "target closed");
 });
 
 test("a named dedicated worker is protected in its announced context before resuming", async () => {

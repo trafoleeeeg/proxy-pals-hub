@@ -93,7 +93,7 @@ const WORKER_REASONS = new Set(["setup-failed", "close-failed", "resume-failed",
 const WORKER_STAGES = new Set(["context", "Inspector.enable", "Runtime.enable", "Emulation.setUserAgentOverride",
   "Emulation.setTimezoneOverride", "Emulation.setLocaleOverride", "Emulation.setHardwareConcurrencyOverride",
   "Runtime.evaluate", "Target.setAutoAttach", "Runtime.runIfWaitingForDebugger"]);
-const PAGE_STAGES = new Set([...WORKER_STAGES, "blank-init", "Page.enable", "Page.getFrameTree",
+const PAGE_STAGES = new Set([...WORKER_STAGES, "blank-init", "Page.enable", "Page.getFrameTree", "Runtime.getIsolateId",
   "Network.setUserAgentOverride", "Page.addScriptToEvaluateOnNewDocument", "Emulation.setDeviceMetricsOverride"]);
 
 // This is deliberately an allowlist: never persist URLs, profile names, IPC

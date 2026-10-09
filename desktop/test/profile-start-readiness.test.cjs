@@ -23,4 +23,6 @@ test("production WebContentsView and restored-profile startup initialize blank b
   assert.match(result.output, /SYNTHETIC_NAMED_WORKER_READY classic/);
   assert.match(result.output, /SYNTHETIC_NAMED_WORKER_READY module/);
   assert.match(result.output, /SYNTHETIC_FULL_PROFILE_NAMED_WORKERS_OK/);
+  assert.match(result.output, /SYNTHETIC_REUSED_RENDERER_IFRAMES_OK/);
+  assert.match(result.output, /SYNTHETIC_FULL_PROFILE_IFRAMES_OK/);
 });

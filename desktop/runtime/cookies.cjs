@@ -270,15 +270,21 @@ function createCookieStore({ safeStorage, userData }) {
   };
 }
 
-async function initializeCookies(ses, store, payload) {
+async function initializeCookies(ses, store, payload, recovery) {
   const local = await store.read(payload.profileId);
   const cloudRevision = revision(payload.cookiesUpdatedAt);
   let selected;
   let source;
+  const recovered = recovery ? await recovery.select(payload, local, {
+    cookies: parseCookies(payload.cookies ?? "[]"), cookiesUpdatedAt: cloudRevision,
+  }) : null;
   // Clean local caches defer to an explicit cloud revision/import. An unclean
   // checkpoint instead remembers its exact cloud base: it is not just a cache.
   // Comparing wall clocks from different computers is never authoritative.
-  if (local?.pending) {
+  if (recovered) {
+    selected = recovered;
+    source = recovered.source;
+  } else if (local?.pending) {
     // Compare the known base revision, never clocks on different machines.
     // A changed cloud base might be a deliberate import or another device:
     // preserve both rather than silently overwriting either snapshot.
@@ -312,7 +318,7 @@ async function initializeCookies(ses, store, payload) {
   if (selected.cookies.length && !restoreResult.installed) throw new Error("Unable to restore imported cookies: no cookies were accepted");
   const cookiesUpdatedAt = selected.cookiesUpdatedAt || new Date().toISOString();
   await store.write(payload.profileId, cookies, cookiesUpdatedAt, { pending: true, baseRevision: cloudRevision });
-  return { cookiesUpdatedAt, signature: canonicalCookies(cookies), source, skippedCookies: restoreResult.skipped,
+  return { cookiesUpdatedAt, signature: canonicalCookies(cookies), source, recoveryBackupId: recovered?.backupId, skippedCookies: restoreResult.skipped,
     cookieRestore: { installed: restoreResult.installed, total: selected.cookies.length, expired: restoreResult.expired } };
 }
 

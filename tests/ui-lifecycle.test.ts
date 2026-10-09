@@ -37,6 +37,68 @@ function fixture(running: RunningProfile[] = []) {
 }
 
 describe("desktop profile lifecycle", () => {
+  test("cookie conflict releases its lease and offers metadata-only explicit recovery", async () => {
+    const f = fixture();
+    const receiptId = "10000000-0000-4000-8000-000000000009";
+    f.bridge.listCookieRecoveryBackups = async () => ({ ok: true, backups: [] });
+    f.bridge.launchProfile = async data => {
+      f.state.launches.push(data);
+      if (!data.cookieRecovery) return { ok: false, code: "COOKIE_RECOVERY_CONFLICT", error: "Требуется восстановление cookies", recovery: {
+        receiptId, name: "Test profile", changed: false,
+        local: { revision: "2026-10-09T01:00:00Z", count: 2, activeCount: 1, cookies: "synthetic-private-content" },
+        cloud: { revision: "2026-10-09T02:00:00Z", count: 3, activeCount: 2 },
+      } };
+      return { ok: true, recoveryBackupId: "encrypted-backup-id" };
+    };
+    await expect(f.controller.start("a")).rejects.toThrow("восстановление");
+    expect(f.state.closeCalls).toEqual([{ profileId: "a", lockToken: "lease-a" }]);
+    expect(f.controller.getSnapshot().recoveries?.a?.receiptId).toBe(receiptId);
+    expect(JSON.stringify(f.controller.getSnapshot())).not.toContain("synthetic-private-content");
+    expect(JSON.stringify(f.controller.getSnapshot())).not.toContain("lease-a");
+    await f.controller.sync();
+    expect(f.state.saves).toHaveLength(0);
+    expect(f.state.launches).toHaveLength(1);
+    await f.controller.start("a", { source: "local", receiptId });
+    expect(f.state.launches[1].cookieRecovery).toEqual({ source: "local", receiptId });
+    expect(f.controller.getSnapshot().recoveries?.a).toBeUndefined();
+    expect(f.controller.getSnapshot().errors.a).toBeUndefined();
+    expect(f.controller.getSnapshot().notices.a).toContain("зашифрованном резерве");
+  });
+
+  test("malformed recovery metadata is not published and old clients cannot attempt recovery", async () => {
+    const f = fixture();
+    await expect(f.controller.start("a", { source: "local", receiptId: "test" })).rejects.toThrow("Обновите клиент");
+    expect(f.state.launches).toHaveLength(0);
+    f.bridge.launchProfile = async () => ({ ok: false, code: "COOKIE_RECOVERY_CONFLICT", error: "Cookies различаются", recovery: {
+      receiptId: "not-a-uuid", name: "Invalid", local: null, cloud: { revision: null, count: -1, activeCount: 0 }, changed: false,
+    } });
+    await expect(f.controller.start("a")).rejects.toThrow("Cookies");
+    expect(f.controller.getSnapshot().recoveries?.a).toBeUndefined();
+  });
+
+  test("recovery is never a persistent server preference and cannot replace a running session", async () => {
+    const f = fixture();
+    f.api.launch = async id => ({ ...payload(id), cookieRecovery: { source: "cloud", backupId: "server-supplied" } });
+    await f.controller.start("a");
+    expect(f.state.launches[0].cookieRecovery).toBeUndefined();
+    await expect(f.controller.start("a", { source: "cloud", backupId: "test" })).rejects.toThrow("Закройте профиль");
+    expect(f.state.launches).toHaveLength(1);
+  });
+
+  test("a changed conflict returns a fresh choice without saving cookies", async () => {
+    const f = fixture();
+    const oldReceipt = "10000000-0000-4000-8000-000000000008", newReceipt = "10000000-0000-4000-8000-000000000009";
+    f.bridge.listCookieRecoveryBackups = async () => ({ ok: true, backups: [] });
+    f.bridge.launchProfile = async () => ({ ok: false, code: "COOKIE_RECOVERY_CONFLICT", error: "Версии cookies изменились", recovery: {
+      receiptId: newReceipt, name: "Test", local: { revision: null, count: 1, activeCount: 1 }, cloud: { revision: null, count: 2, activeCount: 2 }, changed: true,
+    } });
+    await expect(f.controller.start("a", { source: "local", receiptId: oldReceipt })).rejects.toThrow("изменились");
+    expect(f.controller.getSnapshot().recoveries?.a?.receiptId).toBe(newReceipt);
+    expect(f.controller.getSnapshot().recoveries?.a?.changed).toBe(true);
+    expect(f.state.saves).toHaveLength(0);
+    expect(f.state.closeCalls[0]).not.toHaveProperty("cookies");
+  });
+
   test("font-isolated profiles refuse old engines and release the acquired lease without cookies", async () => {
     for (const supported of [undefined, false, true]) {
       const f = fixture();

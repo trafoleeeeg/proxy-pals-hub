@@ -1,6 +1,6 @@
 import { generateFingerprint } from "../../src/lib/fingerprint";
 import { ConnectionUnavailableError } from "../../src/lib/panel-connectivity";
-import type { LaunchPayload, ProfileClosed, RunningProfile, UmbraBridge, UpdateStatus } from "../../src/lib/desktop";
+import type { CookieRecoveryBackup, LaunchPayload, ProfileClosed, RunningProfile, UmbraBridge, UpdateStatus } from "../../src/lib/desktop";
 
 const scenario = new URLSearchParams(location.search).get("scenario");
 const now = "2026-09-15T00:00:00Z";
@@ -33,6 +33,9 @@ export const fixture = {
   archived: [] as ProfileClosed[],
   update: { state: "none" } as UpdateStatus,
   cookies: cookieText,
+  recoveryChanged: false,
+  recoveryFailure: false,
+  recoveryBackups: [] as CookieRecoveryBackup[],
   closedSubscriptions: () => closedListeners.size,
   emitUpdate(status: UpdateStatus) { this.update = status; updateListeners.forEach((listener) => listener(status)); },
   emitClosed(id: string) {
@@ -118,7 +121,27 @@ const bridge: UmbraBridge = {
   onPanelResume: (listener) => { resumeListeners.add(listener); return () => { resumeListeners.delete(listener); }; },
   pushBrowserSettings: async () => ({ ok: true }),
   onBrowserSettingsChanged: () => () => {},
-  launchProfile: async (payload) => { fixture.running.push({ profileId: payload.profileId, name: payload.name, lockToken: payload.lockToken }); return { ok: true }; },
+  launchProfile: async (payload) => {
+    fixture.calls.push({ method: "nativeLaunch", data: { profileId: payload.profileId, cookieRecovery: payload.cookieRecovery } });
+    if (scenario === "cookie-recovery" && payload.profileId === "p1") {
+      const changed = fixture.recoveryChanged;
+      if (!payload.cookieRecovery || changed) {
+        fixture.recoveryChanged = false;
+        return { ok: false, code: "COOKIE_RECOVERY_CONFLICT", error: "Локальные и облачные cookies различаются; требуется восстановление", recovery: {
+          receiptId: changed ? "10000000-0000-4000-8000-000000000009" : "10000000-0000-4000-8000-000000000008",
+          name: payload.name, local: { revision: now, count: 2, activeCount: 1 }, cloud: { revision: now, count: changed ? 4 : 3, activeCount: 2 }, changed,
+        } };
+      }
+      if (fixture.recoveryFailure) return { ok: false, error: "Не удалось сохранить зашифрованный резерв обеих версий cookies. Данные не заменены." };
+      const backupId = crypto.randomUUID();
+      fixture.recoveryBackups.push({ backupId, createdAt: now, selectedSource: payload.cookieRecovery.source,
+        local: { revision: now, count: 2, activeCount: 1 }, cloud: { revision: now, count: 3, activeCount: 2 } });
+      fixture.running.push({ profileId: payload.profileId, name: payload.name, lockToken: payload.lockToken });
+      return { ok: true, recoveryBackupId: backupId };
+    }
+    fixture.running.push({ profileId: payload.profileId, name: payload.name, lockToken: payload.lockToken }); return { ok: true };
+  },
+  listCookieRecoveryBackups: async () => ({ ok: true, backups: structuredClone(fixture.recoveryBackups) }),
   closeProfile: async (id) => {
     const { snapshotId: _snapshotId, ...snapshot } = fixture.emitClosed(id);
     return { ok: true, ...snapshot };

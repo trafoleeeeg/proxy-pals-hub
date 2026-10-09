@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { recordProcessEvent } = require("./process-diagnostics.cjs");
+const { createNativeFatalParser } = require("./native-fatal-diagnostics.cjs");
 
 const CHANNEL = "umbra:private-browser-protocol";
 const CHILD = "UMBRA_PRIVATE_BROWSER_CHILD";
@@ -12,7 +13,7 @@ const MAX_MESSAGE = 16 * 1024 * 1024;
 
 // Chromium's browser target is reachable through inherited anonymous pipes.
 // No HTTP/WebSocket debugging listener, port file, or renderer IPC bridge.
-function spawnBrowser(executable, args, options = {}) {
+function spawnBrowser(executable, args, options = {}, onPipeClose = () => {}) {
   const env = { ...process.env, ...options.env, [CHILD]: "1" };
   delete env.ELECTRON_RUN_AS_NODE;
   const cleanArgs = args.filter((arg) => !/^--remote-debugging-(?:port|pipe|io-pipes)(?:=|$)/.test(arg));
@@ -22,9 +23,10 @@ function spawnBrowser(executable, args, options = {}) {
   let buffer = "";
   let stopped = false;
   const decoder = new StringDecoder("utf8");
-  const stop = () => {
+  const stop = (reason) => {
     if (stopped) return;
     stopped = true;
+    try { onPipeClose(reason); } catch { /* Diagnostics must not prevent pipe cleanup. */ }
     if (child.connected) child.send({ channel: CHANNEL, closed: true }, () => {});
     // Closing the private pipe asks Electron to quit through its normal
     // before-quit handler, which durably saves profiles and the cookie outbox.
@@ -32,28 +34,28 @@ function spawnBrowser(executable, args, options = {}) {
     child.stdio[4].destroy();
   };
   const forward = (payload) => {
-    if (child.connected) child.send({ channel: CHANNEL, payload }, (error) => { if (error) stop(); });
+    if (child.connected) child.send({ channel: CHANNEL, payload }, (error) => { if (error) stop("ipc-send-failed"); });
   };
   child.stdio[4].on("data", (chunk) => {
     buffer += decoder.write(chunk);
-    if (buffer.length > MAX_MESSAGE) { stop(); return; }
+    if (buffer.length > MAX_MESSAGE) { stop("read-message-too-large"); return; }
     let index;
     while ((index = buffer.indexOf("\0")) !== -1) {
       const record = buffer.slice(0, index);
       buffer = buffer.slice(index + 1);
-      try { forward(JSON.parse(record)); } catch { stop(); return; }
+      try { forward(JSON.parse(record)); } catch { stop("message-forward-failed"); return; }
     }
   });
   child.on("message", (message) => {
     if (message?.channel !== CHANNEL || !message.payload || child.stdio[3].destroyed) return;
     const record = JSON.stringify(message.payload);
-    if (record.length > MAX_MESSAGE) { stop(); return; }
+    if (record.length > MAX_MESSAGE) { stop("write-message-too-large"); return; }
     child.stdio[3].write(record + "\0");
   });
-  child.stdio[3].on("error", stop);
-  child.stdio[4].on("error", stop);
-  child.stdio[4].on("end", stop);
-  child.on("disconnect", stop);
+  child.stdio[3].on("error", () => stop("write-error"));
+  child.stdio[4].on("error", () => stop("read-error"));
+  child.stdio[4].on("end", () => stop("read-end"));
+  child.on("disconnect", () => stop("ipc-disconnect"));
   return child;
 }
 
@@ -76,7 +78,9 @@ function superviseBrowser({ forwardOutput = false } = {}) {
   app.setPath("sessionData", coordinatorData);
   const cleanup = () => { try { fs.rmSync(coordinatorData, { recursive: true, force: true }); } catch { /* Locked coordinator cache remains in the OS temp directory. */ } };
   app.on("will-quit", cleanup);
-  const child = spawnBrowser(process.execPath, process.argv.slice(1));
+  const child = spawnBrowser(process.execPath, process.argv.slice(1), {},
+    (reason) => diagnose("coordinator-pipe-closed", { reason }));
+  child.stderr.on("data", createNativeFatalParser((category) => diagnose("coordinator-native-fatal", { category, childPid: child.pid })));
   if (forwardOutput) { child.stdout.pipe(process.stdout); child.stderr.pipe(process.stderr); }
   else { child.stdout.resume(); child.stderr.resume(); }
   let finished = false;

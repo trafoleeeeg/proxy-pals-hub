@@ -43,6 +43,50 @@ test("arbitrary event names and unrecognized Electron details are not logged", (
   }
 });
 
+test("Windows unsigned native exit codes and signed exit codes retain their original number", (t) => {
+  const { directory, file } = fixture(t);
+  const codes = [-2147483648, -1073741819, -1, 0, 1, 2147483647, 2147483648, 0xC0000005, 0xC0000409, 0xFFFFFFFF];
+  for (const exitCode of codes) recordProcessEvent(directory, "coordinator-child-exit", { exitCode, childPid: 123 });
+  const rows = fs.readFileSync(file, "utf8").trim().split("\n").map(JSON.parse);
+  assert.deepEqual(rows.map(row => row.exitCode), codes);
+});
+
+test("exit code validation rejects out-of-range values without widening process IDs", (t) => {
+  const { directory, file } = fixture(t);
+  for (const value of [-2147483649, 4294967296, 1.5, Infinity, -Infinity, NaN, "3221225477", null]) {
+    recordProcessEvent(directory, "coordinator-child-exit", { exitCode: value });
+  }
+  for (const value of [-1, 0, 1.5, 2147483648, 0xFFFFFFFF, Infinity, "123", null]) {
+    recordProcessEvent(directory, "coordinator-child-exit", { childPid: value, contentsId: value });
+  }
+  const rows = fs.readFileSync(file, "utf8").trim().split("\n").map(JSON.parse);
+  for (const row of rows) {
+    for (const key of ["exitCode", "childPid", "contentsId"]) assert.equal(Object.hasOwn(row, key), false);
+  }
+});
+
+test("coordinator diagnostics persist only fixed fatal categories and pipe reasons", (t) => {
+  const { directory, file } = fixture(t);
+  recordProcessEvent(directory, "coordinator-native-fatal", {
+    category: "native-fatal", childPid: 123, source: "private.cc", line: 123, message: "private-cookie", url: "https://private.example",
+  });
+  recordProcessEvent(directory, "coordinator-native-fatal", { category: "v8-oom" });
+  recordProcessEvent(directory, "coordinator-native-fatal", { category: "private", reason: "private" });
+  recordProcessEvent(directory, "coordinator-pipe-closed", { reason: "message-forward-failed", payload: "private-cookie" });
+  recordProcessEvent(directory, "coordinator-pipe-closed", { reason: "private" });
+  assert.equal(recordProcessEvent(directory, "panel-bundle-fallback", { error: "private-cookie" }), true);
+  const raw = fs.readFileSync(file, "utf8");
+  const rows = raw.trim().split("\n").map(JSON.parse);
+  assert.equal(rows[0].category, "native-fatal");
+  assert.equal(rows[1].category, "v8-oom");
+  assert.equal(rows[2].category, undefined);
+  assert.equal(rows[2].reason, undefined);
+  assert.equal(rows[3].reason, "message-forward-failed");
+  assert.equal(rows[4].reason, undefined);
+  assert.equal(rows[5].event, "panel-bundle-fallback");
+  assert.doesNotMatch(raw, /private|cookie|"source"|"message"|"payload"|https/);
+});
+
 test("close progress records only approved phases without profile identifiers", (t) => {
   const { directory, file } = fixture(t);
   recordProcessEvent(directory, "profile-close-phase", { phase: "cookies", profileId: "private-id", url: "https://private.example" });

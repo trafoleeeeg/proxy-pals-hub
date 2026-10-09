@@ -52,9 +52,9 @@ export function PanelConnection({ recovered, fullPage = false, initialError }: {
       // event, including sleep without a navigator.onLine transition.
       if (now - lastTick > 45_000) lost();
       lastTick = now;
-      if (connectionUnavailable()) wake();
+      if (task.needsRecovery()) wake();
     }, 15_000);
-    if (offline || initialError instanceof SessionExpiredError) wake();
+    if (task.needsRecovery()) wake();
     return () => {
       disposed = true;
       task.dispose();

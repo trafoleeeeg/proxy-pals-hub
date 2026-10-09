@@ -6,6 +6,7 @@ const MAX_BYTES = 128 * 1024;
 const EVENTS = new Set([
   "browser-start", "browser-before-quit", "browser-will-quit", "browser-uncaught-exception",
   "coordinator-start", "coordinator-before-quit", "coordinator-child-error", "coordinator-child-exit",
+  "coordinator-pipe-closed", "coordinator-native-fatal", "panel-bundle-fallback",
   "coordinator-disconnect", "renderer-gone", "child-process-gone",
   "profile-close-phase",
   "profile-cleanup-failed",
@@ -21,6 +22,9 @@ const PROCESS_TYPES = new Set([
   "GPU", "Utility", "Zygote", "Sandbox helper", "Pepper Plugin", "Pepper Plugin Broker", "Unknown",
 ]);
 const SIGNALS = new Set(["SIGABRT", "SIGBUS", "SIGFPE", "SIGILL", "SIGINT", "SIGKILL", "SIGSEGV", "SIGTERM"]);
+const PIPE_REASONS = new Set(["read-message-too-large", "write-message-too-large", "message-forward-failed",
+  "ipc-send-failed", "write-error", "read-error", "read-end", "ipc-disconnect"]);
+const FATAL_CATEGORIES = new Set(["native-fatal", "v8-oom"]);
 const WORKER_REASONS = new Set(["setup-failed", "close-failed", "resume-failed", "started-unprotected", "worker-crashed", "worker-retired", "worker-restarted", "termination-unconfirmed", "protocol-disconnect"]);
 const WORKER_STAGES = new Set(["context", "Inspector.enable", "Runtime.enable", "Emulation.setUserAgentOverride",
   "Emulation.setTimezoneOverride", "Emulation.setLocaleOverride", "Emulation.setHardwareConcurrencyOverride",
@@ -39,6 +43,8 @@ function recordProcessEvent(userData, event, details = {}, options = {}) {
       if (Number.isSafeInteger(details.elapsedMs) && details.elapsedMs >= 0) row.elapsedMs = details.elapsedMs;
     }
     if (REASONS.has(details.reason)) row.reason = details.reason;
+    if (event === "coordinator-pipe-closed" && PIPE_REASONS.has(details.reason)) row.reason = details.reason;
+    if (event === "coordinator-native-fatal" && FATAL_CATEGORIES.has(details.category)) row.category = details.category;
     if (event === "background-worker") {
       if (WORKER_REASONS.has(details.reason)) row.reason = details.reason;
       if (WORKER_STAGES.has(details.stage)) row.stage = details.stage;
@@ -47,8 +53,11 @@ function recordProcessEvent(userData, event, details = {}, options = {}) {
     }
     if (PROCESS_TYPES.has(details.processType)) row.processType = details.processType;
     if (SIGNALS.has(details.signal)) row.signal = details.signal;
-    for (const key of ["exitCode", "childPid", "contentsId"]) {
-      if (Number.isSafeInteger(details[key]) && details[key] >= -2147483648 && details[key] <= 2147483647) row[key] = details[key];
+    // Node's Windows child-process exit codes are unsigned DWORDs. Preserve
+    // the original number, including native statuses such as 0xC0000005.
+    if (Number.isSafeInteger(details.exitCode) && details.exitCode >= -2147483648 && details.exitCode <= 4294967295) row.exitCode = details.exitCode;
+    for (const key of ["childPid", "contentsId"]) {
+      if (Number.isSafeInteger(details[key]) && details[key] > 0 && details[key] <= 2147483647) row[key] = details[key];
     }
     row.freeMemoryMb = Math.round(os.freemem() / 1048576);
     const directory = path.join(userData, "diagnostics");

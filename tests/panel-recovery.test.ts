@@ -5,6 +5,53 @@ import { assertPanelRoutesReady, createPanelRecovery } from "../src/lib/panel-re
 
 afterEach(() => setConnectionUnavailable(false));
 
+test("a network error route recovers even when another check clears offline before each attempt", async () => {
+  let refetches = 0;
+  const task = createPanelRecovery({
+    initialError: new ConnectionUnavailableError(),
+    verify: async () => ({ id: "owner" }),
+    recovered: async () => { if (++refetches === 1) throw new ConnectionUnavailableError(); },
+    expired: () => { throw new Error("must not expire valid auth"); },
+  });
+  try {
+    setConnectionUnavailable(false);
+    expect(task.needsRecovery()).toBe(true);
+    expect((await task.run()).status).toBe("offline");
+    expect(refetches).toBe(1);
+    setConnectionUnavailable(false);
+    expect(task.needsRecovery()).toBe(true);
+    expect((await task.run()).status).toBe("recovered");
+    expect(refetches).toBe(2);
+    expect(task.needsRecovery()).toBe(false);
+    expect((await task.run()).status).toBe("recovered");
+    expect(refetches).toBe(2);
+  } finally { task.dispose(); }
+});
+
+test("automatic route recovery stops on expiry or application failure and explicit retry remains available", async () => {
+  let user: object | null = null, fails = true, exits = 0, refetches = 0;
+  const task = createPanelRecovery({
+    initialError: new ConnectionUnavailableError(), verify: async () => user,
+    recovered: async () => { refetches++; if (fails) throw new Error("Server function not found"); },
+    expired: () => { exits++; },
+  });
+  try {
+    expect(task.needsRecovery()).toBe(true);
+    expect((await task.run()).status).toBe("expired");
+    expect(exits).toBe(1);
+    expect(task.needsRecovery()).toBe(false);
+    user = { id: "owner" };
+    expect((await task.run({ retry: true })).status).toBe("failed");
+    expect(refetches).toBe(1);
+    expect(task.needsRecovery()).toBe(false);
+    expect((await task.run()).status).toBe("skipped");
+    fails = false;
+    expect((await task.run({ retry: true })).status).toBe("recovered");
+    expect(refetches).toBe(2);
+    expect(task.needsRecovery()).toBe(false);
+  } finally { task.dispose(); }
+});
+
 test("a resolved router invalidation with a failed route cannot declare recovery", async () => {
   let online = false, resets = 0;
   const root = createRootRoute();

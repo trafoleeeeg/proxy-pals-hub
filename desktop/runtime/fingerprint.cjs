@@ -190,7 +190,10 @@ async function prepareFingerprintTarget(wc, { isClosing = () => false, timeout =
   }
 }
 
-async function applyFingerprint(wc, fp, { onFailure = () => {}, onDiagnostic = () => {}, isClosing = () => false } = {}) {
+async function applyFingerprint(wc, fp, { onFailure = () => {}, onDiagnostic = () => {}, onTrace = () => {}, isClosing = () => false } = {}) {
+  const trace = (stage, phase, elapsedMs, targetType = "page") => {
+    try { onTrace({ stage, phase, elapsedMs, targetType, contentsId: wc.id }); } catch { /* Never alter protection. */ }
+  };
   const diagnose = (reason, stage = "context", targetType = "page") => {
     if (isClosing() || wc.isDestroyed?.()) return;
     try { onDiagnostic({ reason, stage, targetType }); } catch { /* Never alter protection. */ }
@@ -202,8 +205,10 @@ async function applyFingerprint(wc, fp, { onFailure = () => {}, onDiagnostic = (
     if (isClosing() || wc.isDestroyed?.()) throw new Error("Fingerprint target is closing");
   };
   ensureOpen();
-  try { await prepareFingerprintTarget(wc, { isClosing }); }
-  catch (error) { diagnose("blank-init-failed", "blank-init"); throw error; }
+  const blankStarted = Date.now();
+  trace("blank-init", "begin");
+  try { await prepareFingerprintTarget(wc, { isClosing }); trace("blank-init", "done", Date.now() - blankStarted); }
+  catch (error) { trace("blank-init", "failed", Date.now() - blankStarted); diagnose("blank-init-failed", "blank-init"); throw error; }
   ensureOpen();
   wc.setUserAgent(fp.userAgent);
   wc.setWebRTCIPHandlingPolicy(WEBRTC_POLICY);
@@ -227,8 +232,12 @@ async function applyFingerprint(wc, fp, { onFailure = () => {}, onDiagnostic = (
     onFailure("Защита страницы недоступна, профиль остановлен");
   };
   const send = async (method, params, id) => {
-    try { return await sendCommand(method, params, id); }
+    const started = Date.now();
+    const targetType = id ? (pageChildren.has(id) ? "page" : "worker") : "page";
+    trace(method, "begin", undefined, targetType);
+    try { const result = await sendCommand(method, params, id); trace(method, "done", Date.now() - started, targetType); return result; }
     catch (error) {
+      trace(method, "failed", Date.now() - started, targetType);
       throw Object.assign(new Error("Fingerprint protection command failed"), { privacyStage: error?.privacyStage || method });
     }
   };

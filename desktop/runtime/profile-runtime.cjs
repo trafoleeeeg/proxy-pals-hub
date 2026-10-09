@@ -70,6 +70,11 @@ function createProfileRuntime(electron, options = {}) {
   const cleanupTimeoutMs = options.cleanupTimeoutMs ?? 4000;
   const shutdownTimeoutMs = options.shutdownTimeoutMs ?? 15000;
   const profiles = new Map();
+  const diagnose = (entry, event, details = {}) => {
+    try { (options.recordDiagnostic || recordProcessEvent)(app?.getPath?.("userData"), event,
+      { runId: entry?.diagnosticRunId, tabCount: entry?.windows?.size, closing: !!entry?.closingRequested, ...details }); }
+    catch { /* A failed diagnostic write must not change profile behavior. */ }
+  };
   let shuttingDown = false;
   let store;
   let recoveryRef;
@@ -108,6 +113,11 @@ function createProfileRuntime(electron, options = {}) {
   function snapshot(entry, issueAcknowledgement = false, durableSaveProtocol = false) {
     entry.snapshotQueue = entry.snapshotQueue.catch(() => {}).then(async () => {
       if (issueAcknowledgement && (profiles.get(entry.profileId) !== entry || entry.state !== "running" || entry.closingRequested)) return null;
+      const started = Date.now();
+      const operationId = randomUUID();
+      let ok = true;
+      diagnose(entry, "profile-snapshot", { phase: "begin", operationId });
+      try {
       await entry.ses.cookies.flushStore();
       entry.ses.flushStorageData();
       const cookies = await readSessionCookies(entry.ses);
@@ -142,6 +152,13 @@ function createProfileRuntime(electron, options = {}) {
       // memory without bound. An expired receipt is rejected without mutation.
       if (entry.issuedCookieSnapshots.size > 16) entry.issuedCookieSnapshots.delete(entry.issuedCookieSnapshots.keys().next().value);
       return { ...result, snapshotId, snapshotRevision, snapshotSequence, baseRevision: entry.cloudCookieRevision, cookieHash: hash, unchanged };
+      } catch (error) {
+        ok = false;
+        diagnose(entry, "profile-snapshot", { phase: "failed", operationId, elapsedMs: Date.now() - started, errorCode: error?.code });
+        throw error;
+      } finally {
+        diagnose(entry, "profile-snapshot", { phase: "done", operationId, elapsedMs: Date.now() - started, ok });
+      }
     }).catch(() => { throw new Error("Unable to flush encrypted profile cookies"); });
     return entry.snapshotQueue;
   }
@@ -233,7 +250,8 @@ function createProfileRuntime(electron, options = {}) {
         entry.pendingWindows.add(pending);
         return pending;
       },
-      closeProfile: () => closeProfileWindow(entry.profileId),
+      closeProfile: source => closeProfileWindow(entry.profileId, source),
+      recordDiagnostic: (event, details) => diagnose(entry, event, details),
       importCookies: async (text) => {
         const cookies = parseCookieImport(text);
         const result = await applyImportedCookies(entry.ses, cookies);
@@ -250,7 +268,7 @@ function createProfileRuntime(electron, options = {}) {
         const ids = new Set(entry.allowedExtensions || []);
         if (enabled) ids.add(id); else ids.delete(id);
         await extensionConsent().write(entry.profileId, [...ids]);
-        await closeProfileWindow(entry.profileId);
+        await closeProfileWindow(entry.profileId, "extension-change");
       },
       getZoomLevel: () => entry.zoomLevel || 0,
       getPrivacy: (url) => {
@@ -272,7 +290,7 @@ function createProfileRuntime(electron, options = {}) {
         await privacyStore().writePermissions(entry.profileId, rules);
         // Restart the entire profile: reload alone cannot revoke capabilities
         // already captured by shared workers, frames or another open tab.
-        await closeProfileWindow(entry.profileId);
+        await closeProfileWindow(entry.profileId, "privacy-change");
       },
       setZoomLevel: async (level) => { entry.zoomLevel = level; notifyBrowserSettings(entry); },
       setExtensionPinned: async (id, pinned) => {
@@ -451,6 +469,7 @@ function createProfileRuntime(electron, options = {}) {
     if (entry.proxySwitching) throw new Error("Смена прокси уже выполняется");
     if (target.id === entry.activeProxyId) return true;
     entry.proxySwitching = true;
+    diagnose(entry, "proxy-operation", { operation: "switch", phase: "begin" });
     const previousRuntime = entry.proxyRuntime;
     const previousTarget = entry.proxyTarget || null;
     const previousId = entry.activeProxyId || null;
@@ -474,6 +493,7 @@ function createProfileRuntime(electron, options = {}) {
       notifyBrowserSettings(entry);
       entry.browser?.publish?.();
       void checkConnection(entry);
+      diagnose(entry, "proxy-operation", { operation: "switch", phase: "done", ok: true });
       return true;
     } catch {
       // Трафик остаётся заблокированным, пока прежний сервер не поднимется снова.
@@ -488,6 +508,7 @@ function createProfileRuntime(electron, options = {}) {
         blockSession(entry.ses);
       }
       entry.lastError = "Не удалось переключить прокси";
+      diagnose(entry, "proxy-operation", { operation: "switch", phase: "failed", ok: false });
       entry.browser?.publish?.();
       throw new Error("Не удалось переключить прокси. Трафик остался на прежнем сервере");
     } finally { entry.proxySwitching = false; }
@@ -575,10 +596,12 @@ function createProfileRuntime(electron, options = {}) {
   function checkConnection(entry) {
     if (entry.checkJob) return entry.checkJob;
     if (!entry.proxyTarget || !options.checkProxy || entry.state !== "running") return Promise.resolve();
+    diagnose(entry, "proxy-operation", { operation: "check", phase: "begin" });
     const job = Promise.resolve().then(() => options.checkProxy(entry.proxyTarget)).then((result) => {
       entry.connection = result; entry.checkedAt = new Date().toISOString();
+      diagnose(entry, "proxy-operation", { operation: "check", phase: "done", ok: !!result?.ok });
       if (!result?.ok) void failoverProxy(entry).catch(() => {});
-    }).catch(() => { entry.connection = { ok: false }; void failoverProxy(entry).catch(() => {}); }).finally(() => {
+    }).catch(() => { diagnose(entry, "proxy-operation", { operation: "check", phase: "failed", ok: false }); entry.connection = { ok: false }; void failoverProxy(entry).catch(() => {}); }).finally(() => {
       entry.checkJob = null; entry.browser?.publish?.();
     });
     entry.checkJob = job;
@@ -595,12 +618,13 @@ function createProfileRuntime(electron, options = {}) {
     entry.primary = entry.browser.shell;
     if (entry.closingRequested) throw new Error("Профиль закрывается");
     const win = entry.browser.createTab({ pinnedHome: primary, activate });
+    diagnose(entry, "profile-lifecycle", { phase: "tabs", contentsId: win.webContents.id });
     if (primary) entry.homeTab = win;
     entry.windows.add(win);
     win.on("close", (event) => {
       event.preventDefault();
       if (entry.windows.size === 1) {
-        closeProfileWindow(entry.profileId).catch(() => { entry.lastError = "Profile close failed; local data retained"; });
+        closeProfileWindow(entry.profileId, "last-tab-close").catch(() => { entry.lastError = "Profile close failed; local data retained"; });
       } else if (!entry.closingRequested) {
         if (!win.isDestroyed()) win.destroy();
         void snapshot(entry).catch(() => { entry.lastError = "Не удалось сохранить текущую сессию вкладки"; });
@@ -610,7 +634,7 @@ function createProfileRuntime(electron, options = {}) {
       entry.windows.delete(win);
       if (!entry.closingRequested) recordTabs(entry);
       if (!entry.windows.size && entry.state === "running" && !entry.closingRequested) {
-        closeProfileWindow(entry.profileId).catch(() => { entry.lastError = "Profile close failed; local data retained"; });
+        closeProfileWindow(entry.profileId, "last-tab-destroyed").catch(() => { entry.lastError = "Profile close failed; local data retained"; });
       }
     });
     win.webContents.on("did-navigate", () => recordTabs(entry));
@@ -641,11 +665,12 @@ function createProfileRuntime(electron, options = {}) {
       // initialization, then attaches CDP, before any remote navigation.
       // Starting navigation and attachment concurrently can bind DevTools twice.
       const fingerprintOptions = { isClosing: () => entry.closingRequested || win.closing || win.isDestroyed(),
-        onDiagnostic: details => recordProcessEvent(app?.getPath?.("userData"), "page-protection", details), onFailure: () => {
+        onTrace: details => diagnose(entry, "protection-command", details),
+        onDiagnostic: details => diagnose(entry, "page-protection", details), onFailure: () => {
         if (entry.closingRequested || win.closing || win.isDestroyed()) return;
         entry.lastError = "Защита страницы недоступна, профиль остановлен";
         blockSession(entry.ses);
-        void closeProfileWindow(entry.profileId).then(
+        void closeProfileWindow(entry.profileId, "page-protection").then(
           () => app?.emit?.("umbra:profile-protection-failed", { saved: true, kind: "page" }),
           () => app?.emit?.("umbra:profile-protection-failed", { saved: false, kind: "page" }),
         );
@@ -694,6 +719,7 @@ function createProfileRuntime(electron, options = {}) {
     if (payload.lockToken != null && (typeof payload.lockToken !== "string" || payload.lockToken.length > 512)) throw new Error("Некорректный токен блокировки профиля");
     if (payload.deviceId != null && (typeof payload.deviceId !== "string" || !payload.deviceId || payload.deviceId.length > 512 || /[\r\n\0]/.test(payload.deviceId))) throw new Error("Некорректный идентификатор устройства");
     const entry = {
+      diagnosticRunId: randomUUID(), launchStage: "starting",
       profileId: id, name: typeof payload.name === "string" ? payload.name.slice(0, 200) : "Profile",
       lockToken: payload.lockToken ?? null, deviceId: payload.deviceId ?? null, partition: `persist:profile-${id}`,
       state: "starting", startedAt: new Date().toISOString(), windows: new Set(), pendingWindows: new Set(),
@@ -710,8 +736,11 @@ function createProfileRuntime(electron, options = {}) {
     entry.zoomLevel = initialSettings?.zoomLevel || 0;
     entry.settingsRevision = initialSettings?.revision || 0;
     profiles.set(id, entry);
+    const launchStage = phase => { entry.launchStage = phase; diagnose(entry, "profile-lifecycle", { phase }); };
+    launchStage("starting");
     entry.startPromise = Promise.resolve().then(async () => {
       try {
+        launchStage("session");
         entry.ses = session.fromPartition(entry.partition);
         blockSession(entry.ses);
         if (!backgroundWorkerSessionSafe(entry.ses)) throw new Error("Background worker shutdown failed; restart Umbra");
@@ -730,6 +759,7 @@ function createProfileRuntime(electron, options = {}) {
         for (const extension of extensionApi.getAllExtensions?.() || []) extensionApi.removeExtension(extension.id);
         const defaultUA = entry.ses.getUserAgent().replace(/\s(?:Electron|Umbra)\/[^ ]+/g, "");
         entry.fp = normalizeFingerprint(payload.fingerprint || {}, defaultUA);
+        launchStage("fingerprint");
         await applyFontIsolation(entry.ses, entry.fp, { app });
         applyNativeScreenMetrics(entry.ses, entry.fp, {
           required: process.env.UMBRA_REQUIRE_NATIVE_SCREEN === "1" || (process.platform === "win32" && electron.app?.isPackaged === true),
@@ -738,12 +768,14 @@ function createProfileRuntime(electron, options = {}) {
           required: process.env.UMBRA_REQUIRE_NATIVE_HARDWARE === "1" || (process.platform === "win32" && electron.app?.isPackaged === true),
         });
         entry.fp.hardwarePermissions = await privacyStore().readPermissions(id);
+        launchStage("workers");
         entry.backgroundWorkers = await configureBackgroundWorkers(entry.ses, entry.fp, {
-          onDiagnostic: (details) => recordProcessEvent(app?.getPath?.("userData"), "background-worker", details),
+          onTrace: details => diagnose(entry, "protection-command", details),
+          onDiagnostic: (details) => diagnose(entry, "background-worker", details),
           onFailure: (message) => {
           entry.lastError = message;
           blockSession(entry.ses);
-          void closeProfileWindow(entry.profileId).then(
+          void closeProfileWindow(entry.profileId, "worker-protection").then(
             () => app?.emit?.("umbra:profile-protection-failed", { saved: true }),
             () => app?.emit?.("umbra:profile-protection-failed", { saved: false }),
           );
@@ -763,6 +795,7 @@ function createProfileRuntime(electron, options = {}) {
         entry.proxyFailover = initialSettings?.proxyFailover === true;
         const selected = initialSettings?.activeProxyId ? entry.proxyPool.find((item) => item.id === initialSettings.activeProxyId) : null;
         let launchProxy = selected ? proxyConnectionOf(selected) : payload.proxy;
+        launchStage("proxy");
         try {
           entry.proxyRuntime = await setupProxy(entry.ses, launchProxy);
         } catch (proxyFailure) {
@@ -781,6 +814,7 @@ function createProfileRuntime(electron, options = {}) {
         }
          installResourceRecovery(entry);
         registerCookieTransport(entry.ses, cookieTransport(entry.ses));
+        launchStage("cookies");
         const initialized = await initializeCookies(entry.ses, cookieStore(), { ...payload, profileId: id }, cookieRecovery());
         entry.saveAttempts = initialized.saveAttempts;
         entry.cookiesUpdatedAt = initialized.cookiesUpdatedAt;
@@ -788,6 +822,7 @@ function createProfileRuntime(electron, options = {}) {
         entry.cookieSource = initialized.source;
         entry.cookieRestore = initialized.cookieRestore;
         entry.recoveryBackupId = initialized.recoveryBackupId;
+        launchStage("extensions");
         entry.extensionsLoaded = new Map();
         entry.allowedExtensions = await extensionConsent().read(id);
         if (extensionStore) {
@@ -808,6 +843,7 @@ function createProfileRuntime(electron, options = {}) {
           void saveBookmarks(entry, entry.bookmarks);
         }
       const saved = await tabStore().read(id).catch(() => ({ tabs: [], activeIndex: 0 }));
+      launchStage("tabs");
       const restoreSaved = saved.tabs.length > 0 && !hasExplicitStartUrl;
       const plan = restoreSaved ? saved.tabs : (url === "about:blank" ? [] : [url]);
       await makeWindow(entry, "about:blank", true);
@@ -819,6 +855,7 @@ function createProfileRuntime(electron, options = {}) {
       if (focusTab && !focusTab.isDestroyed()) focusTab.show?.();
         entry.browser?.markReady?.();
         entry.state = "running";
+        launchStage("running");
         watchCookies(entry);
         entry.browser?.publish?.();
         notifyBrowserSettings(entry);
@@ -826,6 +863,7 @@ function createProfileRuntime(electron, options = {}) {
         loadBookmarkIcons(entry);
         return status(entry);
       } catch (error) {
+        diagnose(entry, "profile-lifecycle", { phase: "failed", stage: entry.launchStage, errorCode: error?.code });
         entry.state = "failed";
         unwatchCookies(entry);
          uninstallResourceRecovery(entry);
@@ -910,9 +948,10 @@ function createProfileRuntime(electron, options = {}) {
     return entry.snapshotQueue;
   }
 
-  function closeProfileWindow(id) {
+  function closeProfileWindow(id, source = "api") {
     const entry = profiles.get(profileId(id));
     if (!entry) return Promise.resolve(null);
+    diagnose(entry, "profile-close-request", { source });
     if (entry.closePromise) return entry.closePromise;
     entry.closingRequested = true;
     // The user's close action is immediate; durable cleanup continues behind
@@ -921,7 +960,8 @@ function createProfileRuntime(electron, options = {}) {
     // Revocation must block immediately, even while an asynchronous launch or
     // durable cookie save is still in flight.
     if (entry.ses) blockSession(entry.ses);
-    const closePhase = (phase) => recordProcessEvent(app?.getPath?.("userData"), "profile-close-phase", { phase });
+    const closeStarted = Date.now();
+    const closePhase = phase => diagnose(entry, "profile-close-phase", { phase, source, elapsedMs: Date.now() - closeStarted });
     const requireRestart = () => {
       quarantineBackgroundWorkers(entry.ses);
       entry.restartRequired = true;
@@ -939,7 +979,7 @@ function createProfileRuntime(electron, options = {}) {
           const started = Date.now();
           try { await within(Promise.resolve().then(task), timeout); }
           catch {
-            recordProcessEvent(app?.getPath?.("userData"), "profile-cleanup-failed", { operation, elapsedMs: Date.now() - started });
+            diagnose(entry, "profile-cleanup-failed", { operation, elapsedMs: Date.now() - started });
             requireRestart();
           }
         };
@@ -974,7 +1014,7 @@ function createProfileRuntime(electron, options = {}) {
       if (entry.proxyRuntime) {
         try { await within(Promise.resolve().then(() => entry.proxyRuntime.dispose()), cleanupTimeoutMs); }
         catch {
-          recordProcessEvent(app?.getPath?.("userData"), "profile-cleanup-failed", { operation: "proxy" });
+          diagnose(entry, "profile-cleanup-failed", { operation: "proxy" });
           requireRestart();
         }
       }
@@ -1004,7 +1044,7 @@ function createProfileRuntime(electron, options = {}) {
   async function closeAllProfiles() {
     shuttingDown = true;
     try {
-      const results = await Promise.allSettled([...profiles.keys()].map(closeProfileWindow));
+      const results = await Promise.allSettled([...profiles.keys()].map(id => closeProfileWindow(id, "app-quit")));
       if (results.some((result) => result.status === "rejected")) throw new Error("Some profiles could not be flushed; retry shutdown");
     } finally { shuttingDown = false; }
   }

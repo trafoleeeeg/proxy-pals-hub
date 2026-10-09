@@ -3,7 +3,8 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { recordProcessEvent } = require("../runtime/process-diagnostics.cjs");
+const { recordProcessEvent, maintainProcessJournal, startProcessJournalMaintenance, observeContents } = require("../runtime/process-diagnostics.cjs");
+const { EventEmitter } = require("node:events");
 
 function fixture(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "umbra-process-diagnostics-"));
@@ -149,4 +150,105 @@ test("worker diagnostics retain only approved stages, reasons and outcomes", (t)
   assert.equal(rows[0].outcome, "stopped");
   for (const key of ["reason", "stage", "workerType", "outcome"]) assert.equal(Object.hasOwn(rows[1], key), false);
   assert.doesNotMatch(raw, /private|secret|fingerprint|targetId|https/);
+});
+
+test("lifecycle traces correlate technical runs and reject secret fields and arbitrary codes", t => {
+  const { directory, file } = fixture(t);
+  const runId = "10000000-0000-4000-8000-000000000009";
+  recordProcessEvent(directory, "profile-close-request", { runId, source: "shell-close", profileId: "private-id", cookies: "private-cookie", stack: "private-token" });
+  recordProcessEvent(directory, "ipc-operation", { operationId: runId, operation: "close-profile", phase: "failed", elapsedMs: 35, errorCode: "ENOSPC", ok: false });
+  recordProcessEvent(directory, "profile-lifecycle", { runId: "private", stage: "cookies", phase: "failed", errorCode: "private", source: "private", version: "private" });
+  const raw = fs.readFileSync(file, "utf8");
+  const rows = raw.trim().split("\n").map(JSON.parse);
+  assert.equal(rows[0].runId, runId);
+  assert.equal(rows[0].source, "shell-close");
+  assert.equal(rows[1].bootId, rows[0].bootId);
+  assert.ok(rows[1].seq > rows[0].seq);
+  assert.ok(rows[1].uptimeMs >= rows[0].uptimeMs);
+  assert.equal(rows[1].errorCode, "ENOSPC");
+  assert.equal(rows[1].elapsedMs, 35);
+  assert.equal(rows[2].runId, undefined);
+  assert.equal(rows[2].stage, "cookies");
+  assert.doesNotMatch(raw, /private|profileId|stack|token/);
+});
+
+test("UTC day rotation keeps recent evidence and removes rows older than 24 hours", t => {
+  const { directory, file } = fixture(t);
+  const now = Date.parse("2026-10-10T00:01:00Z");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, [{ at: "2026-10-08T23:59:00Z", event: "browser-start" }, { at: "2026-10-09T23:59:00Z", event: "renderer-gone" }].map(JSON.stringify).join("\n") + "\n");
+  fs.utimesSync(file, new Date(now - 120000), new Date(now - 120000));
+  assert.equal(maintainProcessJournal(directory, { now }), true);
+  assert.equal(fs.existsSync(file), false);
+  const previous = fs.readFileSync(file + ".old", "utf8").trim().split("\n").map(JSON.parse);
+  assert.deepEqual(previous.map(row => row.event), ["renderer-gone"]);
+  assert.equal(maintainProcessJournal(directory, { now: now + 24 * 3600000 }), true);
+  assert.equal(fs.existsSync(file + ".old"), false);
+});
+
+test("idle maintenance expires stale logs even without any new events", t => {
+  const { directory, file } = fixture(t);
+  recordProcessEvent(directory, "browser-start");
+  const future = Date.now() + 2 * 24 * 3600000;
+  assert.equal(maintainProcessJournal(directory, { now: future }), true);
+  assert.equal(fs.existsSync(file), false);
+  assert.equal(fs.existsSync(file + ".old"), false);
+  const stop = startProcessJournalMaintenance(directory);
+  assert.equal(typeof stop, "function");
+  stop(); stop();
+});
+
+test("many diagnostic events retain only two bounded segments", t => {
+  const { directory, file } = fixture(t);
+  for (let i = 0; i < 200; i++) assert.equal(recordProcessEvent(directory, "process-health", { rssMb: 100, heapMb: 20 }, { maxBytes: 1024 }), true);
+  for (const segment of [file, file + ".old"]) {
+    assert.ok(fs.statSync(segment).size <= 1400);
+    for (const row of fs.readFileSync(segment, "utf8").trim().split("\n")) assert.equal(JSON.parse(row).event, "process-health");
+  }
+  assert.deepEqual(fs.readdirSync(path.dirname(file)).sort(), ["process-events.jsonl", "process-events.jsonl.old"]);
+});
+
+test("contents observer records numeric load failures and teardown without URLs or error messages", t => {
+  const { directory, file } = fixture(t);
+  const contents = new EventEmitter(); contents.id = 19; contents.debugger = new EventEmitter();
+  observeContents(contents, (event, details) => recordProcessEvent(directory, event, details), "profile-tab");
+  contents.emit("did-start-loading");
+  contents.emit("did-navigate", {}, "https://private.example/token");
+  contents.emit("did-fail-load", {}, -105, "private-error", "https://private.example/token", true);
+  contents.debugger.emit("detach", {}, "private-reason");
+  contents.emit("destroyed");
+  const raw = fs.readFileSync(file, "utf8");
+  const rows = raw.trim().split("\n").map(JSON.parse);
+  assert.deepEqual(rows.map(row => row.phase), ["did-start-loading", "did-navigate", "did-fail-load", "debugger-detached", "destroyed"]);
+  assert.equal(rows[2].netError, -105);
+  assert.equal(rows[2].mainFrame, true);
+  assert.doesNotMatch(raw, /private|https|token/);
+  observeContents(new EventEmitter(), () => { throw new Error("write failed"); }, "panel");
+});
+
+test("protection commands retain method and timing, never parameters or responses", t => {
+  const { directory, file } = fixture(t);
+  recordProcessEvent(directory, "protection-command", { phase: "begin", stage: "Runtime.evaluate", targetType: "page", params: { expression: "private-cookie" } });
+  recordProcessEvent(directory, "protection-command", { phase: "done", stage: "Runtime.evaluate", elapsedMs: 3, response: "private-token" });
+  const raw = fs.readFileSync(file, "utf8");
+  const rows = raw.trim().split("\n").map(JSON.parse);
+  assert.equal(rows[0].stage, "Runtime.evaluate");
+  assert.equal(rows[1].elapsedMs, 3);
+  assert.doesNotMatch(raw, /private|params|response|expression/);
+});
+
+test("destroyed contents events never re-read the native ID getter", t => {
+  const { directory, file } = fixture(t);
+  const contents = new EventEmitter();
+  let dead = false;
+  Object.defineProperty(contents, "id", { get() { if (dead) throw new Error("Object has been destroyed"); return 29; } });
+  observeContents(contents, (event, details) => recordProcessEvent(directory, event, details), "profile-tab");
+  dead = true;
+  assert.doesNotThrow(() => contents.emit("destroyed"));
+  const row = JSON.parse(fs.readFileSync(file, "utf8").trim());
+  assert.equal(row.phase, "destroyed");
+  assert.equal(row.contentsId, 29);
+  const failing = new EventEmitter();
+  observeContents(failing, () => { throw new Error("ENOSPC"); }, "panel");
+  assert.doesNotThrow(() => failing.emit("destroyed"));
 });

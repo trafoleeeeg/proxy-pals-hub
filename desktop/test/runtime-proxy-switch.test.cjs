@@ -32,7 +32,7 @@ function harness(options = {}) {
         loadURL: async url => { this.url = url; }, reload: () => { reloads++; },
       });
       this.webContents.debugger = new EventEmitter();
-      Object.assign(this.webContents.debugger, { attach() {}, isAttached: () => true, detach() {}, sendCommand: async () => {} });
+      Object.assign(this.webContents.debugger, { attach() {}, isAttached: () => true, detach() {}, sendCommand: async command => command === "Runtime.getIsolateId" ? { id: "abcd" } : undefined });
       windows.push(this);
     }
     async loadURL(url) { this.url = url; }

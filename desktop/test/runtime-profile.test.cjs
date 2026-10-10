@@ -41,6 +41,7 @@ function harness({ diagnosticFailure = false } = {}) {
       });
       this.webContents.debugger = new EventEmitter();
       Object.assign(this.webContents.debugger, { attach: () => {}, isAttached: () => true, detach: () => {}, sendCommand: async (command, args) => {
+        if (command === "Runtime.getIsolateId") return { id: "abcd" };
         this.commands.push({ command, args });
         if (command === "Emulation.setScriptExecutionDisabled") await freezeCommand();
       } });

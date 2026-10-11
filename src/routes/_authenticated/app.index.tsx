@@ -16,6 +16,7 @@ import { listProfiles, saveProfile, cloneProfile, bulkCreateProfiles, getProfile
 import { listProxies } from "@/lib/proxies.functions";
 import { listFolders } from "@/lib/folders.functions";
 import { usePermissions } from "@/lib/usePermissions";
+import { showPanelReadError } from "@/lib/panel-connectivity";
 import { useDesktopProfileLifecycle } from "@/hooks/useDesktopProfileLifecycle";
 import { generateFingerprint, describeFingerprint, verifiedProxyTimezone, type Fingerprint, type FingerprintOS } from "@/lib/fingerprint";
 import { ProfileFingerprint } from "@/components/profile-fingerprint";
@@ -238,8 +239,8 @@ function ProfilesWorkspace() {
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {permissionsError && <p role="alert" className="text-sm text-destructive">Не удалось загрузить ваши права. Обновите страницу и повторите попытку.</p>}
     {ws?.scope === "member" && folderList.isSuccess && !folderList.data.length && <p role="status" className="text-sm text-warning">Вам пока не открыта ни одна папка с профилями. Владелец может выдать доступ в разделе «Папки».</p>}
-    {profiles.isError && <p role="alert" className="text-sm text-destructive">Не удалось обновить профили. <Button size="sm" variant="outline" onClick={() => profiles.refetch()}>Повторить</Button></p>}
-    {proxies.isError && <p role="alert" className="text-sm text-warning">Прокси недоступны. <Button size="sm" variant="outline" onClick={() => proxies.refetch()}>Повторить</Button></p>}
+    {showPanelReadError(profiles) && <p role="alert" className="text-sm text-destructive">Не удалось обновить профили. <Button size="sm" variant="outline" onClick={() => profiles.refetch()}>Повторить</Button></p>}
+    {showPanelReadError(proxies) && <p role="alert" className="text-sm text-warning">Прокси недоступны. <Button size="sm" variant="outline" onClick={() => proxies.refetch()}>Повторить</Button></p>}
     <div className="min-h-[360px] overflow-hidden rounded-xl border border-border/70">
       <div className="scroll-thin min-w-0 overflow-x-auto"><Table className="min-w-max table-fixed text-[13px]"><TableHeader className="sticky top-0 z-10 bg-background"><TableRow>
         {manage && <TableHead className="w-10"><Checkbox aria-label="Выбрать видимые профили" disabled={!rows.length} checked={visibleSelected === 0 ? false : visibleSelected === rows.length ? true : "indeterminate"} onCheckedChange={(checked) => setSelected((current) => toggleVisibleSelection(current, visibleIds, checked === true))} /></TableHead>}
@@ -279,7 +280,7 @@ function ProfilesWorkspace() {
           </ContextMenuContent></ContextMenu>;
         })}
         </SortableContext>
-        {!profiles.isPending && !profiles.isError && !rows.length && <TableRow><TableCell colSpan={columnCount} className="py-10 text-center text-sm text-muted-foreground">{search ? "По выбранным фильтрам профилей нет" : "В этой папке пока нет профилей"}</TableCell></TableRow>}
+        {!profiles.isPending && !showPanelReadError(profiles) && !rows.length && <TableRow><TableCell colSpan={columnCount} className="py-10 text-center text-sm text-muted-foreground">{search ? "По выбранным фильтрам профилей нет" : "В этой папке пока нет профилей"}</TableCell></TableRow>}
       </TableBody></Table>
       </div>
     </div>

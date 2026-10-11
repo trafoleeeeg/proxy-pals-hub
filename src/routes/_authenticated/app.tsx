@@ -16,6 +16,7 @@ import { ProfileFolderProvider } from "@/lib/useProfileFolder";
 import { ImpersonationControl } from "@/components/impersonation-control";
 import { ProfileDndProvider } from "@/components/profile-dnd";
 import { CookieRecoveryAction } from "@/components/cookie-recovery";
+import { showPanelReadError } from "@/lib/panel-connectivity";
 
 export const Route = createFileRoute("/_authenticated/app")({
   head: () => ({ meta: [
@@ -180,7 +181,7 @@ function AppShell() {
             <SelectTrigger aria-label="Рабочая команда" className="w-full text-xs"><SelectValue placeholder="Команда" /></SelectTrigger>
             <SelectContent>{(selection.workspaces.data?.length ? selection.workspaces.data : ws ? [ws] : []).map((team) => <SelectItem key={team.teamId} value={team.teamId}>{team.teamName}</SelectItem>)}</SelectContent>
           </Select>
-          {selection.workspaces.isError && <Button size="sm" variant="ghost" onClick={() => selection.workspaces.refetch()}>Повторить загрузку команд</Button>}
+          {showPanelReadError(selection.workspaces) && <Button size="sm" variant="ghost" onClick={() => selection.workspaces.refetch()}>Повторить загрузку команд</Button>}
           <p className="text-xs text-muted-foreground">{ws?.scope === "owner" ? "Владелец" : ws?.scope === "manager" ? "Администратор" : ws ? "Сотрудник" : ""}</p>
           <ImpersonationControl workspace={ws} closeProfiles={runtime.closeAll} />
         </div>

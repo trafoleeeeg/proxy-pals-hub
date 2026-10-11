@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { getMyPermissions } from "./team.functions";
+import { showPanelReadError } from "./panel-connectivity";
 
 export const PERMISSION_LABELS = {
   "profile.create": "Создавать профили",
@@ -23,8 +24,7 @@ export function usePermissions(teamId: string | undefined) {
     queryFn: () => fetchPermissions({ data: { teamId: teamId! } }),
     enabled: !!teamId,
     staleTime: 60_000,
-    refetchOnWindowFocus: "always",
   });
-  const can = (key: PermissionKey) => query.data?.[key] === true;
-  return { can, scope: query.data?.scope ?? null, isPending: query.isPending, isError: query.isError, permissions: query.data };
+  const can = (key: PermissionKey) => !query.isError && query.data?.[key] === true;
+  return { can, scope: query.data?.scope ?? null, isPending: query.isPending, isError: showPanelReadError(query), permissions: query.data };
 }

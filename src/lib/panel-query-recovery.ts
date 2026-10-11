@@ -8,7 +8,10 @@ export const PANEL_QUERY_DEFAULTS = {
   staleTime: 15_000,
   networkMode: "always" as const,
   retry: false as const,
-  refetchOnReconnect: true,
+  // The wake coordinator verifies auth BEFORE refreshing active reads. Native
+  // focus/reconnect refetches otherwise race that verification after sleep.
+  refetchOnWindowFocus: false,
+  refetchOnReconnect: false,
 };
 
 // A new explicit action must also work after a missed online event. Execute it

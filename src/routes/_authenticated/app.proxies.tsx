@@ -6,6 +6,7 @@ import { Activity, CheckCheck, ClipboardPaste, Clock3, Link2, Loader2, Pencil, P
 import { toast } from "sonner";
 import { useWorkspace } from "@/lib/useWorkspace";
 import { usePermissions } from "@/lib/usePermissions";
+import { showPanelReadError } from "@/lib/panel-connectivity";
 import { listProxies, saveProxy, deleteProxy, importProxies, checkProxy, proxyForCheck, recordProxyCheck, rotateProxyIp } from "@/lib/proxies.functions";
 import {
   PROXY_LIMITS, ProxyCheckQueue, parseProxyPort, performDesktopProxyCheck,
@@ -452,10 +453,10 @@ export function ProxiesPage() {
                 </div>}
               </TableCell>
             </TableRow>)}
-            {(proxies.isPending || proxies.isError || !proxies.data?.length) && <TableRow>
+            {(proxies.isPending || showPanelReadError(proxies) || !proxies.data?.length) && <TableRow>
               <TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
-                {proxies.isPending ? "Загрузка прокси..." : proxies.isError ? "Не удалось загрузить прокси" : "Пока нет ни одного прокси"}
-                {proxies.isError && <Button variant="ghost" onClick={() => { void proxies.refetch(); }}>Повторить</Button>}
+                {proxies.isPending ? "Загрузка прокси..." : showPanelReadError(proxies) ? "Не удалось загрузить прокси" : "Пока нет ни одного прокси"}
+                {showPanelReadError(proxies) && <Button variant="ghost" onClick={() => { void proxies.refetch(); }}>Повторить</Button>}
               </TableCell>
             </TableRow>}
           </TableBody>

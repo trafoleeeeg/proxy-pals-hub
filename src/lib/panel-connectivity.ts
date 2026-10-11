@@ -22,6 +22,11 @@ export function isConnectionUnavailable(error: unknown): boolean {
   return error instanceof ConnectionUnavailableError;
 }
 
+/** A cached read survives transient transport errors; real errors remain visible. */
+export function showPanelReadError(query: { isError: boolean; error: unknown; data: unknown }): boolean {
+  return query.isError && !(query.data !== undefined && isConnectionUnavailable(query.error));
+}
+
 /** Retain only an already verified UI identity; server requests still require fresh auth. */
 export async function recoverVerifiedUser<T>(verify: () => Promise<T>, cached: T | undefined): Promise<T> {
   try { return await verify(); }

@@ -27,6 +27,7 @@ export function createPanelRecovery({ verify, recovered, expired, paused = () =>
   let applicationFailed = initialError !== undefined && !isConnectionUnavailable(initialError) && !(initialError instanceof SessionExpiredError);
   let needsInitialRouteRecovery = initialError instanceof SessionExpiredError || isConnectionUnavailable(initialError);
   let expiryReported = false;
+  let refreshRequested = false;
   const sessionExpired = (): PanelRecoveryResult => {
     applicationFailed = false;
     setConnectionUnavailable(false);
@@ -37,8 +38,9 @@ export function createPanelRecovery({ verify, recovered, expired, paused = () =>
     needsRecovery() {
       return !disposed && !applicationFailed && !expiryReported && (needsInitialRouteRecovery || connectionUnavailable());
     },
-    run({ retry = false }: { retry?: boolean } = {}): Promise<PanelRecoveryResult> {
+    run({ retry = false, refresh = false }: { retry?: boolean; refresh?: boolean } = {}): Promise<PanelRecoveryResult> {
       if (disposed || paused()) return Promise.resolve({ status: "skipped" });
+      refreshRequested ||= refresh;
       if (pending) return pending;
       if (applicationFailed && !retry) return Promise.resolve({ status: "skipped" });
       const controller = new AbortController();
@@ -63,7 +65,10 @@ export function createPanelRecovery({ verify, recovered, expired, paused = () =>
         // global offline flag is correctly false.
         // Another check may restore auth or clear the shared offline flag
         // while this route is still failed. Only its own reload resets it.
-        if (retry || needsInitialRouteRecovery || wasOffline || connectionUnavailable()) await recovered(signal);
+        if (retry || refreshRequested || needsInitialRouteRecovery || wasOffline || connectionUnavailable()) {
+          refreshRequested = false;
+          await recovered(signal);
+        }
         if (signal.aborted || disposed || paused()) return { status: "skipped" };
         needsInitialRouteRecovery = false;
         applicationFailed = false;

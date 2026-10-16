@@ -13,7 +13,7 @@ app.commandLine.appendSwitch("in-process-gpu");
 app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
 app.whenReady().then(async () => {
   const started = performance.now();
-  const origin = "https://proxy-pals-hub.lovable.app";
+  const origin = "https://umbra.mafiatrafa.com";
   const panelSession = session.fromPartition("isolated-local-panel-test");
   let ready = false; let localResources = 0; let serverCalls = 0;
   ipcMain.handle("umbra:panel-ready", () => { ready = true; return { ok: true }; });

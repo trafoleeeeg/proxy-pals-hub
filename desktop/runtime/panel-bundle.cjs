@@ -72,19 +72,25 @@ async function readBounded(response, limit) {
 }
 
 function createPanelBundle({ panelSession, origin, bundledDirectory, cacheDirectory, safeStorage, desktopVersion = require("../package.json").version }) {
-  if (new URL(origin).protocol !== "https:") throw new Error("Local panel requires HTTPS origin");
+  const parsedOrigin = new URL(origin);
+  if (parsedOrigin.protocol !== "https:" || parsedOrigin.origin !== origin || parsedOrigin.username || parsedOrigin.password) throw new Error("Local panel requires an exact HTTPS origin");
   const bundled = loadBundled(bundledDirectory);
   validateManifest(bundled.manifest, "", desktopVersion);
   let selected = bundled;
   const protectedCache = safeStorage?.isEncryptionAvailable?.() && safeStorage.getSelectedStorageBackend?.() !== "basic_text";
-  const pointer = path.join(cacheDirectory, "active.enc");
+  // A different privileged origin is a different code lineage. Never import an
+  // old flat pointer, even if its revision is higher than this installer's UI.
+  // Website/profile partitions and the session outbox are deliberately separate.
+  const originCacheDirectory = path.join(cacheDirectory, sha256(origin));
+  const pointer = path.join(originCacheDirectory, "active.enc");
   if (protectedCache) {
     try {
       if (fs.statSync(pointer).size > MAX_MANIFEST * 2) throw new Error("Invalid cache pointer");
       const metadata = JSON.parse(safeStorage.decryptString(fs.readFileSync(pointer)));
+      if (metadata.schema !== 2 || metadata.origin !== origin) throw new Error("Invalid cache origin");
       if (!/^[a-f0-9-]{36}$/.test(metadata.generation)) throw new Error("Invalid cache generation");
       validateManifest(metadata.manifest, bundled.manifest.revision, desktopVersion);
-      selected = loadBundle(path.join(cacheDirectory, metadata.generation), metadata.manifest);
+      selected = loadBundle(path.join(originCacheDirectory, metadata.generation), metadata.manifest);
     } catch { /* Missing, old or damaged cache: use verified installer assets. */ }
   }
   const fetchNetwork = (request, options = {}) => panelSession.fetch(request, { ...options, bypassCustomProtocolHandlers: true });
@@ -135,7 +141,7 @@ function createPanelBundle({ panelSession, origin, bundledDirectory, cacheDirect
       const manifest = validateManifest(JSON.parse((await download(MANIFEST, MAX_MANIFEST)).toString("utf8")), selected.manifest.revision, desktopVersion);
       if (manifest.revision === selected.manifest.revision) return false;
       const generation = randomUUID();
-      staging = path.join(cacheDirectory, generation);
+      staging = path.join(originCacheDirectory, generation);
       fs.mkdirSync(staging, { recursive: true });
       // Bounded parallel downloads; no account/session headers or API results.
       let cursor = 0;
@@ -155,7 +161,7 @@ function createPanelBundle({ panelSession, origin, bundledDirectory, cacheDirect
       loadBundle(staging, manifest);
       const temp = pointer + "." + generation;
       const fd = fs.openSync(temp, "wx");
-      try { fs.writeFileSync(fd, safeStorage.encryptString(JSON.stringify({ generation, manifest }))); fs.fsyncSync(fd); }
+      try { fs.writeFileSync(fd, safeStorage.encryptString(JSON.stringify({ schema: 2, origin, generation, manifest }))); fs.fsyncSync(fd); }
       finally { fs.closeSync(fd); }
       fs.renameSync(temp, pointer);
       // Keep `selected` immutable for the current process, including reloads.
@@ -164,7 +170,7 @@ function createPanelBundle({ panelSession, origin, bundledDirectory, cacheDirect
       controller.abort();
       // Only the UUID directory created by this invocation, within this cache.
       try {
-        if (staging && path.dirname(staging) === path.resolve(cacheDirectory)) fs.rmSync(staging, { recursive: true, force: true });
+        if (staging && path.dirname(staging) === path.resolve(originCacheDirectory)) fs.rmSync(staging, { recursive: true, force: true });
       } catch { /* Incomplete UUID directories are never activated. */ }
       return false; // Failed download never touches the current generation.
     } finally { clearTimeout(timer); }

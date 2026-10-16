@@ -22,7 +22,7 @@ const { randomUUID } = require("node:crypto");
 const { createPanelStartup, panelBackground } = require("./runtime/panel-startup.cjs");
 const { createPanelBundle } = require("./runtime/panel-bundle.cjs");
 
-const DEFAULT_APP_URL = "https://proxy-pals-hub.lovable.app/app";
+const DEFAULT_APP_URL = "https://umbra.mafiatrafa.com/app";
 // A packaged client must never let a local environment variable replace the
 // trusted panel origin. This origin controls which page receives the IPC
 // bridge and therefore must be fixed in the release binary.

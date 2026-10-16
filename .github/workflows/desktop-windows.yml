@@ -68,8 +68,11 @@ jobs:
       - name: Check TypeScript
         # Build generates the typed TanStack route tree, which is intentionally
         # not committed to the repository.
+        env:
+          VITE_SUPABASE_URL: ${{ vars.UMBRA_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.UMBRA_SUPABASE_PUBLISHABLE_KEY }}
         run: |
-          bun run build
+          node scripts/build-cloudflare.cjs
           bun run typecheck
 
       - name: Run full desktop test suite
@@ -108,9 +111,14 @@ jobs:
           bun-version: 1.4.2
 
       - name: Build and verify anonymous local panel
+        # Public repository variables only; never compile legacy .env defaults
+        # or server credentials into the privileged desktop panel.
+        env:
+          VITE_SUPABASE_URL: ${{ vars.UMBRA_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.UMBRA_SUPABASE_PUBLISHABLE_KEY }}
         run: |
           bun install --frozen-lockfile
-          bun run build
+          node scripts/build-cloudflare.cjs
           bun run typecheck
 
       - name: Install dependencies

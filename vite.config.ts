@@ -6,7 +6,22 @@
 // You can pass additional config via defineConfig({ vite: { ... }, etc... }) if needed.
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
+const cloudflareBuild = process.env["UMBRA_CLOUDFLARE_BUILD"] === "1";
+
 export default defineConfig({
+  // The independent deployment gets its public configuration explicitly from
+  // the build environment. Neither Vite nor the helper may load legacy .env
+  // defaults, and no server credential is included in the browser defines.
+  ...(cloudflareBuild ? {
+    envDefine: false,
+    vite: {
+      envDir: false,
+      define: Object.fromEntries(
+        ["VITE_SUPABASE_URL", "VITE_SUPABASE_PUBLISHABLE_KEY"].map(name =>
+          [`import.meta.env.${name}`, JSON.stringify(process.env[name])]),
+      ),
+    },
+  } : {}),
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this

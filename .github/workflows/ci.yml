@@ -69,3 +69,13 @@ jobs:
         env:
           LOVABLE_SANDBOX: "1"
         run: bun run build
+
+      - name: Проверка независимой Cloudflare Pages сборки
+        env:
+          VITE_SUPABASE_URL: https://migration-test.invalid
+          VITE_SUPABASE_PUBLISHABLE_KEY: sb_publishable_synthetic_not_real
+          SUPABASE_URL: https://migration-test.invalid
+          SUPABASE_PUBLISHABLE_KEY: sb_publishable_synthetic_not_real
+          SUPABASE_SERVICE_ROLE_KEY: sb_secret_server_only_probe_not_real
+          APP_ENCRYPTION_KEY: server_only_synthetic_encryption_probe_not_real
+        run: node scripts/build-cloudflare.cjs

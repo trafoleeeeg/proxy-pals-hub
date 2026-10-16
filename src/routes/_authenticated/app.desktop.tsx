@@ -12,6 +12,7 @@ import { useWorkspace } from "@/lib/useWorkspace";
 import { usePermissions } from "@/lib/usePermissions";
 import { getBookmarkDefaults, saveBookmarkDefaults } from "@/lib/bookmark-defaults.functions";
 import type { BookmarkDefaults } from "@/lib/bookmark-defaults";
+import { KeyTransferExport } from "@/components/key-transfer-export";
 
 export const Route = createFileRoute("/_authenticated/app/desktop")({ component: ClientPage });
 const RELEASES = "https://github.com/trafoleeeeg/proxy-pals-hub/releases/latest";
@@ -74,6 +75,7 @@ export function ClientPage() {
     </section> : <section className="space-y-4 border-y border-border py-5"><h2 className="font-semibold">Установщик Windows</h2><a href={RELEASES} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm text-primary hover:underline"><Download className="size-4" />Скачать установщик из последнего релиза</a></section>}
     <BookmarkDefaultsManager />
     <ExtensionManager />
+    <KeyTransferExport />
     <section className="space-y-2 text-sm text-muted-foreground">
       <h2 className="font-semibold text-foreground">Данные профилей</h2>
       <p>Облачная синхронизация переносит только cookies. Local Storage, IndexedDB и остальные локальные данные сайтов остаются на текущем компьютере.</p>

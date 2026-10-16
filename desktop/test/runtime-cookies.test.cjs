@@ -269,6 +269,40 @@ test("persistent restore accepts only native microsecond conversion and bounded 
   }
 });
 
+test("Windows coarse JS clock does not reject the native 400-day cap", { skip: process.platform !== "win32" }, async t => {
+  // Node/V8's clock is based on GetSystemTimeAsFileTime (~15.625 ms), while
+  // Chromium's cookie clock uses GetSystemTimePreciseAsFileTime. Model one
+  // native timestamp falling ahead of the unchanged coarse JS clock tick.
+  const coarseNow = 1_800_000_000_000;
+  t.mock.method(Date, "now", () => coarseNow);
+  const requested = { ...cookie("persistent"), session: false,
+    expirationDate: coarseNow / 1000 + 3 * 365 * 86400 };
+  for (const clockOffset of [-15.625, 15.625]) {
+    const ses = session();
+    const originalSet = ses.cookies.set;
+    ses.cookies.set = details => originalSet({ ...details,
+      expirationDate: (coarseNow + clockOffset) / 1000 + 400 * 86400 });
+    assert.equal((await restoreCookies(ses, [requested])).installed, 1);
+  }
+});
+
+test("clock quantization cannot excuse ordinary expiry changes or caps outside one tick", async t => {
+  const coarseNow = 1_800_000_000_000;
+  t.mock.method(Date, "now", () => coarseNow);
+  for (const [requestedDays, actualExpiry] of [
+    [30, coarseNow / 1000 + 30 * 86400 - 0.015625],
+    [3 * 365, (coarseNow + 18) / 1000 + 400 * 86400],
+    [3 * 365, (coarseNow - 18) / 1000 + 400 * 86400],
+  ]) {
+    const ses = session();
+    const originalSet = ses.cookies.set;
+    ses.cookies.set = details => originalSet({ ...details, expirationDate: actualExpiry });
+    await assert.rejects(restoreCookies(ses, [{ ...cookie("persistent"), session: false,
+      expirationDate: coarseNow / 1000 + requestedDays * 86400 }]), { code: "COOKIE_RESTORE_FAILED" });
+    assert.equal((await ses.cookies.get({})).length, 0);
+  }
+});
+
 test("expiry normalization cannot excuse arbitrary expiry or security and scope changes", async () => {
   const requested = { ...cookie("persistent"), session: false,
     expirationDate: Math.floor(Date.now() / 1000) + 3 * 365 * 86400 + 0.1234567 };

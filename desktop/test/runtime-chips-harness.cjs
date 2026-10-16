@@ -39,11 +39,15 @@ async function verifyPersistentExpiry() {
     const fixture = { ...base, name: kind, session: false, expirationDate, ...overrides };
     await ses.clearStorageData({ storages: ["cookies"] });
     // Observe Chromium's own conversion independently of restore verification.
+    const before = Date.now();
     await transport.write(fixture);
+    const after = Date.now();
     const observed = (await transport.read()).find(cookie => cookie.name === kind);
     assert.ok(observed);
     console.log("UMBRA_COOKIE_EXPIRY_PROBE " + JSON.stringify({ kind, requested: expirationDate,
-      observed: observed.expirationDate, deltaSeconds: observed.expirationDate - expirationDate }));
+      observed: observed.expirationDate, deltaSeconds: observed.expirationDate - expirationDate,
+      before, after, capClockBeforeDeltaMs: (observed.expirationDate - 400 * day) * 1000 - before,
+      capClockAfterDeltaMs: (observed.expirationDate - 400 * day) * 1000 - after }));
     await ses.clearStorageData({ storages: ["cookies"] });
     try {
       const result = await restoreCookies(ses, [fixture]);
@@ -57,9 +61,14 @@ async function verifyPersistentExpiry() {
       assert.equal(actual.hostOnly, true);
       assert.equal(actual.sameSite, fixture.sameSite);
       if (!kind.endsWith("long-lived")) assert.ok(Math.abs(actual.expirationDate - expirationDate) <= 0.000002);
-      else if (fixture.secure) assert.ok(actual.expirationDate > now + 399 * day && actual.expirationDate <= Date.now() / 1000 + 400 * day);
-      else assert.ok((actual.expirationDate > now + 399 * day && actual.expirationDate <= Date.now() / 1000 + 400 * day)
-        || (actual.expirationDate > now + 2 * 3600 && actual.expirationDate <= Date.now() / 1000 + 3 * 3600));
+      else {
+        // The JS clock's Windows anchor is coarse while Chromium's cookie clock
+        // is precise; the cap may legitimately be ahead by one 15.625 ms tick.
+        const latestNativeNow = (Date.now() + (process.platform === "win32" ? 17 : 1)) / 1000;
+        if (fixture.secure) assert.ok(actual.expirationDate > now + 399 * day && actual.expirationDate <= latestNativeNow + 400 * day);
+        else assert.ok((actual.expirationDate > now + 399 * day && actual.expirationDate <= latestNativeNow + 400 * day)
+          || (actual.expirationDate > now + 2 * 3600 && actual.expirationDate <= latestNativeNow + 3 * 3600));
+      }
     } catch (error) { failures.push({ kind, code: error.code || "ASSERTION_FAILED" }); }
   }
   await ses.clearStorageData({ storages: ["cookies"] });

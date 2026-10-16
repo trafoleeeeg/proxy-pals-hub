@@ -183,10 +183,15 @@ function restoredExpiryMatches(actual, expected, written) {
   // HTTP policy caps them at 3 hours. Only accept a cap created during this exact
   // set call, never an arbitrary shortened expiry or an older native cookie.
   const limits = expected.secure ? [400 * 86400] : [400 * 86400, 3 * 3600];
+  // On Windows Node/V8 Time::Now anchors to GetSystemTimeAsFileTime (one
+  // ~15.625 ms tick), but Chromium base::Time::Now uses its Precise counterpart.
+  // Include that clock quantization only for the newly applied native cap;
+  // ordinary expirations retain the microsecond comparison above.
+  const clockTick = process.platform === "win32" ? 16 : 0;
   return limits.some(limit => {
-    const earliest = Math.min(expected.expirationDate, written.before / 1000 + limit);
+    const earliest = Math.min(expected.expirationDate, (written.before - clockTick) / 1000 + limit);
     // Date.now() truncates milliseconds; Chromium's native clock retains micros.
-    const latest = Math.min(expected.expirationDate, (written.after + 1) / 1000 + limit);
+    const latest = Math.min(expected.expirationDate, (written.after + clockTick + 1) / 1000 + limit);
     return actual.expirationDate >= earliest - precision && actual.expirationDate <= latest + precision;
   });
 }

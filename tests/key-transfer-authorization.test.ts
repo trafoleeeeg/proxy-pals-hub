@@ -247,19 +247,15 @@ test("post-auth diagnostic outcomes survive synthetic HTTP JSON transport withou
   } finally { await server.stop(true); }
 });
 
-test("committed owner-approved recipient retains exact pins and the explicitly extended absolute deadline", () => {
-  const request = committedKeyTransferConfig.request!;
-  expect(committedKeyTransferConfig.enabled).toBe(true);
-  expect(request.transferId).toBe("b44f50f3-f79a-47c9-ba0f-cfabb7ca92bb");
-  expect(request.keyId).toBe("e6750e281ca21ac245b67ffe1c7426747b9fb54ad196546325f99280f37da29a");
-  expect(request.sourceOrigin).toBe(KEY_TRANSFER_SOURCE);
-  expect(request.targetOrigin).toBe(KEY_TRANSFER_TARGET);
-  expect(request.createdAt).toBe("2026-10-16T19:53:18.730Z");
-  expect(request.expiresAt).toBe("2026-10-16T21:00:00.000Z");
-  const created = Date.parse(request.createdAt), expires = Date.parse(request.expiresAt);
-  expect(expires - created).toBe(4_001_270);
-  // Verify the approved interval independently of when CI happens to run.
-  // Never derive a new expiry from the test's wall clock.
-  expect(validateKeyTransferConfig(committedKeyTransferConfig, created + 1)).toEqual(request);
-  expect(() => validateKeyTransferConfig(committedKeyTransferConfig, expires)).toThrow(KEY_TRANSFER_UNAVAILABLE);
+test("committed disabled configuration fails closed without APP key access", async () => {
+  expect(committedKeyTransferConfig).toEqual({ enabled: false, request: null });
+  // Disabled means disabled even at a time inside the former approved window;
+  // this must not rely solely on the recipient's absolute expiry.
+  expect(() => validateKeyTransferConfig(committedKeyTransferConfig, Date.parse("2026-10-16T19:53:18.731Z"))).toThrow(KEY_TRANSFER_UNAVAILABLE);
+  expect(() => validateKeyTransferConfig(committedKeyTransferConfig, Date.now())).toThrow(KEY_TRANSFER_UNAVAILABLE);
+  api.state.config.enabled = committedKeyTransferConfig.enabled;
+  api.state.config.request = committedKeyTransferConfig.request;
+  expect(await api.getKeyTransferStatus({ data: {} })).toEqual({ enabled: false });
+  await expect(api.exportEncryptedMigrationKey({ data: {} })).rejects.toThrow(KEY_TRANSFER_UNAVAILABLE);
+  expect(api.state.reads).toBe(0);
 });

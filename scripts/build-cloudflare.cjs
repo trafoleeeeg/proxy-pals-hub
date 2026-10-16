@@ -82,6 +82,7 @@ function buildCloudflare({ root = path.resolve(__dirname, ".."), environment = p
   for (const args of commands) run(args);
   finalize(root, env);
   run([path.join(root, "scripts/verify-cloudflare.cjs")]);
+  run([path.join(root, "scripts/verify-key-transfer.cjs")]);
 }
 
 if (require.main === module) {

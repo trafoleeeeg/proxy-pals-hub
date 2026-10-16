@@ -47,8 +47,8 @@ test("Pages generates GeoIP then one SSR build then verifies the matching deskto
   buildCloudflare({ root, environment: publicEnvironment, spawn: (...args) => { calls.push(args); return { status: 0 }; },
     finalize: () => { assert.equal(calls.length, 3); finalized = true; } });
   assert.equal(finalized, true);
-  assert.equal(calls.length, 4);
-  assert.deepEqual(calls.map(call => path.basename(call[1][0])), ["generate-geoip.cjs", "vite.js", "build-panel-bundle.cjs", "verify-cloudflare.cjs"]);
+  assert.equal(calls.length, 5);
+  assert.deepEqual(calls.map(call => path.basename(call[1][0])), ["generate-geoip.cjs", "vite.js", "build-panel-bundle.cjs", "verify-cloudflare.cjs", "verify-key-transfer.cjs"]);
   assert.deepEqual(calls[1][1].slice(1), ["build"]);
   for (const [executable, , options] of calls) {
     assert.equal(executable, process.execPath);
@@ -61,7 +61,7 @@ test("Pages generates GeoIP then one SSR build then verifies the matching deskto
 });
 
 test("a failed or unsupported build step stops before publishing further output", () => {
-  for (const failedStep of [0, 1, 2, 3]) {
+  for (const failedStep of [0, 1, 2, 3, 4]) {
     for (const failure of [{ status: 1 }, { status: null, signal: "SIGTERM" }, { error: new Error("unsupported worker import") }]) {
       let calls = 0;
       assert.throws(() => buildCloudflare({ environment: publicEnvironment, spawn: () => calls++ === failedStep ? failure : { status: 0 }, finalize() {} }));

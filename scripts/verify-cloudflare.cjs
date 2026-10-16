@@ -64,6 +64,23 @@ const { validateAnonymousShell } = require("./panel-build-source.cjs");
       assert.equal(decoded.result, undefined, "unauthenticated function must never return data");
     }
     assert.equal(upstreamRequests, 0, "verification must never contact a database");
+    for (const name of ["getKeyTransferStatus", "exportEncryptedMigrationKey"]) {
+      const transferId = sha256(`src/lib/key-transfer.functions.ts--${name}_createServerFn_handler`);
+      const url = `https://migration-test.invalid/_serverFn/${transferId}`;
+      const transfer = await worker.fetch(new Request(url, {
+        method: "POST", headers: { "content-type": "application/json", origin: "https://migration-test.invalid", "x-tsr-serverfn": "true" },
+        body: JSON.stringify(toJSON({ data: {} })),
+      }), {}, context);
+      assert.match(transfer.headers.get("cache-control") || "", /no-store/, "key-transfer RPC must never be cached");
+      const decoded = fromCrossJSON(await transfer.json(), { refs: new Map(), plugins: defaultSerovalDeserializerPlugins });
+      const denial = decoded instanceof Error ? decoded : decoded?.error;
+      assert(denial instanceof Error && /^Unauthorized:/.test(denial.message), "anonymous key transfer must fail before reading any key");
+      assert.equal(decoded.result, undefined);
+      const wrongMethod = await worker.fetch(new Request(url, { headers: { origin: "https://migration-test.invalid", "x-tsr-serverfn": "true" } }), {}, context);
+      assert.equal(wrongMethod.status, 405, "GET must never invoke key-transfer RPC");
+      assert(!(await wrongMethod.text()).includes("wrappedKey"));
+    }
+    assert.equal(upstreamRequests, 0, "key-transfer denial must not contact a database");
   } finally { globalThis.fetch = previousFetch; }
   console.log("Verified Pages worker: SSR sign-in, anonymous workspace shell, unauthenticated RPC rejection, static panel integrity; no upstream requests");
 })().catch(error => { console.error(error.message); process.exitCode = 1; });

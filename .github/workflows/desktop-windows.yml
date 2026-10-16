@@ -119,6 +119,11 @@ jobs:
           npm ci
           node node_modules/electron/install.js
 
+      - name: Test protected key transfer with native Windows DPAPI
+        env:
+          UMBRA_REQUIRE_DPAPI: "1"
+        run: bun test tests/key-transfer-vault-interop.test.ts
+
       - name: Download and verify pinned Windows engine
         shell: pwsh
         env:

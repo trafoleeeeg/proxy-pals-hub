@@ -22,8 +22,8 @@ export function openSyntheticEnvelope(envelope: KeyTransferEnvelope) {
   } finally { key.fill(0); }
 }
 
-test.each(["synthetic-only-key", "  synthetic-key  \r\n", "\tключ🙂\n", " "])("encrypted envelope preserves the exact synthetic UTF-8 key %#", (raw) => {
-  const envelope = sealKeyTransfer(raw, { plain: "safe-synthetic-challenge", encrypted: "synthetic-canary" }, request, now);
+test.each(["synthetic-only-key", "  synthetic-key  \r\n", "\tключ🙂\n", " "])("encrypted envelope preserves the exact synthetic UTF-8 key %#", async (raw) => {
+  const envelope = await sealKeyTransfer(raw, { plain: "safe-synthetic-challenge", encrypted: "synthetic-canary" }, request, now);
   const payload = openSyntheticEnvelope(envelope);
   expect(payload.secretName).toBe("APP_ENCRYPTION_KEY");
   expect(Buffer.from(payload.secret, "utf8").equals(Buffer.from(raw, "utf8"))).toBe(true);
@@ -31,23 +31,23 @@ test.each(["synthetic-only-key", "  synthetic-key  \r\n", "\tключ🙂\n", " 
   expect(JSON.stringify(envelope)).not.toContain(raw);
 });
 
-test("every export has independent wrapping and GCM randomness", () => {
-  const first = sealKeyTransfer("synthetic", { plain: "test", encrypted: "test" }, request, now);
-  const second = sealKeyTransfer("synthetic", { plain: "test", encrypted: "test" }, request, now);
+test("every export has independent wrapping and GCM randomness", async () => {
+  const first = await sealKeyTransfer("synthetic", { plain: "test", encrypted: "test" }, request, now);
+  const second = await sealKeyTransfer("synthetic", { plain: "test", encrypted: "test" }, request, now);
   expect(first.iv).not.toBe(second.iv);
   expect(first.wrappedKey).not.toBe(second.wrappedKey);
   expect(first.ciphertext).not.toBe(second.ciphertext);
 });
 
-test.each(["format", "transferId", "keyId", "sourceOrigin", "targetOrigin", "issuedAt", "expiresAt", "wrappedKey", "iv", "tag", "ciphertext"] as const)("tampering %s is rejected cryptographically", (field) => {
-  const envelope = sealKeyTransfer("synthetic-only", { plain: "test", encrypted: "test" }, request, now);
+test.each(["format", "transferId", "keyId", "sourceOrigin", "targetOrigin", "issuedAt", "expiresAt", "wrappedKey", "iv", "tag", "ciphertext"] as const)("tampering %s is rejected cryptographically", async (field) => {
+  const envelope = await sealKeyTransfer("synthetic-only", { plain: "test", encrypted: "test" }, request, now);
   const changed = { ...envelope, [field]: field === "iv" ? Buffer.alloc(12, 7).toString("base64") : envelope[field].slice(0, -4) + "AAAA" };
   expect(() => openSyntheticEnvelope(changed)).toThrow();
 });
 
-test("another recipient cannot unwrap the envelope", () => {
+test("another recipient cannot unwrap the envelope", async () => {
   const other = generateKeyPairSync("rsa", { modulusLength: 3072 });
-  const envelope = sealKeyTransfer("synthetic", { plain: "test", encrypted: "test" }, request, now);
+  const envelope = await sealKeyTransfer("synthetic", { plain: "test", encrypted: "test" }, request, now);
   expect(() => privateDecrypt({ key: other.privateKey, padding: constants.RSA_PKCS1_OAEP_PADDING, oaepHash: "sha256" }, Buffer.from(envelope.wrappedKey, "base64"))).toThrow();
 });
 

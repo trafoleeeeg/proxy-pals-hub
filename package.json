@@ -8,6 +8,7 @@
     "dev": "vite dev",
     "prebuild": "node scripts/generate-geoip.cjs",
     "build": "vite build && node scripts/build-panel-bundle.cjs",
+    "build:cloudflare": "node scripts/build-cloudflare.cjs",
     "prebuild:dev": "node scripts/generate-geoip.cjs",
     "build:dev": "vite build --mode development",
     "preview": "vite preview",

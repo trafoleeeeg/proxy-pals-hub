@@ -40,6 +40,22 @@ test("only anonymous root or non-rendered pending matches enter the panel", () =
   }
 });
 
+test("Cloudflare Pages selects its exact worker/public pair without stale fallback", () => {
+  const root = path.resolve("fixture");
+  for (const env of [{ NITRO_PRESET: "cloudflare-pages" }, { NITRO_PRESET: "cloudflare_pages" },
+    { SERVER_PRESET: "cloudflare-pages" }, { NITRO_PRESET: "cloudflare-pages", SERVER_PRESET: "node-server" }]) {
+    assert.deepEqual(resolveBuildOutput(root, env), {
+      publicDirectory: path.join(root, "dist"), serverEntry: path.join(root, "dist/_worker.js/index.js"),
+    });
+  }
+  assert.deepEqual(resolveBuildOutput(root, { NITRO_PRESET: "cloudflare-module", SERVER_PRESET: "cloudflare-pages" }), {
+    publicDirectory: path.join(root, ".output/public"), serverEntry: path.join(root, ".output/server/index.mjs"),
+  });
+  assert.deepEqual(resolveBuildOutput(root, { LOVABLE_SANDBOX: "1", NITRO_PRESET: "cloudflare-pages" }), {
+    publicDirectory: path.join(root, "dist/client"), serverEntry: path.join(root, "dist/server/index.mjs"),
+  });
+});
+
 test("server render carries shell header but no user cookies or authorization", async () => {
   const handler = { fetch: async (request, env) => {
     assert.equal(request.url, "https://localhost/app");
@@ -55,6 +71,8 @@ test("server render carries shell header but no user cookies or authorization", 
     new Response("private", { headers: { "content-type": "text/html" } })]) {
     await assert.rejects(renderAnonymousShell({ fetch: async () => response }));
   }
+  const unsupported = new Error("Unsupported Cloudflare runtime import");
+  await assert.rejects(renderAnonymousShell({ fetch: () => { throw unsupported; } }), error => error === unsupported);
 });
 
 test("unexpected directory at the panel entry is not recursively removed", t => {

@@ -5,6 +5,15 @@ function resolveBuildOutput(root, env = process.env) {
   // Match vite-tanstack-config's sandbox detection. Never mix the current
   // client with a stale server (or fall back to a previous build directory).
   const sandbox = env.LOVABLE_SANDBOX === "1" || !!env.DEV_SERVER__PROJECT_PATH;
+  const preset = (env.NITRO_PRESET || env.SERVER_PRESET || "").replaceAll("_", "-");
+  // The wrapper pins Lovable's output in its sandbox regardless of NITRO_PRESET.
+  // Outside it, Pages advanced mode places the worker beside the public assets.
+  if (!sandbox && preset === "cloudflare-pages") {
+    return {
+      publicDirectory: path.join(root, "dist"),
+      serverEntry: path.join(root, "dist/_worker.js/index.js"),
+    };
+  }
   const directory = sandbox ? "dist" : ".output";
   return {
     publicDirectory: path.join(root, directory, sandbox ? "client" : "public"),

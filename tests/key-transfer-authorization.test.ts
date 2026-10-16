@@ -1,10 +1,11 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterAll, afterEach, expect, test } from "bun:test";
 import { constants, createDecipheriv, createHash, generateKeyPairSync, privateDecrypt, randomUUID } from "node:crypto";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { KEY_TRANSFER_SOURCE, KEY_TRANSFER_TARGET, KEY_TRANSFER_UNAVAILABLE } from "../src/lib/key-transfer.server";
+import { KEY_TRANSFER_SOURCE, KEY_TRANSFER_TARGET, KEY_TRANSFER_UNAVAILABLE, validateKeyTransferConfig } from "../src/lib/key-transfer.server";
+import { keyTransferConfig as committedKeyTransferConfig } from "../src/lib/key-transfer-config.server";
 
 const source = fileURLToPath(new URL("../src/lib/key-transfer.functions.ts", import.meta.url));
 const contents = readFileSync(source, "utf8");
@@ -15,8 +16,12 @@ const modules: Record<string, string> = {
   state: `export const state = { auth: true, config: { enabled: false, request: null }, http: null, claims: {},
     secret: 'SYNTHETIC_ONLY_MUST_NOT_APPEAR_IN_ERRORS', reads: 0, calls: [], headers: {},
     user: { data: { user: { id: 'synthetic-owner', is_anonymous: false } }, error: null },
-    role: { data: true, error: null }, roleThrows: false, userThrows: false, expireDuringUser: false, canaryThrows: false };
-    export function readSyntheticKey() { state.reads++; state.calls.push('secret'); return state.secret; }`,
+    role: { data: true, error: null }, roleThrows: false, userThrows: false, expireDuringUser: false, canaryThrows: false,
+    readThrows: false, cryptoImportThrows: false, canaryImportThrows: false, randomThrows: false, expireDuringCanary: false, stalePasswordDuringCanary: false };
+    export function readSyntheticKey() { state.reads++; state.calls.push('secret'); if (state.readThrows) throw new Error(state.secret); return state.secret; }
+    export async function importSyntheticCrypto() { if (state.cryptoImportThrows) throw new Error(state.secret);
+      const native = await import('node:crypto'); return { randomBytes(size) { if (state.randomThrows) throw new Error(state.secret); return native.randomBytes(size); } }; }
+    export async function importSyntheticCanary() { if (state.canaryImportThrows) throw new Error(state.secret); return import('transfer-test:canary'); }`,
   start: `import { state } from 'transfer-test:state';
     export function createMiddleware() { return { server: fn => ({ run: fn }) }; }
     export function createServerFn(options) {
@@ -38,7 +43,10 @@ const modules: Record<string, string> = {
     state.calls.push('auth'); if (!state.auth) throw new Error('Unauthorized: synthetic'); return next(); } };`,
   config: `import { state } from 'transfer-test:state'; export const keyTransferConfig = state.config;`,
   canary: `import { state } from 'transfer-test:state'; import { createCipheriv, createHash, randomBytes } from 'node:crypto';
-    export const encryptSecret = plain => { if (state.canaryThrows) throw new Error(state.secret); const iv = randomBytes(12), cipher = createCipheriv('aes-256-gcm', createHash('sha256').update(state.secret).digest(), iv);
+    export const encryptSecret = plain => { if (state.canaryThrows) throw new Error(state.secret);
+      if (state.expireDuringCanary) state.config.request.expiresAt = new Date(Date.now() - 1).toISOString();
+      if (state.stalePasswordDuringCanary) state.claims.amr[0].timestamp = Math.floor(Date.now()/1000)-601;
+      const iv = randomBytes(12), cipher = createCipheriv('aes-256-gcm', createHash('sha256').update(state.secret).digest(), iv);
       const data = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]); return [iv, cipher.getAuthTag(), data].map(x => x.toString('base64')).join('.'); };`,
 };
 const built = await Bun.build({ entrypoints: ["transfer-test:entry"], target: "bun", write: false,
@@ -50,14 +58,22 @@ const built = await Bun.build({ entrypoints: ["transfer-test:entry"], target: "b
     build.onResolve({ filter: /^\.\/key-transfer-config\.server$/ }, () => ({ path: "config", namespace: "transfer-test" }));
     build.onResolve({ filter: /^\.\/crypto\.server$/ }, () => ({ path: "canary", namespace: "transfer-test" }));
     build.onLoad({ filter: /key-transfer\.functions\.ts$/ }, () => ({
-      contents: `import { readSyntheticKey } from 'transfer-test:state';\n` + contents.replace(rawAccess, "readSyntheticKey()"),
+      contents: `import { readSyntheticKey, importSyntheticCrypto, importSyntheticCanary } from 'transfer-test:state';\n` + contents
+        .replace(rawAccess, "readSyntheticKey()")
+        .replace('await import("node:crypto")', "await importSyntheticCrypto()")
+        .replace('await import("./crypto.server")', "await importSyntheticCanary()"),
       loader: "ts", resolveDir: fileURLToPath(new URL("../src/lib", import.meta.url)),
     }));
     build.onLoad({ filter: /.*/, namespace: "transfer-test" }, ({ path }) => ({ contents: modules[path]!, loader: "ts", resolveDir: fileURLToPath(new URL("..", import.meta.url)) }));
   } }],
 });
 if (!built.success) throw new AggregateError(built.logs);
-const fixture = join(mkdtempSync(join(tmpdir(), "umbra-key-auth-")), "fixture.js");
+const fixtureDirectory = mkdtempSync(join(tmpdir(), "umbra-key-auth-"));
+const fixture = join(fixtureDirectory, "fixture.js");
+afterAll(() => {
+  if (dirname(resolve(fixtureDirectory)) !== resolve(tmpdir()) || !basename(fixtureDirectory).startsWith("umbra-key-auth-")) throw new Error("Unexpected synthetic fixture path");
+  rmSync(fixtureDirectory, { recursive: true, force: true });
+});
 writeFileSync(fixture, await built.outputs[0]!.text());
 const api = await import(pathToFileURL(fixture).href);
 const pair = generateKeyPairSync("rsa", { modulusLength: 3072 });
@@ -77,22 +93,26 @@ function reset() {
   api.state.user = { data: { user: { id: "synthetic-owner", is_anonymous: false } }, error: null };
   api.state.role = { data: true, error: null }; api.state.roleThrows = false; api.state.userThrows = false;
   api.state.expireDuringUser = false; api.state.canaryThrows = false;
+  api.state.readThrows = false; api.state.cryptoImportThrows = false; api.state.canaryImportThrows = false;
+  api.state.randomThrows = false; api.state.expireDuringCanary = false; api.state.stalePasswordDuringCanary = false;
 }
 reset(); afterEach(reset);
 
 test("actual handler builder requires POST, auth and no-store before its key read", async () => {
   expect(api.exportEncryptedMigrationKey.method).toBe("POST");
   const result = await api.exportEncryptedMigrationKey({ data: {} });
-  expect(result.format).toBe("umbra-key-transfer-v1");
+  expect(result.ok).toBe(true);
+  const envelope = result.envelope;
+  expect(envelope.format).toBe("umbra-key-transfer-v1");
   expect(api.state.calls).toEqual(["auth", "getUser", "is_superadmin", "secret"]);
   expect(api.state.reads).toBe(1);
   expect(api.state.headers["Cache-Control"]).toContain("no-store");
   expect(JSON.stringify(result)).not.toContain(api.state.secret);
-  const wrappingKey = privateDecrypt({ key: pair.privateKey, padding: constants.RSA_PKCS1_OAEP_PADDING, oaepHash: "sha256" }, Buffer.from(result.wrappedKey, "base64"));
-  const decipher = createDecipheriv("aes-256-gcm", wrappingKey, Buffer.from(result.iv, "base64"));
-  decipher.setAAD(Buffer.from(JSON.stringify([result.format, result.transferId, result.keyId, result.sourceOrigin, result.targetOrigin, result.issuedAt, result.expiresAt])));
-  decipher.setAuthTag(Buffer.from(result.tag, "base64"));
-  const payload = JSON.parse(Buffer.concat([decipher.update(Buffer.from(result.ciphertext, "base64")), decipher.final()]).toString("utf8"));
+  const wrappingKey = privateDecrypt({ key: pair.privateKey, padding: constants.RSA_PKCS1_OAEP_PADDING, oaepHash: "sha256" }, Buffer.from(envelope.wrappedKey, "base64"));
+  const decipher = createDecipheriv("aes-256-gcm", wrappingKey, Buffer.from(envelope.iv, "base64"));
+  decipher.setAAD(Buffer.from(JSON.stringify([envelope.format, envelope.transferId, envelope.keyId, envelope.sourceOrigin, envelope.targetOrigin, envelope.issuedAt, envelope.expiresAt])));
+  decipher.setAuthTag(Buffer.from(envelope.tag, "base64"));
+  const payload = JSON.parse(Buffer.concat([decipher.update(Buffer.from(envelope.ciphertext, "base64")), decipher.final()]).toString("utf8"));
   wrappingKey.fill(0);
   expect(payload.secret).toBe(api.state.secret);
   const [iv, tag, data] = payload.canary.encrypted.split(".").map((part: string) => Buffer.from(part, "base64"));
@@ -146,14 +166,74 @@ test("nested crypto/Auth/RPC errors cannot serialize secret values", async () =>
   expect(api.state.reads).toBe(0);
 });
 
-test.each(["missing", "oversized", "crypto error"])("%s APP-key failure has a generic response only", async (failure) => {
-  if (failure === "missing") api.state.secret = "";
-  if (failure === "oversized") api.state.secret = "SYNTHETIC".repeat(3000);
-  if (failure === "crypto error") api.state.canaryThrows = true;
-  try { await api.exportEncryptedMigrationKey({ data: {} }); throw new Error("unexpected success"); }
-  catch (error) {
-    expect((error as Error).message).toBe(KEY_TRANSFER_UNAVAILABLE);
-    expect((error as Error).cause).toBeUndefined();
-    expect(api.state.reads).toBe(1);
-  }
+test.each([
+  ["missing source", "source_key_unavailable", () => { api.state.secret = ""; }],
+  ["source access throws", "source_key_unavailable", () => { api.state.readThrows = true; }],
+  ["crypto import", "crypto_import_failed", () => { api.state.cryptoImportThrows = true; }],
+  ["canary module import", "crypto_import_failed", () => { api.state.canaryImportThrows = true; }],
+  ["canary encryption", "canary_failed", () => { api.state.canaryThrows = true; }],
+  ["randomness", "canary_failed", () => { api.state.randomThrows = true; }],
+  ["seal rejects oversized key", "seal_failed", () => { api.state.secret = "SYNTHETIC".repeat(3000); }],
+  ["seal rejects malformed UTF-8", "seal_failed", () => { api.state.secret = "\ud800"; }],
+] as const)("%s yields only its finite owner-only code", async (_name, code, change) => {
+  change();
+  const result = await api.exportEncryptedMigrationKey({ data: {} });
+  expect(result).toEqual({ ok: false, code });
+  expect(Object.keys(result).sort()).toEqual(["code", "ok"]);
+  expect(JSON.stringify(result)).not.toContain(api.state.secret || "SYNTHETIC_ONLY_MUST_NOT_APPEAR_IN_ERRORS");
+  expect(api.state.reads).toBe(1);
+});
+
+test.each(["expiry", "stale password"])("%s during crypto remains generic instead of disclosing a diagnostic", async (failure) => {
+  api.state.expireDuringCanary = failure === "expiry";
+  api.state.stalePasswordDuringCanary = failure === "stale password";
+  await expect(api.exportEncryptedMigrationKey({ data: {} })).rejects.toThrow(KEY_TRANSFER_UNAVAILABLE);
+  expect(api.state.reads).toBe(1);
+});
+
+test("post-auth diagnostic outcomes survive synthetic HTTP JSON transport without raw errors", async () => {
+  // Loopback-only HTTP adapter around the actual isolated handler builder, not
+  // a claim that the real TanStack wire protocol or production is exercised.
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
+    try {
+      const result = await api.exportEncryptedMigrationKey({ data: await request.json() });
+      return Response.json(result, { headers: api.state.headers });
+    } catch { return Response.json({ error: KEY_TRANSFER_UNAVAILABLE }, { status: 403, headers: api.state.headers }); }
+  } });
+  try {
+    api.state.canaryThrows = true;
+    const response = await fetch(server.url, { method: "POST", body: "{}" });
+    const text = await response.text();
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toContain("no-store");
+    expect(JSON.parse(text)).toEqual({ ok: false, code: "canary_failed" });
+    expect(text).not.toContain(api.state.secret);
+    api.state.auth = false; api.state.reads = 0;
+    const denied = await fetch(server.url, { method: "POST", body: "{}" });
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toEqual({ error: KEY_TRANSFER_UNAVAILABLE });
+    expect(api.state.reads).toBe(0);
+    api.state.auth = true;
+    const badInput = await fetch(server.url, { method: "POST", body: "null" });
+    expect(badInput.status).toBe(403);
+    expect(await badInput.json()).toEqual({ error: KEY_TRANSFER_UNAVAILABLE });
+    expect(api.state.reads).toBe(0);
+  } finally { await server.stop(true); }
+});
+
+test("committed owner-approved recipient has exact pins and an absolute 30-minute window", () => {
+  const request = committedKeyTransferConfig.request!;
+  expect(committedKeyTransferConfig.enabled).toBe(true);
+  expect(request.transferId).toBe("b44f50f3-f79a-47c9-ba0f-cfabb7ca92bb");
+  expect(request.keyId).toBe("e6750e281ca21ac245b67ffe1c7426747b9fb54ad196546325f99280f37da29a");
+  expect(request.sourceOrigin).toBe(KEY_TRANSFER_SOURCE);
+  expect(request.targetOrigin).toBe(KEY_TRANSFER_TARGET);
+  expect(request.createdAt).toBe("2026-10-16T19:53:18.730Z");
+  expect(request.expiresAt).toBe("2026-10-16T20:23:18.730Z");
+  const created = Date.parse(request.createdAt), expires = Date.parse(request.expiresAt);
+  expect(expires - created).toBe(30 * 60_000);
+  // Verify the approved interval independently of when CI happens to run.
+  // Never derive a new expiry from the test's wall clock.
+  expect(validateKeyTransferConfig(committedKeyTransferConfig, created + 1)).toEqual(request);
+  expect(() => validateKeyTransferConfig(committedKeyTransferConfig, expires)).toThrow(KEY_TRANSFER_UNAVAILABLE);
 });

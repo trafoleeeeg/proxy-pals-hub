@@ -26,6 +26,24 @@ test("page protection diagnostics retain only fixed stage/type/reason, never pro
   assert.doesNotMatch(raw, /private|cookie|token|expression|https/);
 });
 
+test("shutdown diagnostics retain only fixed sources and phases", t => {
+  const { directory, file } = fixture(t);
+  recordProcessEvent(directory, "app-quit-request", { quitSource: "panel-close", phase: "cancelled", error: "private-cookie" });
+  recordProcessEvent(directory, "app-quit-request", { quitSource: "unknown", phase: "begin" });
+  recordProcessEvent(directory, "app-quit-request", { quitSource: "private-token", phase: "private-url" });
+  recordProcessEvent(directory, "panel-close-request", { url: "https://private.example", profileId: "private-id" });
+  const raw = fs.readFileSync(file, "utf8");
+  const rows = raw.trim().split("\n").map(JSON.parse);
+  assert.equal(rows[0].quitSource, "panel-close");
+  assert.equal(rows[0].phase, "cancelled");
+  assert.equal(rows[1].quitSource, "unknown");
+  assert.equal(rows[1].phase, "begin");
+  assert.equal(rows[2].quitSource, undefined);
+  assert.equal(rows[2].phase, undefined);
+  assert.equal(rows[3].event, "panel-close-request");
+  assert.doesNotMatch(raw, /private|cookie|token|https|profileId/);
+});
+
 test("process diagnostics retain crash reason and code without site or session data", (t) => {
   const { directory, file } = fixture(t);
   assert.equal(recordProcessEvent(directory, "renderer-gone", {

@@ -21,6 +21,9 @@ const { recordProcessEvent, startProcessJournalMaintenance, observeContents } = 
 const { randomUUID } = require("node:crypto");
 const { createPanelStartup, panelBackground } = require("./runtime/panel-startup.cjs");
 const { createPanelBundle } = require("./runtime/panel-bundle.cjs");
+const { createAppShutdown } = require("./runtime/app-shutdown.cjs");
+const { assertNoPendingProfileClosure, acknowledgeSavedClosure } = require("./runtime/profile-launch-guard.cjs");
+const { createCookieStore } = require("./runtime/cookies.cjs");
 
 const DEFAULT_APP_URL = "https://proxy-pals-hub.lovable.app/app";
 // A packaged client must never let a local environment variable replace the
@@ -41,8 +44,6 @@ let panelBundle = null;
 let updates = null;
 let updateTimer = null;
 let outbox = null;
-let quitting = false;
-let closing = false;
 let proxyChecks = 0;
 let extensionDownloads = 0;
 let stopJournalMaintenance;
@@ -50,6 +51,29 @@ let healthTimer;
 function diagnose(event, details) {
   try { recordProcessEvent(app.getPath("userData"), event, details); } catch { /* Never disrupt the browser for diagnostics. */ }
 }
+const shutdown = createAppShutdown({
+  app,
+  hasOpenProfiles: () => listRunningProfiles().length > 0,
+  closeProfiles: () => closeAllProfiles(),
+  diagnose,
+  confirmQuit: async () => {
+    const options = {
+      type: "question", title: "Закрыть Umbra?",
+      message: "В Umbra есть открытые профили",
+      detail: "Закрыть все профили и выйти? Их данные будут сохранены перед завершением. Чтобы продолжить работу, выберите «Остаться».",
+      buttons: ["Остаться", "Сохранить и выйти"], defaultId: 0, cancelId: 0, noLink: true,
+    };
+    const result = mainWindow && !mainWindow.isDestroyed()
+      ? await dialog.showMessageBox(mainWindow, options) : await dialog.showMessageBox(options);
+    return result.response === 1;
+  },
+  onComplete: () => {
+    clearInterval(updateTimer);
+    clearInterval(healthTimer);
+    stopJournalMaintenance?.();
+  },
+  onError: error => dialog.showErrorBox("Не удалось закрыть Umbra", String(error.message || error)),
+});
 function send(channel, payload) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
 }
@@ -72,6 +96,9 @@ function createWindow(prepare = Promise.resolve()) {
       ],
     },
   });
+  // Hiding Electron's default menu does not remove Ctrl+W / File → Exit.
+  // The panel is not a browser tab and must not inherit these exit commands.
+  window.removeMenu();
   mainWindow = window;
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (isWebUrl(url)) void shell.openExternal(url).catch(() => {});
@@ -90,7 +117,7 @@ function createWindow(prepare = Promise.resolve()) {
   const startup = createPanelStartup(electron, window, {
     appUrl: APP_URL, version: app.getVersion(), prepare,
     localPanel: () => !!panelBundle,
-    isClosing: () => quitting || closing,
+    isClosing: () => shutdown.isQuitting() || shutdown.isClosing(),
     showError: async () => {
       const result = await dialog.showMessageBox(window, {
         type: "error", title: "Umbra", message: "Не удалось загрузить панель",
@@ -103,16 +130,20 @@ function createWindow(prepare = Promise.resolve()) {
   panelStartup = startup;
 
   window.on("close", (event) => {
-    if (!quitting && listRunningProfiles().length) { event.preventDefault(); app.quit(); }
+    diagnose("panel-close-request");
+    if (!shutdown.isQuitting() && (listRunningProfiles().length || shutdown.isClosing())) {
+      event.preventDefault();
+      shutdown.requestQuit("panel-close");
+    }
   });
   observeContents(window.webContents, diagnose, "panel");
   const panelContentsId = window.webContents.id;
   for (const phase of ["close", "closed", "show", "hide", "focus", "blur"]) window.on(phase, () => diagnose("window-lifecycle", { role: "panel", phase, contentsId: panelContentsId }));
   window.on("closed", () => { if (mainWindow === window) { mainWindow = null; panelStartup = null; } });
   void startup.start().catch((error) => {
-    if (window.isDestroyed() || quitting || closing) return;
+    if (window.isDestroyed() || shutdown.isQuitting() || shutdown.isClosing()) return;
     dialog.showErrorBox("Umbra", String(error.message || error));
-    app.quit();
+    shutdown.requestQuit("panel-startup-failed");
   });
 }
 
@@ -146,9 +177,14 @@ function profileId(value) {
   return value;
 }
 handle("umbra:launch-profile", async (payload) => {
-  if (closing || quitting || updates?.isInstalling()) throw new Error("Приложение закрывается или устанавливает обновление");
+  if (shutdown.isClosing() || shutdown.isQuitting() || updates?.isInstalling()) throw new Error("Приложение закрывается или устанавливает обновление");
   profileId(payload?.profileId);
   if (JSON.stringify(payload).length > 6 * 1024 * 1024) throw new Error("Данные профиля слишком большие");
+  // Enforce the durable queue at the native boundary too: older/stale panels
+  // must not reopen a profile with an unacknowledged local closure.
+  if (!listRunningProfiles().some(profile => profile.profileId === payload.profileId)) {
+    assertNoPendingProfileClosure(outbox, payload.profileId);
+  }
   try {
     const profile = await launchProfileWindow(payload, profileClosed);
     return { ok: true, ...(profile.recoveryBackupId ? { recoveryBackupId: profile.recoveryBackupId } : {}) };
@@ -175,7 +211,16 @@ handle("umbra:list-running-profiles", () => ({ ok: true, profiles: listRunningPr
 handle("umbra:browser-settings-push", async (settings) => ({ ok: true, applied: await applyBrowserSettings(settings) }));
 handle("umbra:bookmark-defaults-push", async (settings) => ({ ok: true, applied: await applyBookmarkDefaults(settings) }));
 handle("umbra:pending-profile-closures", () => ({ ok: true, profiles: outbox.list() }));
-handle("umbra:acknowledge-profile-closure", (id) => { outbox.acknowledge(id); return { ok: true }; });
+handle("umbra:acknowledge-profile-closure", async (id) => {
+  // This IPC is sent only after a successful server close. Keep the outbox
+  // record until the matching local checkpoint has been acknowledged; a
+  // terminal/rejected server close uses archive-profile-closure instead.
+  await acknowledgeSavedClosure({ outbox,
+    cookieStore: createCookieStore({ safeStorage, userData: app.getPath("userData") }),
+    isRunning: id => listRunningProfiles().some(profile => profile.profileId === id),
+  }, id);
+  return { ok: true };
+});
 handle("umbra:archive-profile-closure", (id) => { outbox.archive(id); return { ok: true }; });
 handle("umbra:check-proxy", async (payload) => {
   if (proxyChecks >= 4) throw new Error("Дождитесь завершения текущих проверок прокси");
@@ -248,7 +293,7 @@ handle("umbra:extensions-remove", async (id) => {
   return { ok: true };
 });
 
-if (!app.requestSingleInstanceLock()) app.quit();
+if (!app.requestSingleInstanceLock()) shutdown.requestQuit("second-instance");
 else {
   diagnose("browser-start", { version: app.getVersion() });
   process.on("disconnect", () => diagnose("coordinator-disconnect"));
@@ -299,7 +344,7 @@ else {
       updater: autoUpdater,
       enabled: app.isPackaged && process.platform === "win32" && !process.env.PORTABLE_EXECUTABLE_FILE,
       currentVersion: app.getVersion(),
-      hasOpenProfiles: () => listRunningProfiles().length > 0 || closing,
+      hasOpenProfiles: () => listRunningProfiles().length > 0 || shutdown.isClosing(),
       onState: (state) => {
         diagnose("update-state", { phase: state.state, version: state.version });
         send("umbra:update", state);
@@ -352,23 +397,10 @@ else {
       updateTimer.unref();
     }
     app.on("activate", () => { if (!mainWindow) createWindow(); });
-  }).catch((error) => { dialog.showErrorBox("Umbra", String(error.message || error)); app.quit(); });
+  }).catch((error) => { dialog.showErrorBox("Umbra", String(error.message || error)); shutdown.requestQuit("initialization-failed"); });
 }
 app.on("before-quit", (event) => {
-  if (quitting) return;
-  if (!closing) diagnose("browser-before-quit");
-  event.preventDefault();
-  if (closing) return;
-  closing = true;
-  Promise.resolve().then(() => closeAllProfiles()).then(() => {
-    quitting = true;
-    clearInterval(updateTimer);
-    clearInterval(healthTimer);
-    stopJournalMaintenance?.();
-    app.quit();
-  }).catch((error) => {
-    closing = false;
-    dialog.showErrorBox("Не удалось сохранить профиль", String(error.message || error));
-  });
+  if (!shutdown.isQuitting() && !shutdown.isClosing()) diagnose("browser-before-quit");
+  shutdown.beforeQuit(event);
 });
-app.on("window-all-closed", () => { if (!closing) app.quit(); });
+app.on("window-all-closed", () => shutdown.requestQuit("all-windows-closed"));

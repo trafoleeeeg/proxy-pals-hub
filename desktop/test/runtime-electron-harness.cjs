@@ -312,16 +312,32 @@ if (process.versions.electron) {
     };
 
     if (process.env.UMBRA_RUNTIME_TEST_PHASE === "restart") {
+      const checkpoint = await cookieStore.read(ID);
+      assert.equal(checkpoint.pending, true, "local close is not a server acknowledgement");
+      assert.equal(checkpoint.baseRevision, payload().cookiesUpdatedAt);
       const old = payload();
-      // Exercise OS-encrypted offline recovery. A versioned cloud snapshot is
-      // intentionally authoritative even if its wall-clock timestamp is older.
+      // A missing cloud revision is not the base of the pending local session.
+      // Reject the divergent cloud snapshot without touching the encrypted one.
       old.cookiesUpdatedAt = null;
       old.cookies = JSON.stringify([{ name: "__Host-fixture", value: "stale-cloud", domain: "localhost", path: "/", hostOnly: true, secure: true, httpOnly: true, session: true }]);
-      await runtime.launchProfileWindow(old, onClosed);
+      // Production has a panel window; this profile-only fixture must likewise
+      // stay alive between the deliberately failed launch and its safe retry.
+      const keepFixtureAlive = () => {};
+      app.on("window-all-closed", keepFixtureAlive);
+      try {
+        await assert.rejects(runtime.launchProfileWindow(old, onClosed), error => error.code === "COOKIE_RECOVERY_CONFLICT");
+        assert.equal(runtime.getRunningProfile(ID), null);
+        assert.equal(closed.length, 0, "rejected cloud data must not create a close snapshot");
+        assert.deepEqual(await cookieStore.read(ID), checkpoint, "conflict must preserve the exact pending checkpoint");
+        // The exact prior cloud base permits OS-encrypted offline recovery.
+        await runtime.launchProfileWindow(payload(), onClosed);
+      } finally {
+        app.removeListener("window-all-closed", keepFixtureAlive);
+      }
       const snapshot = await runtime.snapshotProfileCookies(ID);
       const restored = JSON.parse(snapshot.cookies).find((cookie) => cookie.name === "__Host-fixture");
       assert.equal(restored.value, "durable-local"); assert.equal(restored.session, true); assert.equal(restored.hostOnly, true);
-      assert.equal(runtime.getRunningProfile(ID).diagnostics.cookieSource, "local");
+      assert.equal(runtime.getRunningProfile(ID).diagnostics.cookieSource, "local-recovery");
       await runtime.closeAllProfiles();
       return;
     }

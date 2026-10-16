@@ -4,6 +4,7 @@ const { randomUUID } = require("node:crypto");
 const { profileId, revision } = require("./validation.cjs");
 const { normalizeCookiePartition } = require("./cookie-partition.cjs");
 const { saveAttempts } = require("./cookie-save-journal.cjs");
+const { synchronizedCookies } = require("./cookie-identity.cjs");
 const transports = new WeakMap();
 const MAX_BYTES = 8 * 1024 * 1024;
 const MAX_IMPORT_BYTES = 5_000_000;
@@ -168,35 +169,118 @@ function retainedCount(actual, imported) {
   return count;
 }
 
+function expiredCookie(cookie) {
+  return !cookie.session && cookie.expirationDate != null && cookie.expirationDate <= Date.now() / 1000;
+}
+
+function restoredExpiryMatches(actual, expected, written) {
+  if (expected.session === true || expected.expirationDate == null) return true;
+  // Chromium stores microseconds, whereas CDP accepts arbitrary double seconds.
+  const precision = 0.000002;
+  if (Math.abs(actual.expirationDate - expected.expirationDate) <= precision) return true;
+  if (!written) return false;
+  // CanonicalCookie caps new persistent cookies at 400 days. Its feature-gated
+  // HTTP policy caps them at 3 hours. Only accept a cap created during this exact
+  // set call, never an arbitrary shortened expiry or an older native cookie.
+  const limits = expected.secure ? [400 * 86400] : [400 * 86400, 3 * 3600];
+  // On Windows Node/V8 Time::Now anchors to GetSystemTimeAsFileTime (one
+  // ~15.625 ms tick), but Chromium base::Time::Now uses its Precise counterpart.
+  // Include that clock quantization only for the newly applied native cap;
+  // ordinary expirations retain the microsecond comparison above.
+  const clockTick = process.platform === "win32" ? 16 : 0;
+  return limits.some(limit => {
+    const earliest = Math.min(expected.expirationDate, (written.before - clockTick) / 1000 + limit);
+    // Date.now() truncates milliseconds; Chromium's native clock retains micros.
+    const latest = Math.min(expected.expirationDate, (written.after + clockTick + 1) / 1000 + limit);
+    return actual.expirationDate >= earliest - precision && actual.expirationDate <= latest + precision;
+  });
+}
+
+function restoredCookieCount(actual, expected, written = new Map()) {
+  const identity = cookie => synchronizedCookies([{ ...cookie,
+    domain: cookie.domain.replace(/^\./, "").toLowerCase(),
+    hostOnly: cookie.hostOnly ?? !cookie.domain.startsWith("."),
+    // Expiry alone has a bounded, native conversion rule; every other synced
+    // attribute (including session/persistent) still participates in identity.
+    ...(cookie.expirationDate != null ? { expirationDate: 0 } : {}),
+  }]);
+  const remaining = new Map();
+  for (const cookie of actual) {
+    const key = identity(cookie);
+    const available = remaining.get(key) || [];
+    available.push(cookie);
+    remaining.set(key, available);
+  }
+  let count = 0;
+  for (const cookie of expected) {
+    const available = remaining.get(identity(cookie)) || [];
+    const index = available.findIndex(candidate => restoredExpiryMatches(candidate, cookie, written.get(cookie)));
+    if (index !== -1) { available.splice(index, 1); count++; }
+  }
+  return count;
+}
+
+async function writeRestoredCookie(ses, cookie, written) {
+  const before = Date.now();
+  await writeSessionCookie(ses, cookie);
+  written.set(cookie, { before, after: Date.now() });
+}
+
+function restoreFailure(rollbackFailed = false) {
+  return Object.assign(new Error(rollbackFailed
+    ? "Cookie restore rollback failed; profile startup cancelled"
+    : "Cookie restore failed; original session preserved"), {
+    code: rollbackFailed ? "COOKIE_RESTORE_ROLLBACK_FAILED" : "COOKIE_RESTORE_FAILED",
+  });
+}
+
 async function restoreCookies(ses, cookies) {
   // Validate before clearing anything: never silently remove a partition key.
   for (const cookie of cookies) assertSupportedPartition(cookie);
   if (cookies.some(cookie => assertSupportedPartition(cookie)) && !transports.has(ses)) throw new Error("Для CHIPS нужен обновлённый клиент с защищённым транспортом cookies");
-  // Prove that the complete partition-aware jar is readable before erasing it.
-  if (transports.has(ses)) await readSessionCookies(ses);
-  // Replace, including removals; merging would revive cookies deleted elsewhere.
-  await ses.clearStorageData({ storages: ["cookies"] });
-  let restored = 0;
-  let skipped = 0;
-  let expired = 0;
-  for (const cookie of cookies) {
-    if (cookie.expirationDate != null && cookie.expirationDate <= Date.now() / 1000) { skipped += 1; expired += 1; continue; }
-    try {
-      await writeSessionCookie(ses, cookie);
-      restored += 1;
-    } catch (error) {
-      if (error?.code === "COOKIE_TRANSPORT_UNAVAILABLE") throw error;
-      // Chromium occasionally rejects obsolete or origin-incompatible cookies
-      // from an older snapshot. One bad entry must not prevent the profile from
-      // opening or discard every other valid cookie.
-      skipped += 1;
-    }
+  // Keep the complete original jar before replacing anything. The encrypted
+  // source checkpoint is committed only after this transaction is verified.
+  const original = parseCookies(JSON.stringify(await readSessionCookies(ses)));
+  if (cookies.length && cookies.every(expiredCookie)) throw restoreFailure();
+  const activeSource = cookies.filter(cookie => !expiredCookie(cookie));
+  const activeOriginal = original.filter(cookie => !expiredCookie(cookie));
+  if (activeOriginal.length === activeSource.length && restoredCookieCount(activeOriginal, activeSource) === activeSource.length) {
+    // In particular, the native-disk fallback may be the only existing copy.
+    // An already identical jar needs no destructive clear/reinstall cycle.
+    const expired = cookies.length - activeSource.length;
+    return { restored: activeSource.length, skipped: expired, expired, installed: activeSource.length };
   }
-  await ses.cookies.flushStore();
-  const actual = await readSessionCookies(ses);
-  const chips = cookies.filter(cookie => assertSupportedPartition(cookie) && !(cookie.expirationDate != null && cookie.expirationDate <= Date.now() / 1000));
-  if (retainedCount(actual, chips) !== chips.length) throw new Error("Не все CHIPS cookies восстановлены; исходный снимок сохранён");
-  return { restored, skipped, expired, installed: retainedCount(actual, cookies) };
+  try {
+    // Replace, including removals; merging would revive cookies deleted elsewhere.
+    await ses.clearStorageData({ storages: ["cookies"] });
+    let restored = 0;
+    const written = new Map();
+    for (const cookie of cookies) {
+      if (expiredCookie(cookie)) continue;
+      await writeRestoredCookie(ses, cookie, written);
+      restored++;
+    }
+    await ses.cookies.flushStore();
+    const actual = await readSessionCookies(ses);
+    const active = cookies.filter(cookie => !expiredCookie(cookie));
+    const installed = restoredCookieCount(actual, active, written);
+    // A resolved set call is insufficient: Chromium can drop or alter a cookie.
+    // Every active cookie, including its scope and security attributes, matters.
+    if (installed !== active.length || actual.filter(cookie => !expiredCookie(cookie)).length !== active.length || (cookies.length && !installed)) throw restoreFailure();
+    const expired = cookies.length - active.length;
+    return { restored, skipped: expired, expired, installed };
+  } catch {
+    try {
+      await ses.clearStorageData({ storages: ["cookies"] });
+      const written = new Map();
+      for (const cookie of original) if (!expiredCookie(cookie)) await writeRestoredCookie(ses, cookie, written);
+      await ses.cookies.flushStore();
+      const actual = await readSessionCookies(ses);
+      const active = original.filter(cookie => !expiredCookie(cookie));
+      if (restoredCookieCount(actual, active, written) !== active.length || actual.filter(cookie => !expiredCookie(cookie)).length !== active.length) throw restoreFailure(true);
+    } catch { throw restoreFailure(true); }
+    throw restoreFailure();
+  }
 }
 
 async function applyImportedCookies(ses, cookies) {
@@ -243,6 +327,17 @@ function createCookieStore({ safeStorage, userData }) {
     async markClosed(id) {
       const saved = await this.read(id);
       if (saved?.pending) await this.write(id, saved.cookies, saved.cookiesUpdatedAt);
+    },
+    async acknowledgeClosed(id, cookies, cookiesUpdatedAt) {
+      const expectedRevision = revision(cookiesUpdatedAt);
+      if (!expectedRevision || typeof cookies !== "string") return false;
+      const expected = canonicalCookies(parseCookies(cookies));
+      // The caller must serialize against launch/close for this profile. A
+      // delayed acknowledgement can clean only its exact durable checkpoint.
+      const saved = await this.read(id);
+      if (!saved?.pending || saved.cookiesUpdatedAt !== expectedRevision || canonicalCookies(saved.cookies) !== expected) return false;
+      await this.write(id, saved.cookies, saved.cookiesUpdatedAt);
+      return true;
     },
     async write(id, cookies, cookiesUpdatedAt, recovery = {}) {
       requireEncryption();

@@ -21,6 +21,60 @@ const cookies = [base, ...[{ topLevelSite: "https://chips.test", hasCrossSiteAnc
   { topLevelSite: "https://chips.test", hasCrossSiteAncestor: true },
   { topLevelSite: "https://other.test", hasCrossSiteAncestor: true }].map(partitionKey => ({ ...base, partitionKey }))];
 const keys = rows => rows.map(cookie => JSON.stringify(cookie.partitionKey || null)).sort();
+async function verifyPersistentExpiry() {
+  const ses = session.fromPartition("persist:expiry-fixture");
+  ses.webRequest.onBeforeRequest((_details, callback) => callback({ cancel: true }));
+  await allowBackgroundWorkers(ses);
+  const transport = createCookieTransport(cookieProtocolForSession(ses));
+  registerCookieTransport(ses, transport);
+  const day = 86400;
+  const now = Math.floor(Date.now() / 1000);
+  const failures = [];
+  for (const [kind, expirationDate, overrides = {}] of [
+    ["fractional-persistent", now + 30 * day + 0.123456],
+    ["submicrosecond-persistent", now + 30 * day + 0.1234567],
+    ["legacy-long-lived", now + 3 * 365 * day + 0.654321],
+    ["insecure-long-lived", now + 3 * 365 * day + 0.654321, { secure: false, sameSite: "lax" }],
+  ]) {
+    const fixture = { ...base, name: kind, session: false, expirationDate, ...overrides };
+    await ses.clearStorageData({ storages: ["cookies"] });
+    // Observe Chromium's own conversion independently of restore verification.
+    const before = Date.now();
+    await transport.write(fixture);
+    const after = Date.now();
+    const observed = (await transport.read()).find(cookie => cookie.name === kind);
+    assert.ok(observed);
+    console.log("UMBRA_COOKIE_EXPIRY_PROBE " + JSON.stringify({ kind, requested: expirationDate,
+      observed: observed.expirationDate, deltaSeconds: observed.expirationDate - expirationDate,
+      before, after, capClockBeforeDeltaMs: (observed.expirationDate - 400 * day) * 1000 - before,
+      capClockAfterDeltaMs: (observed.expirationDate - 400 * day) * 1000 - after }));
+    await ses.clearStorageData({ storages: ["cookies"] });
+    try {
+      const result = await restoreCookies(ses, [fixture]);
+      assert.equal(result.installed, 1, "persistent authentication cookie must remain installed");
+      const actual = (await readSessionCookies(ses)).find(cookie => cookie.name === kind);
+      assert.ok(actual);
+      assert.equal(actual.value, fixture.value);
+      assert.equal(actual.session, false);
+      assert.equal(actual.secure, fixture.secure);
+      assert.equal(actual.httpOnly, true);
+      assert.equal(actual.hostOnly, true);
+      assert.equal(actual.sameSite, fixture.sameSite);
+      if (!kind.endsWith("long-lived")) assert.ok(Math.abs(actual.expirationDate - expirationDate) <= 0.000002);
+      else {
+        // The JS clock's Windows anchor is coarse while Chromium's cookie clock
+        // is precise; the cap may legitimately be ahead by one 15.625 ms tick.
+        const latestNativeNow = (Date.now() + (process.platform === "win32" ? 17 : 1)) / 1000;
+        if (fixture.secure) assert.ok(actual.expirationDate > now + 399 * day && actual.expirationDate <= latestNativeNow + 400 * day);
+        else assert.ok((actual.expirationDate > now + 399 * day && actual.expirationDate <= latestNativeNow + 400 * day)
+          || (actual.expirationDate > now + 2 * 3600 && actual.expirationDate <= latestNativeNow + 3 * 3600));
+      }
+    } catch (error) { failures.push({ kind, code: error.code || "ASSERTION_FAILED" }); }
+  }
+  await ses.clearStorageData({ storages: ["cookies"] });
+  disposeCookieTransport(ses);
+  assert.deepEqual(failures, [], "Chromium expiry normalization must not discard persistent cookies");
+}
 app.whenReady().then(async () => {
   await initializeBackgroundWorkers();
   let protection = safeStorage;
@@ -56,6 +110,7 @@ app.whenReady().then(async () => {
     const encrypted = await fs.readFile(path.join(directory, "profile-cookie-snapshots", id + ".bin"));
     assert.equal(encrypted.includes(Buffer.from(base.value)), false);
     assert.deepEqual(keys((await store.read(id)).cookies), keys(cookies));
+    await verifyPersistentExpiry();
   } else {
     const result = await initializeCookies(a, store, { profileId: id, cookies: "[]", cookiesUpdatedAt: revision });
     assert.equal(result.cookieRestore.installed, 4);

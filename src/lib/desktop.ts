@@ -259,7 +259,7 @@ export class DesktopProfileLifecycle {
         } catch {
           // A native outbox read failure must not hide the workspace or already
           // running profiles. Keep the encrypted files untouched and retry later.
-          this.errors["outbox"] = "Не удалось прочитать очередь сохранения cookies. Остальные профили доступны.";
+          this.errors["outbox"] = "Не удалось прочитать очередь сохранения cookies. Новые запуски приостановлены; открытые профили доступны. Повторите синхронизацию.";
         }
         const result = await withDesktopTimeout(this.bridge.listRunningProfiles(), "Приложение не ответило вовремя");
         if (!result.ok) throw new Error();
@@ -285,7 +285,10 @@ export class DesktopProfileLifecycle {
     if (this.shutdownJob || this.restoring || this.errors["restore"]) return Promise.reject(new Error("Дождитесь синхронизации приложения."));
     if (this.jobs.has(profileId) || this.sessions.has(profileId)) return recovery
       ? Promise.reject(new Error("Закройте профиль перед восстановлением cookies.")) : Promise.resolve();
+    if (this.errors["outbox"]) return Promise.reject(new Error("Не удалось проверить сохранение предыдущих сессий. Повторите синхронизацию перед запуском."));
     return this.run(profileId, async () => {
+      // A queued launch can outlive an outbox read failure on another job.
+      if (this.errors["outbox"]) throw new Error("Не удалось проверить сохранение предыдущих сессий. Повторите синхронизацию перед запуском.");
       if (this.outboxFailures.has(profileId) || [...this.pending.values()].some((p) => p.profileId === profileId)) throw new Error("Сначала сохраните предыдущую сессию профиля.");
       let payload: LaunchPayload | undefined;
       try {
@@ -445,7 +448,7 @@ export class DesktopProfileLifecycle {
     if (this.shutdownJob) return this.shutdownJob;
     if (this.syncJob) return this.syncJob;
     const job = (async () => {
-      try { await this.loadOutbox(); delete this.errors["outbox"]; }
+      try { await this.loadOutbox(); }
       catch { this.errors["outbox"] = "Не удалось прочитать очередь сохранения cookies. Повторите синхронизацию."; this.emit(); }
       const ids = [...new Set([...this.sessions.keys(), ...[...this.pending.values()].map((p) => p.profileId)])];
       await Promise.all(ids.map((id) => this.run(id, async () => {

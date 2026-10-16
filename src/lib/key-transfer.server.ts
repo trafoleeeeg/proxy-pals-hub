@@ -31,6 +31,17 @@ export type KeyTransferEnvelope = {
   ciphertext: string;
 };
 
+// Finite owner-only operational outcomes, never exception text or secret
+// metadata. This union changes the RPC wrapper, not the encrypted envelope.
+export type KeyTransferFailureCode =
+  | "source_key_unavailable"
+  | "crypto_import_failed"
+  | "canary_failed"
+  | "seal_failed";
+export type KeyTransferExportResult =
+  | { ok: true; envelope: KeyTransferEnvelope }
+  | { ok: false; code: KeyTransferFailureCode };
+
 function unavailable(): never { throw new Error(KEY_TRANSFER_UNAVAILABLE); }
 function canonicalDate(value: string): number {
   const time = Date.parse(value);

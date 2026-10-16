@@ -4,8 +4,15 @@ import { Download, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useWorkspace } from "@/lib/useWorkspace";
 import { exportEncryptedMigrationKey, getKeyTransferStatus } from "@/lib/key-transfer.functions";
+import type { KeyTransferFailureCode } from "@/lib/key-transfer.server";
 
 type TransferStatus = Awaited<ReturnType<typeof getKeyTransferStatus>>;
+const failureMessages: Record<KeyTransferFailureCode, string> = {
+  source_key_unavailable: "Источник не предоставил ключ шифрования. Код: source_key_unavailable. Ключ и данные не изменены.",
+  crypto_import_failed: "Не удалось загрузить серверный модуль шифрования. Код: crypto_import_failed. Ключ и данные не изменены.",
+  canary_failed: "Не удалось выполнить синтетическую проверку шифрования. Код: canary_failed. Ключ и данные не изменены.",
+  seal_failed: "Не удалось зашифровать контейнер для закреплённого получателя. Код: seal_failed. Ключ и данные не изменены.",
+};
 
 export function KeyTransferExport() {
   const workspace = useWorkspace();
@@ -26,12 +33,25 @@ export function KeyTransferExport() {
     if (!status?.enabled || busy) return;
     setBusy(true); setMessage("");
     try {
-      const envelope = await exportKey({ data: {} });
-      const url = URL.createObjectURL(new Blob([JSON.stringify(envelope)], { type: "application/json" }));
-      const anchor = document.createElement("a");
-      anchor.href = url; anchor.download = `umbra-key-transfer-${envelope.transferId}.json`;
-      anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-      setMessage("Создан только зашифрованный контейнер. Исходный ключ, cookies и база не изменены. Сохраните файл для локальной проверки; не отправляйте его в чат.");
+      const result = await exportKey({ data: {} });
+      if (!result.ok) {
+        setMessage(Object.hasOwn(failureMessages, result.code) ? failureMessages[result.code] : "Контейнер не получен. Сервер вернул неизвестный результат; ключ и данные не изменены.");
+        return;
+      }
+      let url: string | null = null;
+      try {
+        // The local receiver expects the unchanged envelope, not the RPC union.
+        const envelope = result.envelope;
+        url = URL.createObjectURL(new Blob([JSON.stringify(envelope)], { type: "application/json" }));
+        const anchor = document.createElement("a");
+        anchor.href = url; anchor.download = `umbra-key-transfer-${envelope.transferId}.json`;
+        anchor.click();
+        setMessage("Создан только зашифрованный контейнер; запрос скачивания передан браузеру. Проверьте сохранение файла. Исходный ключ, cookies и база не изменены; файл в чат не отправляйте.");
+      } catch {
+        setMessage("Сервер создал зашифрованный контейнер, но браузер не смог запустить скачивание. Код: download_failed. Ключ и данные не изменены.");
+      } finally {
+        if (url) { const pendingUrl = url; setTimeout(() => URL.revokeObjectURL(pendingUrl), 1000); }
+      }
     } catch { setMessage("Контейнер не получен. Ключ и данные не изменены. Проверьте окно переноса и повторный вход по паролю."); }
     finally { setBusy(false); }
   }

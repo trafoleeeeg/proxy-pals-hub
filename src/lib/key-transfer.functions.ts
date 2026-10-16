@@ -4,6 +4,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { keyTransferConfig } from "./key-transfer-config.server";
 import { KEY_TRANSFER_UNAVAILABLE, sealKeyTransfer, validateKeyTransferConfig, validateKeyTransferHttp, validateRecentPassword } from "./key-transfer.server";
+import type { KeyTransferExportResult, KeyTransferFailureCode, KeyTransferRequest } from "./key-transfer.server";
 import type { ServerContext } from "./server-db";
 
 const noStore = createMiddleware({ type: "function" }).server(async ({ next }) => {
@@ -42,25 +43,45 @@ export const getKeyTransferStatus = createServerFn({ method: "POST" })
 
 export const exportEncryptedMigrationKey = createServerFn({ method: "POST" })
   .middleware([noStore, requireSupabaseAuth]).inputValidator(emptyInput)
-  .handler(async ({ context }) => {
+  .handler(async ({ context }): Promise<KeyTransferExportResult> => {
+    let request: KeyTransferRequest;
     try {
-      const request = validateKeyTransferConfig(keyTransferConfig, Date.now());
+      request = validateKeyTransferConfig(keyTransferConfig, Date.now());
       validateKeyTransferHttp(getRequest(), request);
       await authorize(context, Date.now());
       validateKeyTransferConfig({ enabled: keyTransferConfig.enabled, request }, Date.now());
       validateRecentPassword(context.claims, Date.now());
+    } catch {
+      // No diagnostic code or environment read until every authorization,
+      // recipient, source-origin and absolute-time guard has succeeded.
+      throw new Error(KEY_TRANSFER_UNAVAILABLE);
+    }
+
+    const recheck = () => {
+      validateKeyTransferConfig({ enabled: keyTransferConfig.enabled, request }, Date.now());
+      validateKeyTransferHttp(getRequest(), request);
+      validateRecentPassword(context.claims, Date.now());
+    };
+    let code: KeyTransferFailureCode = "source_key_unavailable";
+    try {
       // No environment value is accessed before the complete authorization and
       // recipient/time/origin checks. No supplied env name or recipient is accepted.
       const rawKey = process.env["APP_ENCRYPTION_KEY"];
       if (!rawKey) throw new Error(KEY_TRANSFER_UNAVAILABLE);
+      code = "crypto_import_failed";
       const { randomBytes } = await import("node:crypto");
       const { encryptSecret } = await import("./crypto.server");
+      code = "canary_failed";
       const plain = randomBytes(32).toString("base64");
       const canary = { plain, encrypted: encryptSecret(plain) };
-      return sealKeyTransfer(rawKey, canary, request, Date.now());
+      code = "seal_failed";
+      const envelope = sealKeyTransfer(rawKey, canary, request, Date.now());
+      recheck();
+      return { ok: true, envelope };
     } catch {
-      // Do not forward nested exceptions, request bodies, crypto inputs or causes
-      // into TanStack's error transport / global error capture.
-      throw new Error(KEY_TRANSFER_UNAVAILABLE);
+      // Do not turn expiry or a lost guard during crypto into a diagnostic
+      // response. Never expose nested exception text, causes, values or lengths.
+      try { recheck(); } catch { throw new Error(KEY_TRANSFER_UNAVAILABLE); }
+      return { ok: false, code };
     }
   });

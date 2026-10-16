@@ -187,6 +187,7 @@ async function main() {
     function denied(result) {
       assert(result.response.status >= 400 || result.error instanceof Error || result.decoded?.error === "unauthorized", "Access must be rejected by real transport or serialized Error");
       assert(!result.text.includes("wrappedKey") && !result.text.includes("ciphertext") && !result.text.includes('"enabled":true'), "Denied request must not return transfer data");
+      assert(!["source_key_unavailable", "crypto_import_failed", "canary_failed", "seal_failed"].some(code => result.text.includes(code)), "Denied request must not return post-authorization diagnostics");
       assert.equal(forbiddenRequests, 0, "No request may escape the allowlisted fake Auth and role RPC");
     }
     for (const name of functionNames) {
@@ -215,7 +216,22 @@ async function main() {
     assert.equal(status.result.keyId, fixture.keyId);
     const exported = await invoke("exportEncryptedMigrationKey"); noStore(exported);
     assert.equal(exported.response.status, 200);
-    decryptEnvelope(exported.result, pair, fixture);
+    assert.deepEqual(Object.keys(exported.result).sort(), ["envelope", "ok"]);
+    assert.equal(exported.result.ok, true, "Successful RPC must contain the explicit success discriminator");
+    decryptEnvelope(exported.result.envelope, pair, fixture);
+
+    // Exercise finite failure codes through the real serialized HTTP transport,
+    // not only the isolated handler fixture. These are synthetic env values in
+    // this standalone process; no live secret, SDK account or database is used.
+    delete process.env.APP_ENCRYPTION_KEY;
+    const missingKey = await invoke("exportEncryptedMigrationKey"); noStore(missingKey);
+    assert.equal(missingKey.response.status, 200);
+    assert.deepEqual(missingKey.result, { ok: false, code: "source_key_unavailable" });
+    process.env.APP_ENCRYPTION_KEY = SYNTHETIC_KEY.repeat(1000);
+    const rejectedSeal = await invoke("exportEncryptedMigrationKey"); noStore(rejectedSeal);
+    assert.equal(rejectedSeal.response.status, 200);
+    assert.deepEqual(rejectedSeal.result, { ok: false, code: "seal_failed" });
+    process.env.APP_ENCRYPTION_KEY = SYNTHETIC_KEY;
     assert(upstreamCalls > 0, "Positive HTTP test must exercise the actual SDK Auth/role path");
     assert.equal(forbiddenRequests, 0);
     assert(!consoleOutput.some(text => text.includes(SYNTHETIC_MARKER) || text.includes(privatePem) || [freshJwt, staleJwt].some(token => text.includes(token))), "Runtime logs must not include synthetic secrets or tokens");

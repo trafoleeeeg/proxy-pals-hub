@@ -1,4 +1,4 @@
-import { constants, createCipheriv, createHash, createPublicKey, publicEncrypt, randomBytes } from "node:crypto";
+import { createHash, createPublicKey } from "node:crypto";
 
 export const KEY_TRANSFER_UNAVAILABLE = "Защищённый перенос недоступен. Проверьте окно переноса и повторно войдите по паролю.";
 export const KEY_TRANSFER_SOURCE = "https://proxy-pals-hub.lovable.app";
@@ -88,19 +88,21 @@ export function validateRecentPassword(claims: Record<string, unknown>, now: num
   if (!recent) unavailable();
 }
 
-export function sealKeyTransfer(
+export async function sealKeyTransfer(
   secret: string,
   canary: { plain: string; encrypted: string },
   request: KeyTransferRequest,
   now: number,
-): KeyTransferEnvelope {
+): Promise<KeyTransferEnvelope> {
   // Recheck the absolute expiry immediately before using the secret. This
   // operation never updates the original key or any database row.
   validateKeyTransferConfig({ enabled: true, request }, now);
   if (!secret || Buffer.byteLength(secret, "utf8") > 16384 || Buffer.from(secret, "utf8").toString("utf8") !== secret) unavailable();
-  const key = randomBytes(32);
-  const iv = randomBytes(12);
-  const payload = Buffer.from(JSON.stringify({ secretName: "APP_ENCRYPTION_KEY", secret, canary }), "utf8");
+  const crypto = globalThis.crypto;
+  if (!crypto?.subtle) unavailable();
+  const key = crypto.getRandomValues(new Uint8Array(32));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const payload = new TextEncoder().encode(JSON.stringify({ secretName: "APP_ENCRYPTION_KEY", secret, canary }));
   try {
     const metadata = {
       format: "umbra-key-transfer-v1" as const, transferId: request.transferId, keyId: request.keyId,
@@ -111,16 +113,17 @@ export function sealKeyTransfer(
       metadata.format, metadata.transferId, metadata.keyId, metadata.sourceOrigin,
       metadata.targetOrigin, metadata.issuedAt, metadata.expiresAt,
     ]), "utf8");
-    const cipher = createCipheriv("aes-256-gcm", key, iv);
-    cipher.setAAD(aad);
-    const ciphertext = Buffer.concat([cipher.update(payload), cipher.final()]);
-    const wrapped = publicEncrypt({
-      key: createPublicKey({ key: Buffer.from(request.publicKeySpki, "base64"), format: "der", type: "spki" }),
-      padding: constants.RSA_PKCS1_OAEP_PADDING, oaepHash: "sha256", oaepLabel: Buffer.alloc(0),
-    }, key);
+    // Use the standard WebCrypto implementation across Node/Workers runtimes.
+    // No PKCS#1 v1.5, SHA-1, missing-AAD or other compatibility fallback.
+    const aes = await crypto.subtle.importKey("raw", key, { name: "AES-GCM" }, false, ["encrypt"]);
+    const rsa = await crypto.subtle.importKey("spki", new Uint8Array(Buffer.from(request.publicKeySpki, "base64")), { name: "RSA-OAEP", hash: "SHA-256" }, false, ["encrypt"]);
+    const sealed = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: new Uint8Array(aad), tagLength: 128 }, aes, payload));
+    const wrapped = new Uint8Array(await crypto.subtle.encrypt({ name: "RSA-OAEP", label: new Uint8Array(0) }, rsa, key));
+    validateKeyTransferConfig({ enabled: true, request }, Date.now());
     return {
-      ...metadata, wrappedKey: wrapped.toString("base64"), iv: iv.toString("base64"),
-      tag: cipher.getAuthTag().toString("base64"), ciphertext: ciphertext.toString("base64"),
+      ...metadata, wrappedKey: Buffer.from(wrapped).toString("base64"), iv: Buffer.from(iv).toString("base64"),
+      tag: Buffer.from(sealed.subarray(sealed.length - 16)).toString("base64"),
+      ciphertext: Buffer.from(sealed.subarray(0, sealed.length - 16)).toString("base64"),
     };
   } catch { unavailable(); }
   finally { key.fill(0); payload.fill(0); }

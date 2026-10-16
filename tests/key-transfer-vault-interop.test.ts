@@ -11,7 +11,7 @@ const supported = process.platform === "win32" && spawnSync("pwsh", ["-NoProfile
 if (process.env["UMBRA_REQUIRE_DPAPI"] === "1" && !supported) throw new Error("Native key transfer test requires Windows and PowerShell 7.4+");
 const script = fileURLToPath(new URL("../scripts/key-transfer-vault.ps1", import.meta.url));
 
-test.skipIf(!supported)("actual TS seal and existing encryptSecret are interoperable with Windows DPAPI receive", () => {
+test.skipIf(!supported)("actual TS seal and existing encryptSecret are interoperable with Windows DPAPI receive", async () => {
   const parent = resolve(mkdtempSync(join(tmpdir(), "umbra-ts-vault-")));
   const vault = join(parent, "vault");
   const previous = process.env["APP_ENCRYPTION_KEY"];
@@ -22,7 +22,7 @@ test.skipIf(!supported)("actual TS seal and existing encryptSecret are interoper
     const manifest = JSON.parse(readFileSync(join(vault, "public-manifest.json"), "utf8")) as KeyTransferRequest;
     process.env["APP_ENCRYPTION_KEY"] = synthetic;
     const plain = "synthetic-canary-not-a-user-record";
-    const envelope = sealKeyTransfer(synthetic, { plain, encrypted: encryptSecret(plain) }, manifest, Date.now());
+    const envelope = await sealKeyTransfer(synthetic, { plain, encrypted: encryptSecret(plain) }, manifest, Date.now());
     const file = join(parent, "encrypted-envelope.json");
     writeFileSync(file, JSON.stringify(envelope));
     const received = spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-File", script, "-Command", "receive", "-StateDirectory", vault, "-EnvelopePath", file], { encoding: "utf8", windowsHide: true, timeout: 30000 });

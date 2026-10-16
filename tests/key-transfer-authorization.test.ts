@@ -191,6 +191,32 @@ test.each(["expiry", "stale password"])("%s during crypto remains generic instea
   expect(api.state.reads).toBe(1);
 });
 
+test.each(["expiry", "stale password"])("%s while WebCrypto awaits is rechecked before any result", async (failure) => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto")!;
+  const native = globalThis.crypto;
+  let changed = false;
+  Object.defineProperty(globalThis, "crypto", { configurable: true, value: {
+    getRandomValues: native.getRandomValues.bind(native),
+    subtle: {
+      async importKey(...args: any[]) {
+        const imported = await (native.subtle.importKey as any)(...args);
+        if (!changed) {
+          changed = true;
+          if (failure === "expiry") api.state.config.request.expiresAt = new Date(Date.now() - 1).toISOString();
+          else api.state.claims.amr[0].timestamp = Math.floor(Date.now() / 1000) - 601;
+        }
+        return imported;
+      },
+      encrypt: native.subtle.encrypt.bind(native.subtle),
+    },
+  } });
+  try {
+    await expect(api.exportEncryptedMigrationKey({ data: {} })).rejects.toThrow(KEY_TRANSFER_UNAVAILABLE);
+    expect(changed).toBe(true);
+    expect(api.state.reads).toBe(1);
+  } finally { Object.defineProperty(globalThis, "crypto", descriptor); }
+});
+
 test("post-auth diagnostic outcomes survive synthetic HTTP JSON transport without raw errors", async () => {
   // Loopback-only HTTP adapter around the actual isolated handler builder, not
   // a claim that the real TanStack wire protocol or production is exercised.
@@ -221,7 +247,7 @@ test("post-auth diagnostic outcomes survive synthetic HTTP JSON transport withou
   } finally { await server.stop(true); }
 });
 
-test("committed owner-approved recipient has exact pins and an absolute 30-minute window", () => {
+test("committed owner-approved recipient retains exact pins and the explicitly extended absolute deadline", () => {
   const request = committedKeyTransferConfig.request!;
   expect(committedKeyTransferConfig.enabled).toBe(true);
   expect(request.transferId).toBe("b44f50f3-f79a-47c9-ba0f-cfabb7ca92bb");
@@ -229,9 +255,9 @@ test("committed owner-approved recipient has exact pins and an absolute 30-minut
   expect(request.sourceOrigin).toBe(KEY_TRANSFER_SOURCE);
   expect(request.targetOrigin).toBe(KEY_TRANSFER_TARGET);
   expect(request.createdAt).toBe("2026-10-16T19:53:18.730Z");
-  expect(request.expiresAt).toBe("2026-10-16T20:23:18.730Z");
+  expect(request.expiresAt).toBe("2026-10-16T21:00:00.000Z");
   const created = Date.parse(request.createdAt), expires = Date.parse(request.expiresAt);
-  expect(expires - created).toBe(30 * 60_000);
+  expect(expires - created).toBe(4_001_270);
   // Verify the approved interval independently of when CI happens to run.
   // Never derive a new expiry from the test's wall clock.
   expect(validateKeyTransferConfig(committedKeyTransferConfig, created + 1)).toEqual(request);

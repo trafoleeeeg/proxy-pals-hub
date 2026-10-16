@@ -75,7 +75,7 @@ export const exportEncryptedMigrationKey = createServerFn({ method: "POST" })
       const plain = randomBytes(32).toString("base64");
       const canary = { plain, encrypted: encryptSecret(plain) };
       code = "seal_failed";
-      const envelope = sealKeyTransfer(rawKey, canary, request, Date.now());
+      const envelope = await sealKeyTransfer(rawKey, canary, request, Date.now());
       recheck();
       return { ok: true, envelope };
     } catch {

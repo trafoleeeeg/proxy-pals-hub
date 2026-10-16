@@ -17,7 +17,7 @@ const EVENTS = new Set([
   "background-worker",
   "page-protection",
   "native-crash-capture",
-  "profile-lifecycle", "profile-close-request", "profile-snapshot", "proxy-operation",
+  "profile-lifecycle", "profile-close-request", "profile-snapshot", "proxy-operation", "app-quit-request", "panel-close-request",
   "contents-lifecycle", "window-lifecycle", "ipc-operation", "browser-command", "power-state", "process-health", "update-state", "protection-command", "execution-context",
 ]);
 const PHASES = new Set(["begin", "ready", "failed", "done", "cancelled", "starting", "running",
@@ -108,6 +108,10 @@ function recordProcessEvent(userData, event, details = {}, options = {}) {
     }
     if (PHASES.has(details.phase) && ["profile-lifecycle", "profile-snapshot", "proxy-operation", "contents-lifecycle", "window-lifecycle", "ipc-operation", "browser-command", "power-state", "update-state", "protection-command"].includes(event)) row.phase = details.phase;
     if (event === "browser-command" && BROWSER_ACTIONS.has(details.action)) row.action = details.action;
+    if (event === "app-quit-request") {
+      if (["begin", "ready", "cancelled", "failed", "done"].includes(details.phase)) row.phase = details.phase;
+      if (["panel-close", "panel-startup-failed", "initialization-failed", "second-instance", "all-windows-closed", "unknown"].includes(details.quitSource)) row.quitSource = details.quitSource;
+    }
     if (event === "execution-context") {
       if (["created", "destroyed", "cleared", "detached"].includes(details.phase)) row.phase = details.phase;
       if (["page", "iframe", "worker"].includes(details.targetType)) row.targetType = details.targetType;

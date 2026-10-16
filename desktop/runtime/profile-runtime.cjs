@@ -21,6 +21,8 @@ const { createCookieRecovery, recoveryRequest } = require("./cookie-recovery.cjs
 // Сообщения об ошибках запуска показываются пользователю, поэтому они переводятся
 // на русский язык на границе клиента, без утечки URL и значений cookies.
 const LAUNCH_ERROR_TEXT = [
+  [/^Cookie restore rollback failed/i, "Не удалось полностью восстановить cookies и вернуть прежнюю сессию. Профиль не запущен; требуется восстановление cookies"],
+  [/^Cookie restore failed/i, "Не все cookies удалось восстановить. Прежняя сессия и исходный снимок сохранены; профиль не запущен"],
   [/^Font isolation requires/i, "Для изоляции шрифтов нужен обновлённый движок Umbra; профиль не запущен"],
   [/^Font isolation bundle/i, "Комплект изолированных шрифтов отсутствует или повреждён; профиль не запущен"],
   [/^Font isolation/i, "Не удалось применить изоляцию шрифтов. После изменения режима перезапустите Umbra"],
@@ -1021,10 +1023,10 @@ function createProfileRuntime(electron, options = {}) {
       }
       if (entry.restartRequired) {
         try { app?.emit?.("umbra:profile-restart-required"); } catch { /* notification is optional */ }
-      } else {
-        // Clear crash recovery only after confirmed cleanup and durable outbox.
-        await cookieStore().markClosed?.(entry.profileId);
       }
+      // A durable local outbox is NOT a server acknowledgement. Keep the
+      // checkpoint pending until the matching successful close is acknowledged
+      // by the panel; terminal/archived closes must retain local recovery.
       for (const win of entry.windows) if (!win.isDestroyed()) win.destroy();
       entry.browser?.destroy();
       if (entry.ses) disposeCookieTransport(entry.ses);

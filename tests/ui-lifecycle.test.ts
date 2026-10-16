@@ -466,17 +466,21 @@ describe("desktop profile lifecycle", () => {
     expect(f.state.closeCalls[0]).toEqual({ profileId: "a", lockToken: "lease-a", deviceId: "device-1", cookies: "[]" });
   });
 
-  test("unreadable durable storage stays encrypted but does not block unrelated launches", async () => {
-    const f = fixture();
+  test("unreadable durable storage keeps running profiles visible and blocks new launches until retry", async () => {
+    const f = fixture([{ profileId: "running", name: "Running", lockToken: "lease-running" }]);
     const read = f.bridge.pendingProfileClosures;
     f.bridge.pendingProfileClosures = async () => ({ ok: false, profiles: [] });
     await f.controller.restore();
-    await f.controller.start("a");
+    await expect(f.controller.start("a")).rejects.toThrow();
+    expect(f.state.launches).toHaveLength(0);
+    expect(f.controller.getSnapshot().running).toEqual([{ profileId: "running", name: "Running" }]);
     await expect(f.controller.closeAll()).rejects.toThrow();
     expect(f.controller.hasWork()).toBe(true);
     f.bridge.pendingProfileClosures = read;
     await f.controller.sync();
     expect(f.controller.hasWork()).toBe(false);
+    await f.controller.start("a");
+    expect(f.state.launches).toHaveLength(1);
   });
 
   test("a stale outbox token is never replaced by the live lease and does not starve heartbeat", async () => {

@@ -69,7 +69,7 @@ function harness({ diagnosticFailure = false } = {}) {
       if (sessions.has(partition)) return sessions.get(partition);
       const cookies = new EventEmitter();
       let data = [];
-      Object.assign(cookies, { get: async () => data, set: async (cookie) => { data.push({ ...cookie, domain: cookie.domain || new URL(cookie.url).hostname, session: true, hostOnly: !cookie.domain }); }, flushStore: async () => { if (flushGate) await flushGate.promise; }, update: (value) => { data = value; cookies.emit("changed"); } });
+      Object.assign(cookies, { get: async () => data, set: async (cookie) => { data.push({ ...cookie, domain: cookie.domain || new URL(cookie.url).hostname, session: true, hostOnly: cookie.hostOnly ?? !cookie.domain }); }, flushStore: async () => { if (flushGate) await flushGate.promise; }, update: (value) => { data = value; cookies.emit("changed"); } });
       const ses = { cookies, webRequest: { onBeforeRequest() {} }, getUserAgent: () => "Chrome/144.0.0.0", setUserAgent() {}, flushStorageData() {}, closeAllConnections: async () => {}, clearStorageData: async (options) => { storageClears.push(options); if (!options?.storages || options.storages.includes("cookies")) data = []; },
         setPermissionRequestHandler(handler) { this.permissionRequest = handler; },
         setPermissionCheckHandler(handler) { this.permissionCheck = handler; },
@@ -117,6 +117,27 @@ function harness({ diagnosticFailure = false } = {}) {
 }
 
 const payload = () => ({ profileId: ID, deviceId: "test-device", name: "Test", lockToken: "test-lock-token", fingerprint: FP, cookies: "[]", cookiesUpdatedAt: null, proxy: null, startUrl: "https://example.test" });
+
+test("durable close without server acknowledgement keeps the newer local session recoverable", async () => {
+  const h = harness();
+  const base = "2026-01-01T00:00:00.000Z";
+  const old = { name: "synthetic-session", value: "old-cloud", domain: "example.test", path: "/", session: true, hostOnly: true };
+  const fresh = { ...old, value: "new-local" };
+  const launch = { ...payload(), cookiesUpdatedAt: base, cookies: JSON.stringify([old]) };
+  let closure;
+  await h.runtime.launchProfileWindow(launch, value => { closure = value; });
+  h.sessions.get(`persist:profile-${ID}`).cookies.update([fresh]);
+  await h.runtime.closeProfileWindow(ID);
+  assert.ok(closure.cookies, "local outbox payload was produced");
+  assert.equal(h.records.get(ID).pending, true, "local cleanup is not a server acknowledgement");
+  assert.equal(h.records.get(ID).baseRevision, base);
+  // Simulate a terminal/archived close: the server could not save this jar.
+  await h.runtime.launchProfileWindow({ ...launch, lockToken: "new-synthetic-lease" });
+  const restored = await h.sessions.get(`persist:profile-${ID}`).cookies.get({});
+  assert.equal(restored[0].value, "new-local");
+  assert.equal(h.records.get(ID).cookies[0].value, "new-local");
+  await h.runtime.closeAllProfiles();
+});
 
 test("lifecycle journal links launch, close initiator and durable cleanup for the same run", async () => {
   const h = harness();

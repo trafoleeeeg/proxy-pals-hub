@@ -23,6 +23,28 @@ $plaintext = $null
 $transportKey = $null
 $proofKey = $null
 $proofPlain = $null
+enum VaultStage {
+    startup
+    path_validation
+    state_directory_create
+    state_directory_acl
+    rsa_generate
+    private_key_protect
+    private_file_write
+    private_file_acl
+    manifest_write
+    manifest_acl
+    state_validate
+    manifest_validate
+    private_key_unprotect
+    envelope_validate
+    envelope_decrypt
+    canary_validate
+    secret_protect
+    secret_file_write
+    secret_file_acl
+}
+[VaultStage]$stage = [VaultStage]::startup
 
 function Fail { throw [InvalidOperationException]::new('Key transfer validation failed.') }
 
@@ -46,6 +68,7 @@ function Assert-PlainPath([string]$Path, [bool]$MustExist) {
 
 function Assert-VaultAcl([string]$Path) {
     $acl = Get-Acl -LiteralPath $Path
+    if (-not $acl.AreAccessRulesProtected) { Fail }
     if ($acl.Owner -ne $currentSid.Value -and $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $currentSid.Value) { Fail }
     $hasOwner = $false
     foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
@@ -56,9 +79,22 @@ function Assert-VaultAcl([string]$Path) {
     if (-not $hasOwner) { Fail }
 }
 
-function Write-NewBytes([string]$Path, [byte[]]$Bytes) {
+function Write-NewBytes([string]$Path, [byte[]]$Bytes, [VaultStage]$WriteStage, [VaultStage]$AclStage) {
+    $script:stage = $WriteStage
     $stream = [IO.FileStream]::new($Path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
     try { $stream.Write($Bytes, 0, $Bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
+    $script:stage = $AclStage
+    # An elevated token can create a file owned by Administrators, even inside
+    # a directory whose owner is the user. Pin owner and DACL explicitly; do
+    # not accept a broader group owner or relax the two-principal allowlist.
+    $acl = [Security.AccessControl.FileSecurity]::new()
+    $acl.SetOwner($currentSid)
+    $acl.SetAccessRuleProtection($true, $false)
+    foreach ($sid in @($currentSid, [Security.Principal.SecurityIdentifier]::new('S-1-5-18'))) {
+        $rule = [Security.AccessControl.FileSystemAccessRule]::new($sid, [Security.AccessControl.FileSystemRights]::FullControl, [Security.AccessControl.AccessControlType]::Allow)
+        $acl.AddAccessRule($rule)
+    }
+    Set-Acl -LiteralPath $Path -AclObject $acl
     Assert-VaultAcl $Path
 }
 
@@ -141,6 +177,7 @@ public static class UmbraVaultDirectory {
 }
 '@
     $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+    $stage = [VaultStage]::path_validation
     $state = Assert-PlainPath $StateDirectory $false
     $parent = [IO.Path]::GetDirectoryName($state)
     if (-not [IO.Directory]::Exists($parent)) { Fail }
@@ -148,10 +185,12 @@ public static class UmbraVaultDirectory {
     $privatePath = [IO.Path]::Combine($state, 'private.dpapi')
     $secretPath = [IO.Path]::Combine($state, 'app-key.dpapi')
     if ($Command -eq 'prepare') {
+        $stage = [VaultStage]::state_directory_create
         if ($EnvelopePath -or (Test-Path -LiteralPath $state)) { Fail }
         # Win32 CreateDirectory is exclusive: ERROR_ALREADY_EXISTS also rejects
         # a concurrent creator. No keys exist until the protected ACL is set.
         if (-not [UmbraVaultDirectory]::CreateDirectory($state, [IntPtr]::Zero)) { Fail }
+        $stage = [VaultStage]::state_directory_acl
         $acl = [Security.AccessControl.DirectorySecurity]::new()
         $acl.SetOwner($currentSid)
         $acl.SetAccessRuleProtection($true, $false)
@@ -162,11 +201,13 @@ public static class UmbraVaultDirectory {
         }
         Set-Acl -LiteralPath $state -AclObject $acl
         Assert-VaultAcl $state
+        $stage = [VaultStage]::rsa_generate
         $rsa = [Security.Cryptography.RSA]::Create(3072)
         $public = $rsa.ExportSubjectPublicKeyInfo()
         $clearPrivate = $rsa.ExportPkcs8PrivateKey()
+        $stage = [VaultStage]::private_key_protect
         $protected = [Security.Cryptography.ProtectedData]::Protect($clearPrivate, $entropy, [Security.Cryptography.DataProtectionScope]::CurrentUser)
-        Write-NewBytes $privatePath $protected
+        Write-NewBytes $privatePath $protected ([VaultStage]::private_file_write) ([VaultStage]::private_file_acl)
         $now = [DateTimeOffset]::UtcNow
         $manifest = [ordered]@{
             format = 'umbra-key-transfer-request-v1'
@@ -179,13 +220,15 @@ public static class UmbraVaultDirectory {
             publicKeySpki = [Convert]::ToBase64String($public)
         }
         $manifestBytes = $utf8.GetBytes((ConvertTo-Json -InputObject $manifest -Compress))
-        Write-NewBytes $manifestPath $manifestBytes
+        Write-NewBytes $manifestPath $manifestBytes ([VaultStage]::manifest_write) ([VaultStage]::manifest_acl)
         [Console]::WriteLine('Protected transfer request prepared. Only public-manifest.json may be shared.')
     } else {
+        $stage = [VaultStage]::state_validate
         if (-not $EnvelopePath -or -not [IO.Directory]::Exists($state) -or (Test-Path -LiteralPath $secretPath)) { Fail }
         [void](Assert-PlainPath $state $true)
         Assert-VaultAcl $state
         foreach ($file in @($manifestPath, $privatePath)) { [void](Assert-PlainPath $file $true); Assert-VaultAcl $file }
+        $stage = [VaultStage]::manifest_validate
         $manifest = Parse-StrictJson (Read-SmallBytes $manifestPath 8192)
         Assert-Keys $manifest @('format', 'transferId', 'keyId', 'sourceOrigin', 'targetOrigin', 'createdAt', 'expiresAt', 'publicKeySpki')
         if ($manifest.format -cne 'umbra-key-transfer-request-v1' -or $manifest.sourceOrigin -cne $sourceOrigin -or $manifest.targetOrigin -cne $targetOrigin) { Fail }
@@ -199,12 +242,14 @@ public static class UmbraVaultDirectory {
         if ($created -gt $now.AddMinutes(1) -or $expires -le $now -or $expires -le $created -or $expires -gt $created.AddHours(24)) { Fail }
         $public = Decode-Base64 (Required-String $manifest 'publicKeySpki' 2048) 1024
         if ((Hex-Sha256 $public) -cne $keyId) { Fail }
+        $stage = [VaultStage]::private_key_unprotect
         $protected = Read-SmallBytes $privatePath 8192
         $clearPrivate = [Security.Cryptography.ProtectedData]::Unprotect($protected, $entropy, [Security.Cryptography.DataProtectionScope]::CurrentUser)
         $rsa = [Security.Cryptography.RSA]::Create()
         $used = 0
         $rsa.ImportPkcs8PrivateKey($clearPrivate, [ref]$used)
         if ($used -ne $clearPrivate.Length -or $rsa.KeySize -ne 3072 -or (Hex-Sha256 $rsa.ExportSubjectPublicKeyInfo()) -cne $keyId) { Fail }
+        $stage = [VaultStage]::envelope_validate
         $envelope = Parse-StrictJson (Read-SmallBytes $EnvelopePath 262144)
         Assert-Keys $envelope @('format', 'transferId', 'keyId', 'sourceOrigin', 'targetOrigin', 'issuedAt', 'expiresAt', 'wrappedKey', 'iv', 'tag', 'ciphertext')
         if ($envelope.format -cne 'umbra-key-transfer-v1' -or $envelope.transferId -cne $transferId -or $envelope.keyId -cne $keyId -or $envelope.sourceOrigin -cne $sourceOrigin -or $envelope.targetOrigin -cne $targetOrigin) { Fail }
@@ -218,6 +263,7 @@ public static class UmbraVaultDirectory {
         $tag = Decode-Base64 (Required-String $envelope 'tag' 32) 16
         $ciphertext = Decode-Base64 (Required-String $envelope 'ciphertext' 196608) 131072
         if ($wrapped.Length -ne 384 -or $iv.Length -ne 12 -or $tag.Length -ne 16) { Fail }
+        $stage = [VaultStage]::envelope_decrypt
         $transportKey = $rsa.Decrypt($wrapped, [Security.Cryptography.RSAEncryptionPadding]::OaepSHA256)
         if ($transportKey.Length -ne 32) { Fail }
         $plaintext = [byte[]]::new($ciphertext.Length)
@@ -226,6 +272,7 @@ public static class UmbraVaultDirectory {
         $payload = Parse-StrictJson $plaintext
         Assert-Keys $payload @('secretName', 'secret', 'canary')
         if ($payload.secretName -cne 'APP_ENCRYPTION_KEY') { Fail }
+        $stage = [VaultStage]::canary_validate
         $secret = Required-String $payload 'secret' 65536
         if ($payload.canary -isnot [Collections.IDictionary]) { Fail }
         Assert-Keys $payload.canary @('plain', 'encrypted')
@@ -247,14 +294,17 @@ public static class UmbraVaultDirectory {
         try { $proofGcm.Decrypt($proofIv, $proofCiphertext, $proofTag, $proofPlain) } finally { $proofGcm.Dispose() }
         $expectedBytes = $utf8.GetBytes($expectedPlain)
         if (-not [Security.Cryptography.CryptographicOperations]::FixedTimeEquals($proofPlain, $expectedBytes)) { Fail }
+        $stage = [VaultStage]::secret_protect
         $protectedSecret = [Security.Cryptography.ProtectedData]::Protect($rawSecret, $entropy, [Security.Cryptography.DataProtectionScope]::CurrentUser)
-        Write-NewBytes $secretPath $protectedSecret
+        Write-NewBytes $secretPath $protectedSecret ([VaultStage]::secret_file_write) ([VaultStage]::secret_file_acl)
         [Console]::WriteLine('Encrypted transfer verified and saved in the local protected vault. No remote service changed.')
     }
     exit 0
 } catch {
     # A nested exception can contain input, filesystem details, or provider data.
-    [Console]::Error.WriteLine('Key transfer failed safely. No secret was printed or remotely changed.')
+    # stage is a compile-time enum, never an exception, path, request field,
+    # provider response, key fingerprint, or decrypted value.
+    [Console]::Error.WriteLine('Key transfer failed safely. No secret was printed or remotely changed. [stage=' + $stage.ToString() + ']')
     exit 1
 } finally {
     foreach ($bytes in @($clearPrivate, $rawSecret, $plaintext, $transportKey, $proofKey, $proofPlain)) {

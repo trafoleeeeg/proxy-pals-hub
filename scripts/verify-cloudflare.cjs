@@ -22,6 +22,9 @@ const { validateAnonymousShell } = require("./panel-build-source.cjs");
   const routes = JSON.parse(fs.readFileSync(path.join(directory, "_routes.json"), "utf8"));
   assert(routes.include.includes("/*"), "SSR and API routes must reach the worker");
   assert(routes.exclude.includes(ENTRY) && routes.exclude.includes(MANIFEST), "panel resources must reach static asset serving");
+  const canonicalEntry = ENTRY.replace(/\.html$/, "");
+  assert(routes.exclude.includes(canonicalEntry), "the panel's internal proxy target must reach static asset serving");
+  assert.equal(fs.readFileSync(path.join(directory, "_redirects"), "utf8").split(/\r?\n/)[0], `${ENTRY} ${canonicalEntry} 200`, "panel download must not receive Pages HTML normalization redirects");
   assert(!routes.exclude.some(route => ["/*", "/app", "/_serverFn/*"].includes(route)), "private routes must not bypass server checks");
   for (const file of bundle.manifest.files) {
     assert(file.path === ENTRY || file.path === "/favicon.ico" || file.path.startsWith("/assets/"));

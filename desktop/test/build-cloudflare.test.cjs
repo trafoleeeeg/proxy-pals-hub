@@ -82,13 +82,18 @@ test("post-build panel assets bypass SSR while server routes remain protected", 
   fs.writeFileSync(path.join(directory, MANIFEST.slice(1)), JSON.stringify(manifest));
   const routesFile = path.join(directory, "_routes.json");
   fs.writeFileSync(routesFile, JSON.stringify({ version: 1, include: ["/*"], exclude: ["/favicon.ico"] }));
+  const redirectsFile = path.join(directory, "_redirects");
+  fs.writeFileSync(redirectsFile, "/legacy / 301\n");
   finalizePagesOutput(root, {});
   finalizePagesOutput(root, {});
   const routes = JSON.parse(fs.readFileSync(routesFile));
   assert.deepEqual(routes.include, ["/*"]);
-  assert.deepEqual(routes.exclude, ["/favicon.ico", ENTRY, MANIFEST]);
+  assert.deepEqual(routes.exclude, ["/favicon.ico", ENTRY, MANIFEST, "/_umbra-panel"]);
+  assert.equal(fs.readFileSync(redirectsFile, "utf8"), "/_umbra-panel.html /_umbra-panel 200\n/legacy / 301\n");
   assert(!routes.exclude.includes("/app") && !routes.exclude.includes("/_serverFn/*"));
   assert.throws(() => finalizePagesOutput(root, { APP_ENCRYPTION_KEY: "synthetic shell" }), /Server-only configuration/);
+  fs.writeFileSync(redirectsFile, "/_umbra-panel.html https://external.invalid/ 302\n");
+  assert.throws(() => finalizePagesOutput(root, {}), /Conflicting desktop panel redirect/);
 });
 
 test("existing build remains unchanged and Pages metadata selects SSR output with Node compatibility", () => {

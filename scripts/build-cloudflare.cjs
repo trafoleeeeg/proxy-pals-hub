@@ -47,7 +47,8 @@ function finalizePagesOutput(root, environment) {
   if (routes.version !== 1 || !Array.isArray(routes.include) || !Array.isArray(routes.exclude)) {
     throw new Error("Invalid Cloudflare Pages routes");
   }
-  routes.exclude = [...new Set([...routes.exclude, ENTRY, MANIFEST])];
+  const canonicalEntry = ENTRY.replace(/\.html$/, "");
+  routes.exclude = [...new Set([...routes.exclude, ENTRY, MANIFEST, canonicalEntry])];
   if (routes.include.length + routes.exclude.length > 100) throw new Error("Cloudflare Pages routing limit exceeded");
   for (const name of ["SUPABASE_SERVICE_ROLE_KEY", "APP_ENCRYPTION_KEY"]) {
     const value = environment[name];
@@ -58,6 +59,16 @@ function finalizePagesOutput(root, environment) {
       }
     }
   }
+  // Pages normally redirects *.html to clean URLs. The desktop updater must
+  // reject network redirects, so proxy this one anonymous static entry before
+  // Pages applies its HTML normalization. Preserve unrelated redirect rules.
+  const redirectsFile = path.join(directory, "_redirects");
+  const proxyRule = `${ENTRY} ${canonicalEntry} 200`;
+  const redirectLines = fs.existsSync(redirectsFile) ? fs.readFileSync(redirectsFile, "utf8").split(/\r?\n/) : [];
+  if (redirectLines.some(line => line.trim().split(/\s+/)[0] === ENTRY && line.trim() !== proxyRule)) {
+    throw new Error("Conflicting desktop panel redirect rule");
+  }
+  fs.writeFileSync(redirectsFile, [proxyRule, ...redirectLines.filter(line => line.trim() !== proxyRule)].join("\n").trimEnd() + "\n");
   fs.writeFileSync(routesFile, JSON.stringify(routes, null, 2) + "\n");
 }
 

@@ -5,7 +5,13 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const source = fs.readFileSync(path.resolve(__dirname, '../../scripts/key-transfer-cloudflare.ps1'), 'utf8');
+const normalizeLineEndings = value => value.replace(/\r\n/g, '\n');
+const source = normalizeLineEndings(fs.readFileSync(path.resolve(__dirname, '../../scripts/key-transfer-cloudflare.ps1'), 'utf8'));
+
+test('security source contracts see identical text from LF and Windows CRLF checkouts', () => {
+  assert.equal(normalizeLineEndings(source), source);
+  assert.equal(normalizeLineEndings(source.replace(/\n/g, '\r\n')), source);
+});
 
 test('Cloudflare destination and reviewed Wrangler entry are not caller-selectable', () => {
   assert.match(source, /\$accountId = '783398cd847a9aa13275dfab6ab2df2c'/);

@@ -51,8 +51,8 @@ export type ProxyCheckResult = {
 export type ProxyRotationStatus = "not_configured" | "ready" | "changing" | "success" | "error";
 
 const uuid = z.string().uuid();
-const ip = z.string().ip();
-const ipv6 = z.string().ip({ version: "v6" });
+const ip = z.union([z.ipv4(), z.ipv6()]);
+const ipv6 = z.ipv6();
 const encoder = new TextEncoder();
 const controls = /[\u0000-\u001f\u007f]/;
 

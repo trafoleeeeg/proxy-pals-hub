@@ -50,6 +50,11 @@ const folder = text(200).trim();
 const writableFingerprintSchema = fingerprintSchema.extend({
   deviceMemory: z.number().refine(isSupportedProfileMemory, PROFILE_MEMORY_ERROR),
 });
+// A PATCH must preserve absent fields. Zod 4 applies defaults inside optional
+// fields, so exclude creation defaults before making this schema partial.
+const fingerprintPatchSchema = writableFingerprintSchema
+  .omit({ aggressivePrivacyMode: true, fontIsolation: true }).partial()
+  .extend({ aggressivePrivacyMode: z.boolean().optional(), fontIsolation: z.boolean().optional() });
 const tags = z.array(text(80).trim().min(1)).max(50);
 const notes = text(20000);
 const customFields = z.record(uuidSchema, text(2000)).refine((value) => Object.keys(value).length <= 50, "Too many custom fields");
@@ -68,7 +73,7 @@ export const bulkCreateSchema = z.object({
 export const bulkUpdateSchema = z.object({
   teamId: uuidSchema, ids: profileIdsSchema,
   changes: z.object({ folder: folder.optional(), tags: tags.optional(), notes: notes.optional(),
-    proxyId: uuidSchema.nullable().optional(), fingerprint: writableFingerprintSchema.partial().strict().optional(),
+    proxyId: uuidSchema.nullable().optional(), fingerprint: fingerprintPatchSchema.strict().optional(),
   }).strict().refine((d) => Object.values(d).some((v) => v !== undefined), "No changes"),
 }).strict();
 export const bulkDeleteSchema = z.object({ teamId: uuidSchema, ids: profileIdsSchema }).strict();

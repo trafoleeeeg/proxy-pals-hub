@@ -18,10 +18,12 @@
     "format": "prettier --write ."
   },
   "overrides": {
+    "launch-editor": "2.14.2",
     "rolldown": "1.2.1",
     "seroval": "1.6.8",
     "source-map-js": "1.2.2",
-    "shell-quote": "1.11.0"
+    "shell-quote": "1.11.0",
+    "zod": "4.6.6"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -81,7 +83,7 @@
     "tw-animate-css": "^1.3.4",
     "vaul": "^1.1.2",
     "vite-tsconfig-paths": "^6.0.2",
-    "zod": "^3.25.76"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
@@ -103,6 +105,6 @@
     "prettier": "^3.7.3",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.56.1",
-    "vite": "8.1.5"
+    "vite": "8.1.6"
   }
 }

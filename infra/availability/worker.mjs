@@ -51,7 +51,7 @@ async function probe(key, { fetcher, setTimer, clearTimer }) {
         method: "POST",
         headers: { apikey: key, "content-type": "application/json", accept: "application/json" },
         body: "{}",
-        redirect: "error",
+        redirect: "manual",
         cache: "no-store",
         signal: controller.signal,
       });

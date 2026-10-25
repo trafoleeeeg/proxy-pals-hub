@@ -51,7 +51,7 @@ for (const key of [KEY, jwt()]) {
       assert.equal(init.method, "POST");
       assert.deepEqual(init.headers, { apikey: key, "content-type": "application/json", accept: "application/json" });
       assert.equal(init.body, "{}");
-      assert.equal(init.redirect, "error");
+      assert.equal(init.redirect, "manual");
       assert.equal(init.cache, "no-store");
       assert.equal(init.signal.aborted, false);
       return json("true");
@@ -112,6 +112,23 @@ test("does not retry authentication, missing RPC or redirect HTTP failures", asy
   for (const status of [201, 202, 401, 403, 404, 302]) {
     let calls = 0;
     const { promise, events } = run(async () => { calls++; return new Response("private body", { status }); });
+    await assert.rejects(promise, { message: MESSAGE });
+    assert.equal(calls, 1);
+    assert.deepEqual(events, [{ stage: "http", status, durationMs: 7, attempt: 1 }]);
+  }
+});
+
+test("rejects redirect locations without following them or forwarding the public key", async () => {
+  for (const status of [301, 302, 303, 307, 308]) {
+    let calls = 0;
+    const { promise, events } = run(async (url, init) => {
+      calls++;
+      assert.equal(url, RPC_URL);
+      assert.equal(init.redirect, "manual");
+      return new Response(null, {
+        status, headers: { location: "https://redirect.example.invalid/must-not-receive-key" },
+      });
+    });
     await assert.rejects(promise, { message: MESSAGE });
     assert.equal(calls, 1);
     assert.deepEqual(events, [{ stage: "http", status, durationMs: 7, attempt: 1 }]);

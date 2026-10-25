@@ -1,0 +1,13 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "umbra-supabase-availability",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": false,
+  "preview_urls": false,
+  "triggers": { "crons": ["17 */4 * * *"] },
+  "vars": {
+    "SUPABASE_URL": "https://mqyjnsbhsfgorjzycwpd.supabase.co"
+  },
+  "observability": { "enabled": true }
+}

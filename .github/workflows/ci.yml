@@ -41,6 +41,9 @@ jobs:
       - name: Проверка наблюдения за обновлениями движка
         run: node --test .github/scripts/engine-update-monitor.test.cjs
 
+      - name: Проверка бесплатного наблюдения за доступностью базы
+        run: node --test infra/availability/database.test.cjs infra/availability/worker.test.mjs
+
       - name: Зависимости клиента
         working-directory: desktop
         run: |

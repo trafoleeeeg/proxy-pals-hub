@@ -1,7 +1,7 @@
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "umbra-supabase-availability",
-  "main": "worker.mjs",
+  "main": "entrypoint.mjs",
   "compatibility_date": "2026-10-01",
   "workers_dev": false,
   "preview_urls": false,

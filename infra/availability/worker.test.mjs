@@ -24,13 +24,21 @@ function run(fetcher, { environment = ENV, ...options } = {}) {
 test("scheduled-only Worker configuration has six UTC runs per day and no public URLs", async () => {
   assert.deepEqual(Object.keys(worker), ["scheduled"]);
   const config = JSON.parse(await readFile(new URL("./wrangler.jsonc", import.meta.url), "utf8"));
-  assert.equal(config.main, "worker.mjs");
+  assert.equal(config.main, "entrypoint.mjs");
   assert.equal(config.compatibility_date, "2026-10-01");
   assert.equal(config.workers_dev, false);
   assert.equal(config.preview_urls, false);
   assert.deepEqual(config.triggers.crons, ["17 */4 * * *"]);
   assert.deepEqual(config.vars, { SUPABASE_URL: PROJECT_ORIGIN });
   assert.equal(config.routes, undefined);
+});
+
+test("configured deployment entrypoint exports only the tested scheduled handler", async () => {
+  const config = JSON.parse(await readFile(new URL("./wrangler.jsonc", import.meta.url), "utf8"));
+  const entrypoint = await import(new URL(config.main, import.meta.url).href);
+  assert.deepEqual(Object.keys(entrypoint), ["default"]);
+  assert.strictEqual(entrypoint.default, worker);
+  assert.deepEqual(Object.keys(entrypoint.default), ["scheduled"]);
 });
 
 for (const key of [KEY, jwt()]) {
